@@ -10,6 +10,51 @@ cmake --build process/build -j
 cmake --install process/build
 ```
 
+## dcalib.sh
+
+`dcalib.sh` runs TDC calibration over all decoded FIFO files in a run. It uses the same input and output base directories as `process.sh`:
+
+```bash
+ipath="/data/2026-testbeam/actual/physics"
+opath="/data/2026-testbeam/process"
+```
+
+Run:
+
+```bash
+process/scripts/dcalib.sh --run RUN_NAME --period 10000
+```
+
+Required command-line options:
+
+```text
+--run RUN          run name/directory
+--period PERIOD    expected pulser period in coarse clock cycles
+```
+
+For each input file like:
+
+```text
+/data/2026-testbeam/actual/physics/<run>/<device>/decoded/alcdaq.fifo_0.root
+```
+
+the script writes outputs in the corresponding device directory:
+
+```text
+/data/2026-testbeam/process/<run>/<device>/dcalib.fifo_0.root
+/data/2026-testbeam/process/<run>/<device>/tdc.fifo_0.conf
+```
+
+The `.root` file contains compact TDC diagnostic histograms. The `.conf` file contains only a `[TDC]` section in the format consumed by `calibrator`. These calibration outputs are not deleted by the script.
+
+`dcalib.sh` currently hardcodes:
+
+```bash
+MIN_PAIRS=1000
+```
+
+Channels with fewer than this number of adjacent-hit pairs are skipped by `dcalib`.
+
 ## process.sh
 
 `process.sh` is the full processing workflow. It currently performs:
