@@ -74,6 +74,8 @@ CLEAN_MERGED_SPILLS    remove merged spill files after triggering
 CLEAN_TRIGGERED_SPILLS remove per-spill trigger output after hadd
 ```
 
+When `WRITE_LOGS=0` and `CLEAN_DEVICE_SPILLS=1`, empty per-device output directories are removed after the device-level split-spill files have been consumed by the final merge. If logs are enabled, directories are kept so their log files remain available.
+
 ## trigger.sh
 
 `trigger.sh` is a smaller helper that runs one trigger configuration over already merged split-spill files:

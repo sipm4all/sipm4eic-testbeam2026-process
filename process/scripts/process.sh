@@ -66,6 +66,21 @@ run_job()
     fi
 }
 
+cleanup_empty_device_dirs()
+{
+    if [ "${WRITE_LOGS}" -ne 0 ]; then
+        return
+    fi
+    if [ "${CLEAN_DEVICE_SPILLS}" -ne 1 ]; then
+        return
+    fi
+
+    for dpath in "${device_dirs[@]}"; do
+        [ -d "${dpath}" ] || continue
+        rmdir "${dpath}" 2>/dev/null || true
+    done
+}
+
 while [ $# -gt 0 ]; do
     case "$1" in
         --run|-r)
@@ -289,6 +304,7 @@ for spill_id in "${spill_ids[@]}"; do
 done
 
 wait "${final_pids[@]}"
+cleanup_empty_device_dirs
 
 echo " --- trigger jobs started "
 for i in "${!TRIGGER_CONFIGS[@]}"; do
@@ -352,3 +368,4 @@ done
 if [ "${CLEAN_MERGED_SPILLS}" -eq 1 ]; then
     rm -f "${orpath}"/aps.sorted.spill_*.root
 fi
+cleanup_empty_device_dirs
