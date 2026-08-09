@@ -105,7 +105,7 @@ The fitted time model follows the calibration convention used by `calibrator.cc`
 calibrated_time = hit.time - channel_offset
 ```
 
-For every accepted frame the macro computes robust means for TIMING0 and TIMING1. It first performs damped iterative residual-to-scintillator-mean corrections, keeping the reference channel fixed at zero after every iteration. For this sample, too many undamped iterations overcorrect; the default is two iterations with damping 0.5. Those offsets are then used as the starting point for a full 63-parameter `TMinuit` minimization. The objective contains both the inter-scintillator term and intra-scintillator residual terms, so the minimizer cannot improve `timing0_mean - timing1_mean` by making individual channel residuals worse:
+For every accepted frame the macro computes robust means for TIMING0 and TIMING1. It first performs damped leave-one-out iterative residual-to-scintillator-mean corrections, keeping the reference channel fixed at zero after every iteration. For this sample, too many undamped iterations overcorrect; the default is three leave-one-out iterations with damping 0.5. Those offsets are then used as the starting point for a full 63-parameter `TMinuit` minimization. The objective contains both the inter-scintillator term and intra-scintillator residual terms, so the minimizer cannot improve `timing0_mean - timing1_mean` by making individual channel residuals worse:
 
 ```cpp
 sum(delta_weight * (timing0_mean - timing1_mean)^2
@@ -143,7 +143,7 @@ void timing_calib(const char *filename,
                   double outlier_window = 2.0,
                   double delta_range = 20.0,
                   double offset_range = 20.0,
-                  int pre_iterations = 2,
+                  int pre_iterations = 3,
                   double minimizer_step = 0.01,
                   int minimizer_calls = 5000,
                   double delta_weight = 1.0,
@@ -152,3 +152,20 @@ void timing_calib(const char *filename,
 ```
 
 The ROOT output includes `hDeltaBefore`, `hDeltaAfter`, `hOffset`, `hOffsetValue`, and before/after channel-residual maps for TIMING0 and TIMING1.
+
+
+Timing calibration diagnostics now also include event-by-event spread histograms:
+
+```text
+hTiming0SpreadBefore / hTiming0SpreadAfter
+hTiming1SpreadBefore / hTiming1SpreadAfter
+hExpectedDeltaFromSpreadBefore / hExpectedDeltaFromSpreadAfter
+```
+
+For each accepted frame, the timing spread is the RMS of selected channel times inside one scintillator. The expected contribution to `RMS(timing0_mean - timing1_mean)` from independent channel jitter is estimated as:
+
+```cpp
+sqrt(spread0^2 / n0 + spread1^2 / n1)
+```
+
+Comparing this estimate with the observed `hDelta` RMS is a useful check of whether the two timing scintillators are limited by independent channel jitter or by an event-by-event effect common to many channels.

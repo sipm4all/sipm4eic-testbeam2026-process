@@ -152,12 +152,18 @@ int accumulate_residual_offsets(const std::vector<frame_info_t> &frames,
 
     for (auto channel : channels0) {
       int gch = global_channel(0, channel);
-      residual_sum[gch] += frame.time[0][channel] - mean0;
+      double time = frame.time[0][channel] - offset[gch];
+      double reference = channels0.size() > 1 ?
+        (mean0 * channels0.size() - time) / (channels0.size() - 1) : mean0;
+      residual_sum[gch] += time - reference;
       ++residual_count[gch];
     }
     for (auto channel : channels1) {
       int gch = global_channel(1, channel);
-      residual_sum[gch] += frame.time[1][channel] - mean1;
+      double time = frame.time[1][channel] - offset[gch];
+      double reference = channels1.size() > 1 ?
+        (mean1 * channels1.size() - time) / (channels1.size() - 1) : mean1;
+      residual_sum[gch] += time - reference;
       ++residual_count[gch];
     }
 
@@ -459,6 +465,12 @@ bool timing_calib(const std::string &filename,
 
   auto hDeltaBefore = new TH1D("hDeltaBefore", "", 400, -delta_range, delta_range);
   auto hDeltaAfter = new TH1D("hDeltaAfter", "", 400, -delta_range, delta_range);
+  auto hTiming0SpreadBefore = new TH1D("hTiming0SpreadBefore", "", 400, 0., delta_range);
+  auto hTiming1SpreadBefore = new TH1D("hTiming1SpreadBefore", "", 400, 0., delta_range);
+  auto hTiming0SpreadAfter = new TH1D("hTiming0SpreadAfter", "", 400, 0., delta_range);
+  auto hTiming1SpreadAfter = new TH1D("hTiming1SpreadAfter", "", 400, 0., delta_range);
+  auto hExpectedDeltaFromSpreadBefore = new TH1D("hExpectedDeltaFromSpreadBefore", "", 400, 0., delta_range);
+  auto hExpectedDeltaFromSpreadAfter = new TH1D("hExpectedDeltaFromSpreadAfter", "", 400, 0., delta_range);
   auto hOffset = new TH1D("hOffset", "", ntiming, 0., ntiming);
   auto hOffsetValue = new TH1D("hOffsetValue", "", 400, -offset_range, offset_range);
   auto hDeltaTiming0Before = new TH2D("hDeltaTiming0Before", "", nchannels, 0., nchannels,
@@ -478,6 +490,20 @@ bool timing_calib(const std::string &filename,
   std::vector<int> selected0;
   std::vector<int> selected1;
 
+  auto selected_spread = [](const frame_info_t &frame,
+                            int det,
+                            const double *offset,
+                            const std::vector<int> &channels,
+                            double mean) {
+    double s2 = 0.;
+    for (auto channel : channels) {
+      int gch = global_channel(det, channel);
+      double residual = frame.time[det][channel] - offset[gch] - mean;
+      s2 += residual * residual;
+    }
+    return channels.empty() ? 0. : std::sqrt(s2 / channels.size());
+  };
+
   int ndiag = 0;
   for (const auto &frame : fit_frames) {
     double mean0_before = 0.;
@@ -486,8 +512,10 @@ bool timing_calib(const std::string &filename,
     double mean1_after = 0.;
     bool ok0_before = selected_channels(frame, 0, zero_offsets, min_channels,
                                         outlier_window, selected0, mean0_before);
+    auto channels0_before = selected0;
     bool ok1_before = selected_channels(frame, 1, zero_offsets, min_channels,
                                         outlier_window, selected1, mean1_before);
+    auto channels1_before = selected1;
     bool ok0_after = selected_channels(frame, 0, offset, min_channels,
                                        outlier_window, selected0, mean0_after);
     auto channels0_after = selected0;
@@ -495,10 +523,23 @@ bool timing_calib(const std::string &filename,
                                        outlier_window, selected1, mean1_after);
     auto channels1_after = selected1;
 
-    if (ok0_before && ok1_before)
+    if (ok0_before && ok1_before) {
       hDeltaBefore->Fill(mean0_before - mean1_before);
+      double spread0 = selected_spread(frame, 0, zero_offsets, channels0_before, mean0_before);
+      double spread1 = selected_spread(frame, 1, zero_offsets, channels1_before, mean1_before);
+      hTiming0SpreadBefore->Fill(spread0);
+      hTiming1SpreadBefore->Fill(spread1);
+      hExpectedDeltaFromSpreadBefore->Fill(std::sqrt(spread0 * spread0 / channels0_before.size() +
+                                                     spread1 * spread1 / channels1_before.size()));
+    }
     if (ok0_after && ok1_after) {
       hDeltaAfter->Fill(mean0_after - mean1_after);
+      double spread0 = selected_spread(frame, 0, offset, channels0_after, mean0_after);
+      double spread1 = selected_spread(frame, 1, offset, channels1_after, mean1_after);
+      hTiming0SpreadAfter->Fill(spread0);
+      hTiming1SpreadAfter->Fill(spread1);
+      hExpectedDeltaFromSpreadAfter->Fill(std::sqrt(spread0 * spread0 / channels0_after.size() +
+                                                    spread1 * spread1 / channels1_after.size()));
       ++ndiag;
 
       for (auto channel : channels0_after) {
@@ -526,8 +567,23 @@ bool timing_calib(const std::string &filename,
     }
   }
 
+  double timing0_spread_before = hTiming0SpreadBefore->GetMean();
+  double timing0_spread_after = hTiming0SpreadAfter->GetMean();
+  double timing1_spread_before = hTiming1SpreadBefore->GetMean();
+  double timing1_spread_after = hTiming1SpreadAfter->GetMean();
+  double expected_delta_before = hExpectedDeltaFromSpreadBefore->GetMean();
+  double expected_delta_after = hExpectedDeltaFromSpreadAfter->GetMean();
+  double observed_delta_rms_before = hDeltaBefore->GetRMS();
+  double observed_delta_rms_after = hDeltaAfter->GetRMS();
+
   hDeltaBefore->Write();
   hDeltaAfter->Write();
+  hTiming0SpreadBefore->Write();
+  hTiming1SpreadBefore->Write();
+  hTiming0SpreadAfter->Write();
+  hTiming1SpreadAfter->Write();
+  hExpectedDeltaFromSpreadBefore->Write();
+  hExpectedDeltaFromSpreadAfter->Write();
   hOffset->Write();
   hOffsetValue->Write();
   hDeltaTiming0Before->Write();
@@ -552,6 +608,14 @@ bool timing_calib(const std::string &filename,
   std::cout << "residual weight:                 " << g_residual_weight << std::endl;
   std::cout << "objective before Minuit:         " << objective_before << std::endl;
   std::cout << "objective after Minuit:          " << objective_after << std::endl;
+  std::cout << "TIMING0 spread before/after:     " << timing0_spread_before
+            << " / " << timing0_spread_after << std::endl;
+  std::cout << "TIMING1 spread before/after:     " << timing1_spread_before
+            << " / " << timing1_spread_after << std::endl;
+  std::cout << "expected delta spread before/after: " << expected_delta_before
+            << " / " << expected_delta_after << std::endl;
+  std::cout << "observed delta RMS before/after: " << observed_delta_rms_before
+            << " / " << observed_delta_rms_after << std::endl;
   std::cout << "frames used for diagnostics:     " << ndiag << std::endl;
   std::cout << "reference channel fixed:         fifo=0 column=0 pixel=0 offset=0" << std::endl;
   std::cout << "ROOT output:                     " << outfilename << std::endl;
@@ -570,7 +634,7 @@ int main(int argc, char **argv)
   double outlier_window = 2.0;
   double delta_range = 20.0;
   double offset_range = 20.0;
-  int pre_iterations = 2;
+  int pre_iterations = 3;
   double iteration_damping = 0.5;
   double minimizer_step = 0.01;
   int minimizer_calls = 0;

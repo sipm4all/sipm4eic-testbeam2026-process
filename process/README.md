@@ -47,7 +47,7 @@ The program first performs iterative residual-to-scintillator-mean pre-calibrati
 Example:
 
 ```bash
-process/bin/timing_calib   --input triggered.timing.root   --output timing_calib.root   --calibration-output timing_channel_offsets.conf   --pre-iterations 2   --minimizer-calls 5000
+process/bin/timing_calib   --input triggered.timing.root   --output timing_calib.root   --calibration-output timing_channel_offsets.conf   --pre-iterations 3   --minimizer-calls 5000
 ```
 
 For quick validation runs, `--max-frames N` limits how many frames are read. Use `--max-frames 0` or omit the option for the full file.
@@ -59,3 +59,20 @@ calibrated_time = raw_time - offset
 ```
 
 It can be included or concatenated into a calibration configuration used by a later `calibrator` pass.
+
+
+Timing calibration diagnostics now also include event-by-event spread histograms:
+
+```text
+hTiming0SpreadBefore / hTiming0SpreadAfter
+hTiming1SpreadBefore / hTiming1SpreadAfter
+hExpectedDeltaFromSpreadBefore / hExpectedDeltaFromSpreadAfter
+```
+
+For each accepted frame, the timing spread is the RMS of selected channel times inside one scintillator. The expected contribution to `RMS(timing0_mean - timing1_mean)` from independent channel jitter is estimated as:
+
+```cpp
+sqrt(spread0^2 / n0 + spread1^2 / n1)
+```
+
+Comparing this estimate with the observed `hDelta` RMS is a useful check of whether the two timing scintillators are limited by independent channel jitter or by an event-by-event effect common to many channels.
