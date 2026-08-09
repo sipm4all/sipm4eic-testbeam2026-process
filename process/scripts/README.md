@@ -42,10 +42,10 @@ the script writes outputs in the corresponding device directory:
 
 ```text
 /data/2026-testbeam/process/<run>/<device>/dcalib.fifo_0.root
-/data/2026-testbeam/process/<run>/<device>/tdc.fifo_0.conf
+/data/2026-testbeam/process/<run>/<device>/dcalib.fifo_0.conf
 ```
 
-The `.root` file contains compact TDC diagnostic histograms. The `.conf` file contains only a `[TDC]` section in the format consumed by `calibrator`. These calibration outputs are not deleted by the script.
+The `.root` file contains compact TDC diagnostic histograms. The `.conf` file is the per-FIFO TDC calibration snippet; it contains only a `[TDC]` section in the format consumed by `calibrator`. These calibration outputs are not deleted by the script.
 
 `dcalib.sh` currently hardcodes:
 

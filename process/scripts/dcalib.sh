@@ -111,7 +111,7 @@ for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
         fifo=${fname#alcdaq.}; fifo=${fifo%.root}
 
         root_output="${odpath}/dcalib.${fifo}.root"
-        txt_output="${odpath}/tdc.${fifo}.conf"
+        txt_output="${odpath}/dcalib.${fifo}.conf"
 
         run_job "${odpath}/dcalib.${fifo}.log" \
             "${DCALIB}" \
