@@ -47,7 +47,7 @@ The program first performs iterative residual-to-scintillator-mean pre-calibrati
 Example:
 
 ```bash
-process/bin/timing_calib   --input triggered.timing.root   --output timing_calib.root   --calibration-output timing_channel_offsets.conf   --pre-iterations 5   --minimizer-calls 5000
+process/bin/timing_calib   --input triggered.timing.root   --output timing_calib.root   --calibration-output timing_channel_offsets.conf   --pre-iterations 2   --minimizer-calls 5000
 ```
 
 For quick validation runs, `--max-frames N` limits how many frames are read. Use `--max-frames 0` or omit the option for the full file.

@@ -124,6 +124,7 @@ void normalize_reference(double *offset)
 
 int accumulate_residual_offsets(const std::vector<frame_info_t> &frames,
                                 double *offset,
+                                double damping,
                                 std::vector<frame_info_t> *fit_frames = nullptr)
 {
   double residual_sum[ntiming] = {};
@@ -169,7 +170,7 @@ int accumulate_residual_offsets(const std::vector<frame_info_t> &frames,
                 << " was never selected; offset unchanged" << std::endl;
       continue;
     }
-    offset[gch] += residual_sum[gch] / residual_count[gch];
+    offset[gch] += damping * residual_sum[gch] / residual_count[gch];
   }
 
   normalize_reference(offset);
@@ -358,9 +359,10 @@ void timing_calib(const char *filename,
                   double outlier_window = 2.0,
                   double delta_range = 20.0,
                   double offset_range = 20.0,
-                  int pre_iterations = 5,
+                  int pre_iterations = 2,
+                  double iteration_damping = 0.5,
                   double minimizer_step = 0.01,
-                  int minimizer_calls = 5000,
+                  int minimizer_calls = 0,
                   double delta_weight = 1.0,
                   double residual_weight = 1.0,
                   int max_frames = 0)
@@ -423,7 +425,7 @@ void timing_calib(const char *filename,
 
   int nfit = 0;
   for (int iter = 0; iter < pre_iterations; ++iter) {
-    nfit = accumulate_residual_offsets(frames, offset,
+    nfit = accumulate_residual_offsets(frames, offset, iteration_damping,
                                        iter == pre_iterations - 1 ? &fit_frames : nullptr);
     if (nfit == 0) {
       std::cerr << "ERROR: no frames survived timing calibration selection" << std::endl;
@@ -433,7 +435,7 @@ void timing_calib(const char *filename,
   }
 
   if (fit_frames.empty()) {
-    nfit = accumulate_residual_offsets(frames, offset, &fit_frames);
+    nfit = accumulate_residual_offsets(frames, offset, iteration_damping, &fit_frames);
     if (nfit == 0) {
       std::cerr << "ERROR: no frames survived timing calibration selection" << std::endl;
       return;
@@ -443,7 +445,9 @@ void timing_calib(const char *filename,
   auto fit_events = make_fit_events(fit_frames, offset);
   g_min_events = &fit_events;
   double objective_before = timing_objective(offset);
-  bool minuit_ok = run_full_minimization(fit_events, offset, minimizer_step, minimizer_calls);
+  bool minuit_ok = true;
+  if (minimizer_calls > 0)
+    minuit_ok = run_full_minimization(fit_events, offset, minimizer_step, minimizer_calls);
   double objective_after = timing_objective(offset);
 
   auto fout = TFile::Open(outfilename, "RECREATE");
@@ -540,6 +544,7 @@ void timing_calib(const char *filename,
   std::cout << "frames used for calibration:     " << nfit << std::endl;
   std::cout << "events used by Minuit:           " << fit_events.size() << std::endl;
   std::cout << "pre-calibration iterations:      " << pre_iterations << std::endl;
+  std::cout << "iteration damping:               " << iteration_damping << std::endl;
   std::cout << "Minuit max calls:                " << minimizer_calls << std::endl;
   std::cout << "Minuit status:                   " << (minuit_ok ? "OK" : "WARNING") << std::endl;
   std::cout << "delta weight:                    " << g_delta_weight << std::endl;
