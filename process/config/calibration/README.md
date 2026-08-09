@@ -59,3 +59,25 @@ device fifo
 A positive offset means the source arrives late in raw time and is shifted earlier by calibration.
 
 See `calibration_example.conf` for a complete template with global defaults and overrides.
+
+
+## Producing TDC Rows with dcalib
+
+`process/bin/dcalib` can generate the `[TDC]` rows from a decoded ROOT file:
+
+```bash
+process/bin/dcalib \
+  --input decoded.root \
+  --output dcalib.root \
+  --calibration-output tdc_calibration.conf
+```
+
+The text output contains only:
+
+```text
+[TDC]
+# device fifo column pixel tdc off iif
+...
+```
+
+Outputs from multiple `dcalib` runs can be concatenated with `cat` to create a larger TDC calibration snippet. If two files contain the same concrete TDC row, `calibrator` will reject the final configuration as a duplicate rule.

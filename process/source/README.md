@@ -14,6 +14,28 @@ Executables are built in `process/build/` and installed to `process/bin/`.
 
 ## Programs
 
+### dcalib
+
+Runs TDC fine-time calibration for every unique ALCOR channel found in an input file and writes both ROOT diagnostics and a calibrator-compatible `[TDC]` text snippet:
+
+```bash
+process/bin/dcalib \
+  --input decoded.root \
+  --output dcalib.root \
+  --calibration-output tdc_calibration.conf \
+  --period 10000 \
+  --min-pairs 100
+```
+
+For each channel identified by `device fifo column pixel`, it fits the four TDC parameters:
+
+```text
+off_0..off_3
+iif_0..iif_3
+```
+
+The text output contains only a `[TDC]` section and can be concatenated with other `dcalib` outputs, provided the same concrete TDC row is not repeated. ROOT diagnostics are stored one directory per channel, each containing `hParam` and `hDelta`.
+
 ### calibrator
 
 Creates or updates the calibrated `time` branch in the `alcor` tree:

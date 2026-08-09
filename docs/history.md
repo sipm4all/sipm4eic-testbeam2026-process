@@ -71,6 +71,8 @@ A dedicated calibration stage was introduced before sorting so downstream progra
 
 ## Calibration Stage
 
+`dcalib` derives TDC `off/iif` rows for every unique ALCOR channel in an input file and writes a `[TDC]` text snippet compatible with `calibrator`. It also writes compact ROOT diagnostics (`hParam` and `hDelta`) per channel.
+
 `calibrator` writes an authoritative `time` branch into the `alcor` tree.
 
 For ALCOR hits:

@@ -29,6 +29,7 @@ cmake --install process/build
 After install, this creates the processing executables in `process/bin/`:
 
 ```text
+dcalib
 calibrator
 sorter
 after-pulse-suppressor
@@ -38,6 +39,7 @@ trigger
 
 ## Main Components
 
+- `dcalib`: derives TDC `off/iif` calibration rows from decoded data.
 - `calibrator`: creates or updates the calibrated `time` branch in the decoded `alcor` tree.
 - `sorter`: sorts each single-lane stream in calibrated time.
 - `after-pulse-suppressor`: suppresses close repeated ALCOR hits per channel.
