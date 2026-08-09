@@ -106,6 +106,8 @@ bool selected_channels(const frame_info_t &frame,
 const std::vector<fit_event_t> *g_min_events = nullptr;
 int g_min_channels = 16;
 double g_outlier_window = 2.0;
+double g_delta_weight = 1.0;
+double g_residual_weight = 1.0;
 
 int par_to_global(int ipar)
 {
@@ -208,29 +210,36 @@ int shift_timing1_to_zero_delta(const std::vector<frame_info_t> &frames,
 double timing_objective(const double *offset)
 {
   double chi2 = 0.;
-  int n = 0;
+  int nterms = 0;
 
   for (const auto &event : *g_min_events) {
     if (event.channel[0].empty() || event.channel[1].empty())
       continue;
 
-    double mean0 = 0.;
-    double mean1 = 0.;
-    for (size_t i = 0; i < event.channel[0].size(); ++i)
-      mean0 += event.time[0][i] - offset[global_channel(0, event.channel[0][i])];
-    for (size_t i = 0; i < event.channel[1].size(); ++i)
-      mean1 += event.time[1][i] - offset[global_channel(1, event.channel[1][i])];
-    mean0 /= event.channel[0].size();
-    mean1 /= event.channel[1].size();
+    double mean[2] = {};
+    for (int det = 0; det < 2; ++det) {
+      for (size_t i = 0; i < event.channel[det].size(); ++i)
+        mean[det] += event.time[det][i] - offset[global_channel(det, event.channel[det][i])];
+      mean[det] /= event.channel[det].size();
+    }
 
-    double delta = mean0 - mean1;
-    chi2 += delta * delta;
-    ++n;
+    for (int det = 0; det < 2; ++det) {
+      for (size_t i = 0; i < event.channel[det].size(); ++i) {
+        double time = event.time[det][i] - offset[global_channel(det, event.channel[det][i])];
+        double residual = time - mean[det];
+        chi2 += g_residual_weight * residual * residual;
+        ++nterms;
+      }
+    }
+
+    double delta = mean[0] - mean[1];
+    chi2 += g_delta_weight * delta * delta;
+    ++nterms;
   }
 
-  if (n == 0)
+  if (nterms == 0)
     return 1.e30;
-  return chi2 / n;
+  return chi2 / nterms;
 }
 
 void timing_fcn(Int_t &, Double_t *, Double_t &f, Double_t *par, Int_t)
@@ -351,7 +360,10 @@ void timing_calib(const char *filename,
                   double offset_range = 20.0,
                   int pre_iterations = 5,
                   double minimizer_step = 0.01,
-                  int minimizer_calls = 5000)
+                  int minimizer_calls = 5000,
+                  double delta_weight = 1.0,
+                  double residual_weight = 1.0,
+                  int max_frames = 0)
 {
 
   trigger_reader_t reader;
@@ -392,11 +404,17 @@ void timing_calib(const char *filename,
       if (have1) ++nwith1;
 
       frames.push_back(frame);
+      if (max_frames > 0 && (int)frames.size() >= max_frames)
+        break;
     }
+    if (max_frames > 0 && (int)frames.size() >= max_frames)
+      break;
   }
 
   g_min_channels = min_channels;
   g_outlier_window = outlier_window;
+  g_delta_weight = delta_weight;
+  g_residual_weight = residual_weight;
 
   double zero_offsets[ntiming] = {};
   double offset[ntiming] = {};
@@ -518,11 +536,14 @@ void timing_calib(const char *filename,
   std::cout << "frames processed:               " << nframes << std::endl;
   std::cout << "frames with TIMING0 hits:        " << nwith0 << std::endl;
   std::cout << "frames with TIMING1 hits:        " << nwith1 << std::endl;
+  std::cout << "frames retained:                 " << frames.size() << std::endl;
   std::cout << "frames used for calibration:     " << nfit << std::endl;
   std::cout << "events used by Minuit:           " << fit_events.size() << std::endl;
   std::cout << "pre-calibration iterations:      " << pre_iterations << std::endl;
   std::cout << "Minuit max calls:                " << minimizer_calls << std::endl;
   std::cout << "Minuit status:                   " << (minuit_ok ? "OK" : "WARNING") << std::endl;
+  std::cout << "delta weight:                    " << g_delta_weight << std::endl;
+  std::cout << "residual weight:                 " << g_residual_weight << std::endl;
   std::cout << "objective before Minuit:         " << objective_before << std::endl;
   std::cout << "objective after Minuit:          " << objective_after << std::endl;
   std::cout << "frames used for diagnostics:     " << ndiag << std::endl;

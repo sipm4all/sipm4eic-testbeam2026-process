@@ -42,13 +42,15 @@ The local timing channel is:
 channel = pixel + 4 * column
 ```
 
-The program first performs iterative residual-to-scintillator-mean pre-calibration, keeping `fifo=0 column=0 pixel=0` fixed at zero after every iteration. It then runs a full 63-parameter `TMinuit` minimization of `sum((timing0_mean - timing1_mean)^2)`.
+The program first performs iterative residual-to-scintillator-mean pre-calibration, keeping `fifo=0 column=0 pixel=0` fixed at zero after every iteration. It then runs a full 63-parameter `TMinuit` minimization. The objective includes both `timing0_mean - timing1_mean` and intra-scintillator channel residual terms, so channel residual maps are constrained during the global fit.
 
 Example:
 
 ```bash
 process/bin/timing_calib   --input triggered.timing.root   --output timing_calib.root   --calibration-output timing_channel_offsets.conf   --pre-iterations 5   --minimizer-calls 5000
 ```
+
+For quick validation runs, `--max-frames N` limits how many frames are read. Use `--max-frames 0` or omit the option for the full file.
 
 The text output is a `[CHANNEL]` calibration snippet using the same sign convention as `calibrator`:
 

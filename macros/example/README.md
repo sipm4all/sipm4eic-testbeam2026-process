@@ -105,10 +105,11 @@ The fitted time model follows the calibration convention used by `calibrator.cc`
 calibrated_time = hit.time - channel_offset
 ```
 
-For every accepted frame the macro computes robust means for TIMING0 and TIMING1. It first performs a few iterative residual-to-scintillator-mean corrections, keeping the reference channel fixed at zero after every iteration. Those offsets are then used as the starting point for a full 63-parameter `TMinuit` minimization of:
+For every accepted frame the macro computes robust means for TIMING0 and TIMING1. It first performs a few iterative residual-to-scintillator-mean corrections, keeping the reference channel fixed at zero after every iteration. Those offsets are then used as the starting point for a full 63-parameter `TMinuit` minimization. The objective contains both the inter-scintillator term and intra-scintillator residual terms, so the minimizer cannot improve `timing0_mean - timing1_mean` by making individual channel residuals worse:
 
 ```cpp
-sum((timing0_mean - timing1_mean)^2)
+sum(delta_weight * (timing0_mean - timing1_mean)^2
+    + residual_weight * channel_residual^2)
 ```
 
 One offset is arbitrary, so the reference channel is fixed to zero:
@@ -144,7 +145,10 @@ void timing_calib(const char *filename,
                   double offset_range = 20.0,
                   int pre_iterations = 5,
                   double minimizer_step = 0.01,
-                  int minimizer_calls = 5000)
+                  int minimizer_calls = 5000,
+                  double delta_weight = 1.0,
+                  double residual_weight = 1.0,
+                  int max_frames = 0)
 ```
 
 The ROOT output includes `hDeltaBefore`, `hDeltaAfter`, `hOffset`, `hOffsetValue`, and before/after channel-residual maps for TIMING0 and TIMING1.
