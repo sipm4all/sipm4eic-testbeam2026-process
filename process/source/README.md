@@ -5,11 +5,12 @@ This directory contains the C++ sources and `CMakeLists.txt` for the processing 
 Build from the repository root:
 
 ```bash
-cmake -S process/source -B build
-cmake --build build -j
+cmake -S process/source -B process/build
+cmake --build process/build -j
+cmake --install process/build
 ```
 
-Executables are written to `build/`.
+Executables are built in `process/build/` and installed to `process/bin/`.
 
 ## Programs
 
@@ -18,7 +19,7 @@ Executables are written to `build/`.
 Creates or updates the calibrated `time` branch in the `alcor` tree:
 
 ```bash
-build/calibrator \
+process/bin/calibrator \
   --input decoded.root \
   --output calibrated.root \
   --config process/config/calibration/calibration_example.conf
@@ -42,7 +43,7 @@ time = coarse + 32768 * rollover - trigger_offset
 Sorts one already decoded/calibrated single-lane ROOT file by `data.time` within spill boundaries:
 
 ```bash
-build/sorter --input calibrated.root --output sorted.root --window 32768
+process/bin/sorter --input calibrated.root --output sorted.root --window 32768
 ```
 
 ### after-pulse-suppressor
@@ -50,7 +51,7 @@ build/sorter --input calibrated.root --output sorted.root --window 32768
 Suppresses hits that arrive too close to a previous hit from the same channel:
 
 ```bash
-build/after-pulse-suppressor --input sorted.root --output aps.sorted.root --window 50
+process/bin/after-pulse-suppressor --input sorted.root --output aps.sorted.root --window 50
 ```
 
 Trigger tags and spill markers are propagated.
@@ -60,13 +61,13 @@ Trigger tags and spill markers are propagated.
 Merges multiple sorted streams and collapses duplicate spill markers:
 
 ```bash
-build/merger --input lane0.root lane1.root --output merged.root
+process/bin/merger --input lane0.root lane1.root --output merged.root
 ```
 
 Optional split-spill output:
 
 ```bash
-build/merger --input lane0.root lane1.root --output board.root --split-spills
+process/bin/merger --input lane0.root lane1.root --output board.root --split-spills
 ```
 
 This writes files such as `board.spill_0000.root`.
@@ -76,7 +77,7 @@ This writes files such as `board.spill_0000.root`.
 Builds triggered frames using a declarative configuration:
 
 ```bash
-build/trigger \
+process/bin/trigger \
   --input merged.root \
   --output frames.root \
   --config process/config/trigger/trigger_range.conf \

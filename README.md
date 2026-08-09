@@ -21,11 +21,12 @@ macros/lib/              reusable ROOT macro helper headers
 From the repository root:
 
 ```bash
-cmake -S process/source -B build
-cmake --build build -j
+cmake -S process/source -B process/build
+cmake --build process/build -j
+cmake --install process/build
 ```
 
-This creates the processing executables in `build/`:
+After install, this creates the processing executables in `process/bin/`:
 
 ```text
 calibrator

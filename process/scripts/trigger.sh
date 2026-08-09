@@ -7,7 +7,7 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 ipath="/data/2026-testbeam/process"
 opath="/data/2026-testbeam/process"
 
-TRIGGER="${ROOT_DIR}/build/trigger"
+TRIGGER="${ROOT_DIR}/process/bin/trigger"
 CONFIG="${ROOT_DIR}/process/config/trigger/trigger_range.conf"
 WINDOW=256
 

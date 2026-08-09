@@ -3,7 +3,7 @@
 Trigger configurations are consumed by `trigger`:
 
 ```bash
-build/trigger \
+process/bin/trigger \
   --input merged.root \
   --output frames.root \
   --config process/config/trigger/trigger_range.conf \

@@ -1,6 +1,7 @@
 # Build output
 build/
-/bin/
+process/build/
+process/bin/
 
 # Local compiled binaries if built in source directories
 /process/source/calibrator

@@ -7,11 +7,11 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 ipath="/data/2026-testbeam/actual/physics"
 opath="/data/2026-testbeam/process"
 
-CALIBRATOR="${ROOT_DIR}/build/calibrator"
-SORTER="${ROOT_DIR}/build/sorter"
-APS="${ROOT_DIR}/build/after-pulse-suppressor"
-MERGER="${ROOT_DIR}/build/merger"
-TRIGGER="${ROOT_DIR}/build/trigger"
+CALIBRATOR="${ROOT_DIR}/process/bin/calibrator"
+SORTER="${ROOT_DIR}/process/bin/sorter"
+APS="${ROOT_DIR}/process/bin/after-pulse-suppressor"
+MERGER="${ROOT_DIR}/process/bin/merger"
+TRIGGER="${ROOT_DIR}/process/bin/trigger"
 HADD="hadd"
 CALIBRATION_CONFIG="${ROOT_DIR}/process/config/calibration/calibration_example.conf"
 TRIGGER_CONFIGS=("${ROOT_DIR}/process/config/trigger/trigger_range.conf" "${ROOT_DIR}/process/config/trigger/trigger_set.conf")

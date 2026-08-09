@@ -1,12 +1,13 @@
 # Workflow Scripts
 
-This directory contains shell scripts for running larger processing workflows. The scripts assume they are run from the repository checkout and that executables have been built in the top-level `build/` directory.
+This directory contains shell scripts for running larger processing workflows. The scripts assume they are run from the repository checkout and that executables have been built in the `process/bin/` directory.
 
 Build first:
 
 ```bash
-cmake -S process/source -B build
-cmake --build build -j
+cmake -S process/source -B process/build
+cmake --build process/build -j
+cmake --install process/build
 ```
 
 ## process.sh
