@@ -31,11 +31,14 @@ add_executable(sorter sorter.cc)
 add_executable(after-pulse-suppressor after-pulse-suppressor.cc)
 add_executable(merger merger.cc)
 add_executable(trigger trigger.cc)
+add_executable(timing_calib timing_calib.cc)
 
-foreach(target dcalib calibrator sorter after-pulse-suppressor merger trigger)
+foreach(target dcalib calibrator sorter after-pulse-suppressor merger trigger timing_calib)
   target_compile_options(${target} PRIVATE ${ROOT_CFLAGS_LIST})
   target_link_libraries(${target} PRIVATE ${ROOT_LIBS_LIST} Boost::program_options)
 endforeach()
+
+target_link_libraries(timing_calib PRIVATE Minuit)
 
 install(TARGETS
   dcalib
@@ -44,5 +47,6 @@ install(TARGETS
   after-pulse-suppressor
   merger
   trigger
+  timing_calib
   RUNTIME DESTINATION bin
 )
