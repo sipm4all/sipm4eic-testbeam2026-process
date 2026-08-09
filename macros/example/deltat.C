@@ -62,14 +62,13 @@ struct category_reader_t {
 };
 
 void
-deltat_trigger_frames(const std::string filename,
-                      int trigger_type,
-                      int trigger_device,
-                      int trigger_fifo,
-                      int trigger_column,
-                      int trigger_pixel,
-                      double trigger_time_offset = 0.,
-                      const std::string outfilename = "deltat_trigger_frames.root")
+deltat(const std::string filename,
+       int trigger_type,
+       int trigger_device,
+       int trigger_fifo,
+       int trigger_column,
+       int trigger_pixel,
+       const std::string outfilename = "deltat.root")
 {
   auto fin = TFile::Open(filename.c_str());
   if (!fin || fin->IsZombie()) {
@@ -114,7 +113,7 @@ deltat_trigger_frames(const std::string filename,
         if (itrigger < 0)
           continue;
 
-        auto event_time = trigger_cat->time(itrigger) - trigger_time_offset;
+        auto event_time = trigger_cat->time(itrigger);
         ++ntriggers;
 
         for (auto cat : cats) {
@@ -179,7 +178,6 @@ deltat_trigger_frames(const std::string filename,
   nfills = 0;
   scan(hDeltaT, dtmin, dtmax, have_dt, ntriggers, nfills);
 
-  std::cout << " --- trigger time offset: " << trigger_time_offset << std::endl;
   if (ntriggers == 0)
     std::cerr << " --- no matching trigger hit found inside the stored frames" << std::endl;
   std::cout << " --- triggers found: " << ntriggers << std::endl;

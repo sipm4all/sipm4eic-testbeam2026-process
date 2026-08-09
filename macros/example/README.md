@@ -14,4 +14,8 @@ It iterates over spills and frames and prints the number of trigger, timing, and
 
 ## deltat.C
 
-Copied from the triggered-frame delta-t analysis macro. It reads the `frames` tree format and fills a 2D delta-t histogram using hits contained in each stored frame.
+Reads the triggered-frame `frames` tree and fills a 2D delta-t histogram using all hits contained in each stored frame. The ROOT function name is `deltat`, matching the filename. Example:
+
+```bash
+root -l 'macros/example/deltat.C("frames.root", 9, 200, 32, -1, -1)'
+```
