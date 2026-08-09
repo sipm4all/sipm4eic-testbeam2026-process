@@ -15,7 +15,7 @@ cmake --install process/build
 `dcalib.sh` runs TDC calibration over all decoded FIFO files in a run. It uses the same input and output base directories as `process.sh`:
 
 ```bash
-ipath="/data/2026-testbeam/actual/physics"
+ipath="/data/2026-testbeam/actual/testpulse"
 opath="/data/2026-testbeam/process"
 ```
 
@@ -35,7 +35,7 @@ Required command-line options:
 For each input file like:
 
 ```text
-/data/2026-testbeam/actual/physics/<run>/<device>/decoded/alcdaq.fifo_0.root
+/data/2026-testbeam/actual/testpulse/<run>/<device>/decoded/alcdaq.fifo_0.root
 ```
 
 the script writes outputs in the corresponding device directory:

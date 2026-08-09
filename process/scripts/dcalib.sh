@@ -4,7 +4,7 @@ shopt -s nullglob
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
-ipath="/data/2026-testbeam/actual/physics"
+ipath="/data/2026-testbeam/actual/testpulse"
 opath="/data/2026-testbeam/process"
 
 DCALIB="${ROOT_DIR}/process/bin/dcalib"
