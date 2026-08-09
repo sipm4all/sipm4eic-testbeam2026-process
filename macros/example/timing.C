@@ -26,7 +26,7 @@ int timing_detector(const hit_t &hit)
 
 int timing_channel(const hit_t &hit)
 {
-  int channel = hit.pixel + 4 * hit.column + 8 * (hit.fifo % 4);
+  int channel = hit.pixel + 4 * hit.column;
   if (channel < 0 || channel >= nchannels)
     return -1;
   return channel;

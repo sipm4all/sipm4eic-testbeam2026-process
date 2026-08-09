@@ -38,7 +38,7 @@ TIMING1: device kc705-200, FIFOs 4..7
 Each scintillator is read out by 32 SiPM channels. The macro uses this local channel index:
 
 ```cpp
-channel = pixel + 4 * column + 8 * (fifo % 4)
+channel = pixel + 4 * column
 ```
 
 For each triggered frame, the macro keeps the earliest hit per timing channel, then estimates a robust mean time separately for TIMING0 and TIMING1. The robust mean is computed by:
