@@ -13,15 +13,46 @@ APS="${ROOT_DIR}/process/bin/after-pulse-suppressor"
 MERGER="${ROOT_DIR}/process/bin/merger"
 TRIGGER="${ROOT_DIR}/process/bin/trigger"
 HADD="hadd"
-CALIBRATION_CONFIG="${ROOT_DIR}/process/config/calibration/calibration_example.conf"
-TRIGGER_CONFIGS=("${ROOT_DIR}/process/config/trigger/trigger_range.conf" "${ROOT_DIR}/process/config/trigger/trigger_set.conf")
-TRIGGER_TAGS=("range" "set")
+
+run=""
+CALIBRATION_CONFIG=""
+TRIGGER_CONFIGS=()
+TRIGGER_TAGS=()
 TRIGGER_WINDOW=256
 
 WRITE_LOGS=0
 CLEAN_DEVICE_SPILLS=1
 CLEAN_MERGED_SPILLS=1
 CLEAN_TRIGGERED_SPILLS=1
+
+usage()
+{
+    cat <<EOF
+usage:
+  $0 --run RUN --calibration CALIBRATION.conf --trigger TRIGGER.conf TAG [options]
+
+required:
+  --run, -r RUN                  run name/directory
+  --calibration, -c FILE         timing calibration configuration
+  --trigger, -t FILE TAG         trigger configuration and output tag; may be repeated
+
+options:
+  --window, -w VALUE             trigger frame window, default: 256
+  --help, -h                     show this help message
+
+example:
+  $0 --run 12345
+  $0 --run 12345 --calibration process/config/calibration/calibration_example.conf --trigger process/config/trigger/trigger_range.conf range --trigger process/config/trigger/trigger_set.conf set --window 256
+EOF
+}
+
+fail()
+{
+    echo "ERROR: $*" >&2
+    echo >&2
+    usage >&2
+    exit 1
+}
 
 run_job()
 {
@@ -35,11 +66,60 @@ run_job()
     fi
 }
 
-if [ $# -ne 1 ]; then
-    echo " usage: $0 [run] "
-    exit 1
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --run|-r)
+            [ $# -ge 2 ] || fail "$1 requires RUN"
+            run=$2
+            shift 2
+            ;;
+        --calibration|-c)
+            [ $# -ge 2 ] || fail "$1 requires FILE"
+            CALIBRATION_CONFIG=$2
+            shift 2
+            ;;
+        --trigger|-t)
+            [ $# -ge 3 ] || fail "$1 requires FILE TAG"
+            TRIGGER_CONFIGS+=("$2")
+            TRIGGER_TAGS+=("$3")
+            shift 3
+            ;;
+        --window|-w)
+            [ $# -ge 2 ] || fail "$1 requires VALUE"
+            TRIGGER_WINDOW=$2
+            shift 2
+            ;;
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        *)
+            fail "unknown option: $1"
+            ;;
+    esac
+done
+
+[ -n "${run}" ] || fail "missing --run"
+[ -n "${CALIBRATION_CONFIG}" ] || fail "missing --calibration"
+[ ${#TRIGGER_CONFIGS[@]} -gt 0 ] || fail "at least one --trigger FILE TAG is required"
+[[ "${TRIGGER_WINDOW}" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "--window must be a positive number"
+awk "BEGIN { exit !(${TRIGGER_WINDOW} > 0) }" || fail "--window must be greater than zero"
+
+if [ ! -f "${CALIBRATION_CONFIG}" ]; then
+    fail "calibration config does not exist: ${CALIBRATION_CONFIG}"
 fi
-run=$1
+
+declare -A seen_trigger_tags=()
+for i in "${!TRIGGER_CONFIGS[@]}"; do
+    config=${TRIGGER_CONFIGS[$i]}
+    tag=${TRIGGER_TAGS[$i]}
+    [ -f "${config}" ] || fail "trigger config does not exist: ${config}"
+    [ -n "${tag}" ] || fail "empty trigger tag for config ${config}"
+    if [[ -n "${seen_trigger_tags[$tag]:-}" ]]; then
+        fail "duplicate trigger tag: ${tag}"
+    fi
+    seen_trigger_tags[$tag]=1
+done
 
 irpath="${ipath}/${run}"
 if [ ! -d "${irpath}" ]; then
