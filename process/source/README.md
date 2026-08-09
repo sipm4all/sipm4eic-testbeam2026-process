@@ -84,7 +84,7 @@ process/bin/trigger \
   --window 256
 ```
 
-The persistent output tree is named `frames`.
+The persistent output tree is named `frames`. Each stored hit includes the original raw fields plus the calibrated `time` value that was used for triggering. The time is persisted in the category branches as `trigger_time`, `timing_time`, and `cherenkov_time`.
 
 ## Shared Headers
 

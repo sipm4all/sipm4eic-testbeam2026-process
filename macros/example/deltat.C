@@ -20,6 +20,7 @@ struct category_reader_t {
   TTreeReaderArray<int> *rollover;
   TTreeReaderArray<int> *coarse;
   TTreeReaderArray<int> *fine;
+  TTreeReaderArray<double> *time;
 
   category_reader_t(TTreeReader &reader, const std::string &prefix)
     : frame_start(new TTreeReaderArray<int>(reader, (prefix + "_frame_start").c_str())),
@@ -31,16 +32,14 @@ struct category_reader_t {
       pixel(new TTreeReaderArray<int>(reader, (prefix + "_pixel").c_str())),
       rollover(new TTreeReaderArray<int>(reader, (prefix + "_rollover").c_str())),
       coarse(new TTreeReaderArray<int>(reader, (prefix + "_coarse").c_str())),
-      fine(new TTreeReaderArray<int>(reader, (prefix + "_fine").c_str()))
+      fine(new TTreeReaderArray<int>(reader, (prefix + "_fine").c_str())),
+      time(new TTreeReaderArray<double>(reader, (prefix + "_time").c_str()))
   {
   }
 
-  double time(int i) const
+  double hit_time(int i) const
   {
-    auto out = (*coarse)[i] + 32768. * (*rollover)[i];
-    if ((*type)[i] == 1)
-      out -= 0.0157 * (*fine)[i];
-    return out;
+    return (*time)[i];
   }
 
   int channel(int i) const
@@ -113,7 +112,7 @@ deltat(const std::string filename,
         if (itrigger < 0)
           continue;
 
-        auto event_time = trigger_cat->time(itrigger);
+        auto event_time = trigger_cat->hit_time(itrigger);
         ++ntriggers;
 
         for (auto cat : cats) {
@@ -124,7 +123,7 @@ deltat(const std::string filename,
             if (cat == trigger_cat && i == itrigger)
               continue;
 
-            auto delta_t = cat->time(i) - event_time;
+            auto delta_t = cat->hit_time(i) - event_time;
             if (hist) {
               hist->Fill(cat->channel(i), delta_t);
               ++nfills;

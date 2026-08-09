@@ -550,6 +550,7 @@ struct frame_t {
   int rollover[maxhits];
   int coarse[maxhits];
   int fine[maxhits];
+  double time[maxhits];
 
   bool add(const data_t &data)
   {
@@ -566,6 +567,7 @@ struct frame_t {
     rollover[nhits] = data.rollover;
     coarse[nhits] = data.coarse;
     fine[nhits] = data.fine;
+    time[nhits] = data.time;
     ++nhits;
     return true;
   }
@@ -585,6 +587,7 @@ struct hit_store_t {
   std::unique_ptr<int[]> rollover;
   std::unique_ptr<int[]> coarse;
   std::unique_ptr<int[]> fine;
+  std::unique_ptr<double[]> time;
 
   hit_store_t()
     : frame_start(new int[maxframes]),
@@ -598,7 +601,8 @@ struct hit_store_t {
       tdc(new int[maxspillhits]),
       rollover(new int[maxspillhits]),
       coarse(new int[maxspillhits]),
-      fine(new int[maxspillhits])
+      fine(new int[maxspillhits]),
+      time(new double[maxspillhits])
   {
     reset();
   }
@@ -630,6 +634,7 @@ struct hit_store_t {
     rollover[j] = frame.rollover[ihit];
     coarse[j] = frame.coarse[ihit];
     fine[j] = frame.fine[ihit];
+    time[j] = frame.time[ihit];
     ++frame_nhits[iframe];
     return true;
   }
@@ -890,6 +895,7 @@ trigger(const std::string filename,
     tout->Branch((prefix + "_rollover").c_str(), store.rollover.get(), (prefix + "_rollover[" + count + "]/I").c_str());
     tout->Branch((prefix + "_coarse").c_str(), store.coarse.get(), (prefix + "_coarse[" + count + "]/I").c_str());
     tout->Branch((prefix + "_fine").c_str(), store.fine.get(), (prefix + "_fine[" + count + "]/I").c_str());
+    tout->Branch((prefix + "_time").c_str(), store.time.get(), (prefix + "_time[" + count + "]/D").c_str());
   };
 
   branch_store("trigger", spill.trigger);

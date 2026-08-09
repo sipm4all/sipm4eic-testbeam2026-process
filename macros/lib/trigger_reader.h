@@ -22,8 +22,7 @@ struct hit_t {
   int rollover;
   int coarse;
   int fine;
-
-  double time() const;
+  double time;
 };
 
 class trigger_reader_t {
@@ -60,6 +59,7 @@ private:
     std::unique_ptr<TTreeReaderArray<int>> rollover;
     std::unique_ptr<TTreeReaderArray<int>> coarse;
     std::unique_ptr<TTreeReaderArray<int>> fine;
+    std::unique_ptr<TTreeReaderArray<double>> time;
 
     void reset();
     bool bind(TTree *tree, TTreeReader &reader, const std::string &prefix);
@@ -91,15 +91,6 @@ private:
   std::vector<hit_t> cherenkov_hits_;
 };
 
-inline double
-hit_t::time() const
-{
-  auto out = coarse + 32768. * rollover;
-  if (type == 1)
-    out -= 0.0157 * fine;
-  return out;
-}
-
 inline bool
 trigger_reader_t::has_branch(TTree *tree, const std::string &name)
 {
@@ -126,6 +117,7 @@ trigger_reader_t::category_t::reset()
   rollover.reset();
   coarse.reset();
   fine.reset();
+  time.reset();
 }
 
 inline bool
@@ -147,7 +139,8 @@ trigger_reader_t::category_t::bind(TTree *tree, TTreeReader &reader,
     prefix + "_tdc",
     prefix + "_rollover",
     prefix + "_coarse",
-    prefix + "_fine"
+    prefix + "_fine",
+    prefix + "_time"
   };
 
   for (auto &name : names) {
@@ -168,6 +161,7 @@ trigger_reader_t::category_t::bind(TTree *tree, TTreeReader &reader,
   rollover.reset(new TTreeReaderArray<int>(reader, (prefix + "_rollover").c_str()));
   coarse.reset(new TTreeReaderArray<int>(reader, (prefix + "_coarse").c_str()));
   fine.reset(new TTreeReaderArray<int>(reader, (prefix + "_fine").c_str()));
+  time.reset(new TTreeReaderArray<double>(reader, (prefix + "_time").c_str()));
 
   return true;
 }
@@ -211,6 +205,7 @@ trigger_reader_t::category_t::fill(std::vector<hit_t> &out, int iframe,
     hit.rollover = (*rollover)[i];
     hit.coarse = (*coarse)[i];
     hit.fine = (*fine)[i];
+    hit.time = (*time)[i];
     out.push_back(hit);
   }
 

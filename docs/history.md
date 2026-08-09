@@ -149,6 +149,8 @@ timing
 cherenkov
 ```
 
+The first version stored only raw hit fields. After introducing the calibration stage, calibrated hit `time` was also persisted in each category as `trigger_time`, `timing_time`, and `cherenkov_time`, because it is now a calibrated data product rather than a temporary helper.
+
 To hide this layout from analysis users, a header-only reader was added:
 
 ```text

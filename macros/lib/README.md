@@ -22,4 +22,4 @@ while (reader.next_spill()) {
 }
 ```
 
-The returned vectors contain `hit_t` objects with original stored fields and a `time()` helper. The vectors remain valid until the next call to `open()`, `next_spill()`, or `next_frame()`.
+The returned vectors contain `hit_t` objects with the original stored fields plus `double time`, the calibrated time value persisted by `trigger.cc`. The vectors remain valid until the next call to `open()`, `next_spill()`, or `next_frame()`.
