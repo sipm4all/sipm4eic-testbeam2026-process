@@ -29,16 +29,16 @@ required:
   --period, -p PERIOD    expected pulser period in coarse clock cycles
 
 options:
-  --devices DEVICE ...   devices to process, default: all
-  --fifos FIFO ...       FIFOs to process, default: all
+  --devices DEVICE ...   device directory names to process, default: all
+  --fifos FIFO ...       FIFO numbers to process, default: all
   --help, -h             show this help message
 
 examples:
   $0 --run 12345 --period 10000
   $0 --run 12345 --period 10000 --devices all --fifos all
-  $0 --run 12345 --period 10000 --devices 192 196 --fifos 0 4 8
-  $0 --run 12345 --period 10000 --devices {192..195} --fifos {0..16}
-  $0 --run 12345 --period 10000 --devices "{192..195}" --fifos "{0..16}"
+  $0 --run 12345 --period 10000 --devices kc705-200 rdo-192 --fifos 0 4 8
+  $0 --run 12345 --period 10000 --devices kc705-200 rdo-{192..195} --fifos {0..16}
+  $0 --run 12345 --period 10000 --devices kc705-200 "rdo-{192..195}" --fifos "{0..16}"
 EOF_USAGE
 }
 
@@ -62,7 +62,7 @@ run_job()
     fi
 }
 
-add_range_or_value()
+add_fifo_range_or_value()
 {
     local target=$1
     local value=$2
@@ -70,7 +70,7 @@ add_range_or_value()
     if [[ "${value}" =~ ^\{([0-9]+)\.\.([0-9]+)\}$ ]]; then
         local first=${BASH_REMATCH[1]}
         local last=${BASH_REMATCH[2]}
-        [ "${first}" -le "${last}" ] || fail "invalid range ${value}"
+        [ "${first}" -le "${last}" ] || fail "invalid FIFO range ${value}"
         local v
         for ((v = first; v <= last; ++v)); do
             eval "${target}+=(\"${v}\")"
@@ -78,14 +78,38 @@ add_range_or_value()
         return
     fi
 
-    [[ "${value}" =~ ^[0-9]+$ ]] || fail "expected non-negative integer or range, got '${value}'"
+    [[ "${value}" =~ ^[0-9]+$ ]] || fail "expected FIFO number or range, got '${value}'"
+    eval "${target}+=(\"${value}\")"
+}
+
+add_device_range_or_value()
+{
+    local target=$1
+    local value=$2
+
+    if [[ "${value}" =~ ^([A-Za-z0-9_.-]*)\{([0-9]+)\.\.([0-9]+)\}$ ]]; then
+        local prefix=${BASH_REMATCH[1]}
+        local first=${BASH_REMATCH[2]}
+        local last=${BASH_REMATCH[3]}
+        [ "${first}" -le "${last}" ] || fail "invalid device range ${value}"
+        local width=${#first}
+        local v
+        for ((v = first; v <= last; ++v)); do
+            printf -v formatted "%0${width}d" "${v}"
+            eval "${target}+=(\"${prefix}${formatted}\")"
+        done
+        return
+    fi
+
+    [[ "${value}" =~ ^[A-Za-z0-9_.-]+$ ]] || fail "expected device name or prefixed range, got '${value}'"
     eval "${target}+=(\"${value}\")"
 }
 
 parse_filter_values()
 {
     local target=$1
-    shift
+    local kind=$2
+    shift 2
     local values=()
 
     while [ $# -gt 0 ]; do
@@ -107,7 +131,11 @@ parse_filter_values()
 
     for value in "${values[@]}"; do
         [ "${value}" != "all" ] || fail "'all' must be the only value for a filter option"
-        add_range_or_value "${target}" "${value}"
+        if [ "${kind}" = "device" ]; then
+            add_device_range_or_value "${target}" "${value}"
+        else
+            add_fifo_range_or_value "${target}" "${value}"
+        fi
     done
 }
 
@@ -124,18 +152,6 @@ contains_value()
     return 1
 }
 
-extract_last_integer()
-{
-    local text=$1
-    local last=""
-    local match
-    while read -r match; do
-        last=${match}
-    done < <(grep -oE '[0-9]+' <<< "${text}" || true)
-    [ -n "${last}" ] || return 1
-    echo "${last}"
-}
-
 while [ $# -gt 0 ]; do
     case "$1" in
         --run|-r)
@@ -149,7 +165,7 @@ while [ $# -gt 0 ]; do
             shift 2
             ;;
         --devices)
-            parse_filter_values DEVICE_FILTER "${@:2}"
+            parse_filter_values DEVICE_FILTER device "${@:2}"
             if [ "${PARSE_FILTER_MODE}" = "all" ]; then
                 DEVICE_ALL=1
                 DEVICE_FILTER=()
@@ -159,7 +175,7 @@ while [ $# -gt 0 ]; do
             shift "${PARSE_FILTER_CONSUMED}"
             ;;
         --fifos)
-            parse_filter_values FIFO_FILTER "${@:2}"
+            parse_filter_values FIFO_FILTER fifo "${@:2}"
             if [ "${PARSE_FILTER_MODE}" = "all" ]; then
                 FIFO_ALL=1
                 FIFO_FILTER=()
@@ -200,8 +216,7 @@ for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
     [ -d "${idpath}" ] || continue
 
     device=$(basename "${idpath}")
-    device_id=$(extract_last_integer "${device}") || fail "could not extract numeric device id from ${device}"
-    if [ "${DEVICE_ALL}" -ne 1 ] && ! contains_value "${device_id}" "${DEVICE_FILTER[@]}"; then
+    if [ "${DEVICE_ALL}" -ne 1 ] && ! contains_value "${device}" "${DEVICE_FILTER[@]}"; then
         continue
     fi
 

@@ -23,7 +23,7 @@ Run:
 
 ```bash
 process/scripts/dcalib.sh --run RUN_NAME --period 10000
-process/scripts/dcalib.sh --run RUN_NAME --period 10000 --devices {192..195} --fifos {0..16}
+process/scripts/dcalib.sh --run RUN_NAME --period 10000 --devices kc705-200 rdo-{192..195} --fifos {0..16}
 ```
 
 Required command-line options:
@@ -36,10 +36,12 @@ Required command-line options:
 Optional filters:
 
 ```text
---devices all              process all devices, default
---devices 192 196          process only selected devices
---devices {192..195}       process an inclusive device range
---devices "{192..195}"     quoted inclusive ranges are also accepted
+--devices all                    process all devices, default
+--devices kc705-200 rdo-192      process selected device directories
+--devices kc705-200 rdo-{192..195}
+                                 process one device plus an inclusive RDO range
+--devices kc705-200 "rdo-{192..195}"
+                                 quoted prefixed ranges are also accepted
 
 --fifos all                process all FIFOs, default
 --fifos 0 4 8              process only selected FIFOs
@@ -47,7 +49,7 @@ Optional filters:
 --fifos "{0..16}"          quoted inclusive ranges are also accepted
 ```
 
-The shell expands unquoted brace ranges before the script receives them. Quoted brace ranges are expanded by the script itself.
+The shell expands unquoted brace ranges before the script receives them. Quoted brace ranges are expanded by the script itself. Device filters match the actual device directory basename, such as `kc705-200` or `rdo-192`; FIFO filters remain numeric.
 
 For each input file like:
 
