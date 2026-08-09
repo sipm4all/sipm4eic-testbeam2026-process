@@ -175,8 +175,17 @@ The timing diagnostic also writes first-order event-shape correlation histograms
 ```text
 hDeltaShapeCorrected
 hDeltaVsSpread0 / hDeltaVsSpread1
-hDeltaVsSlope0 / hDeltaVsSlope1
+hDeltaVsSlopeX0 / hDeltaVsSlopeX1 / hDeltaVsSlopeY0 / hDeltaVsSlopeY1
 hDeltaVsLeftRight0 / hDeltaVsLeftRight1
 ```
 
 `hDeltaShapeCorrected` subtracts a linear diagnostic model of `timing0_mean - timing1_mean` using per-event shape variables measured inside the two scintillators: channel spread, channel-time slope, left/right asymmetry, and even/odd asymmetry. This correction is diagnostic only; it is not written into the `[CHANNEL]` calibration snippet, because it represents event topology or light-propagation information rather than fixed channel offsets.
+
+The event-shape diagnostics use the detector-channel geometry, not raw electronics order. The electronics channel is first mapped through:
+
+```cpp
+eo2do[32] = {22,20,18,16,24,26,28,30,25,27,29,31,23,21,19,17,
+             9,11,13,15,7,5,3,1,6,4,2,0,8,10,12,14}
+```
+
+The detector channel is interpreted as a 4x8 matrix with `x = detector_channel % 4` and `y = detector_channel / 4`. The diagnostic variables include spread, x/y time gradients, and left/right asymmetry in this detector coordinate system.

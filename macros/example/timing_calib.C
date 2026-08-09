@@ -17,6 +17,7 @@ namespace {
 constexpr int nchannels = 32;
 constexpr int ntiming = 64;
 constexpr int reference_channel = 0;
+const int eo2do[nchannels] = {22, 20, 18, 16, 24, 26, 28, 30, 25, 27, 29, 31, 23, 21, 19, 17, 9, 11, 13, 15, 7, 5, 3, 1, 6, 4, 2, 0, 8, 10, 12, 14};
 
 struct frame_info_t {
   bool have[2][nchannels] = {};
@@ -32,8 +33,10 @@ struct shape_event_t {
   double delta = 0.;
   double spread0 = 0.;
   double spread1 = 0.;
-  double slope0 = 0.;
-  double slope1 = 0.;
+  double slope_x0 = 0.;
+  double slope_x1 = 0.;
+  double slope_y0 = 0.;
+  double slope_y1 = 0.;
   double left_right0 = 0.;
   double left_right1 = 0.;
   double even_odd0 = 0.;
@@ -343,7 +346,8 @@ bool event_shape(const frame_info_t &frame,
                  const std::vector<int> &channels,
                  double mean,
                  double &spread,
-                 double &slope,
+                 double &slope_x,
+                 double &slope_y,
                  double &left_right,
                  double &even_odd)
 {
@@ -351,14 +355,17 @@ bool event_shape(const frame_info_t &frame,
     return false;
 
   spread = 0.;
-  slope = 0.;
+  slope_x = 0.;
+  slope_y = 0.;
   left_right = 0.;
   even_odd = 0.;
 
   double sx = 0.;
   double sy = 0.;
   double sxx = 0.;
-  double sxy = 0.;
+  double syy = 0.;
+  double sxt = 0.;
+  double syt = 0.;
   double left = 0.;
   double right = 0.;
   double even = 0.;
@@ -370,51 +377,59 @@ bool event_shape(const frame_info_t &frame,
 
   for (auto channel : channels) {
     int gch = global_channel(det, channel);
+    int detector_channel = eo2do[channel];
+    double x = detector_channel % 4;
+    double y = detector_channel / 4;
     double time = frame.time[det][channel] - offset[gch];
     double residual = time - mean;
     spread += residual * residual;
-    sx += channel;
-    sy += time;
-    sxx += channel * channel;
-    sxy += channel * time;
+    sx += x;
+    sy += y;
+    sxx += x * x;
+    syy += y * y;
+    sxt += x * residual;
+    syt += y * residual;
 
-    if (channel < nchannels / 2) {
-      left += time;
+    if (x < 2) {
+      left += residual;
       ++nleft;
     } else {
-      right += time;
+      right += residual;
       ++nright;
     }
 
-    if (channel % 2 == 0) {
-      even += time;
+    if (detector_channel % 2 == 0) {
+      even += residual;
       ++neven;
     } else {
-      odd += time;
+      odd += residual;
       ++nodd;
     }
   }
 
   spread = std::sqrt(spread / channels.size());
-  double den = channels.size() * sxx - sx * sx;
-  slope = den != 0. ? (channels.size() * sxy - sx * sy) / den : 0.;
+  double denx = channels.size() * sxx - sx * sx;
+  double deny = channels.size() * syy - sy * sy;
+  slope_x = denx != 0. ? channels.size() * sxt / denx : 0.;
+  slope_y = deny != 0. ? channels.size() * syt / deny : 0.;
   left_right = nleft > 0 && nright > 0 ? left / nleft - right / nright : 0.;
   even_odd = neven > 0 && nodd > 0 ? even / neven - odd / nodd : 0.;
   return true;
 }
-
 double shape_value(const shape_event_t &event, int index)
 {
   switch (index) {
   case 0: return 1.;
   case 1: return event.spread0;
   case 2: return event.spread1;
-  case 3: return event.slope0;
-  case 4: return event.slope1;
-  case 5: return event.left_right0;
-  case 6: return event.left_right1;
-  case 7: return event.even_odd0;
-  case 8: return event.even_odd1;
+  case 3: return event.slope_x0;
+  case 4: return event.slope_x1;
+  case 5: return event.slope_y0;
+  case 6: return event.slope_y1;
+  case 7: return event.left_right0;
+  case 8: return event.left_right1;
+  case 9: return event.even_odd0;
+  case 10: return event.even_odd1;
   default: return 0.;
   }
 }
@@ -612,8 +627,10 @@ void timing_calib(const char *filename,
   auto hDeltaShapeCorrected = new TH1D("hDeltaShapeCorrected", "", 400, -delta_range, delta_range);
   auto hDeltaVsSpread0 = new TH2D("hDeltaVsSpread0", "", 200, 0., delta_range, 400, -delta_range, delta_range);
   auto hDeltaVsSpread1 = new TH2D("hDeltaVsSpread1", "", 200, 0., delta_range, 400, -delta_range, delta_range);
-  auto hDeltaVsSlope0 = new TH2D("hDeltaVsSlope0", "", 200, -0.2, 0.2, 400, -delta_range, delta_range);
-  auto hDeltaVsSlope1 = new TH2D("hDeltaVsSlope1", "", 200, -0.2, 0.2, 400, -delta_range, delta_range);
+  auto hDeltaVsSlopeX0 = new TH2D("hDeltaVsSlopeX0", "", 200, -0.2, 0.2, 400, -delta_range, delta_range);
+  auto hDeltaVsSlopeX1 = new TH2D("hDeltaVsSlopeX1", "", 200, -0.2, 0.2, 400, -delta_range, delta_range);
+  auto hDeltaVsSlopeY0 = new TH2D("hDeltaVsSlopeY0", "", 200, -0.2, 0.2, 400, -delta_range, delta_range);
+  auto hDeltaVsSlopeY1 = new TH2D("hDeltaVsSlopeY1", "", 200, -0.2, 0.2, 400, -delta_range, delta_range);
   auto hDeltaVsLeftRight0 = new TH2D("hDeltaVsLeftRight0", "", 200, -delta_range, delta_range, 400, -delta_range, delta_range);
   auto hDeltaVsLeftRight1 = new TH2D("hDeltaVsLeftRight1", "", 200, -delta_range, delta_range, 400, -delta_range, delta_range);
   auto hTiming0SpreadBefore = new TH1D("hTiming0SpreadBefore", "", 400, 0., delta_range);
@@ -700,14 +717,16 @@ void timing_calib(const char *filename,
       shape.spread0 = spread0;
       shape.spread1 = spread1;
       event_shape(frame, 0, offset, channels0_after, mean0_after,
-                  shape.spread0, shape.slope0, shape.left_right0, shape.even_odd0);
+                  shape.spread0, shape.slope_x0, shape.slope_y0, shape.left_right0, shape.even_odd0);
       event_shape(frame, 1, offset, channels1_after, mean1_after,
-                  shape.spread1, shape.slope1, shape.left_right1, shape.even_odd1);
+                  shape.spread1, shape.slope_x1, shape.slope_y1, shape.left_right1, shape.even_odd1);
       shape_events.push_back(shape);
       hDeltaVsSpread0->Fill(shape.spread0, shape.delta);
       hDeltaVsSpread1->Fill(shape.spread1, shape.delta);
-      hDeltaVsSlope0->Fill(shape.slope0, shape.delta);
-      hDeltaVsSlope1->Fill(shape.slope1, shape.delta);
+      hDeltaVsSlopeX0->Fill(shape.slope_x0, shape.delta);
+      hDeltaVsSlopeX1->Fill(shape.slope_x1, shape.delta);
+      hDeltaVsSlopeY0->Fill(shape.slope_y0, shape.delta);
+      hDeltaVsSlopeY1->Fill(shape.slope_y1, shape.delta);
       hDeltaVsLeftRight0->Fill(shape.left_right0, shape.delta);
       hDeltaVsLeftRight1->Fill(shape.left_right1, shape.delta);
       ++ndiag;
@@ -737,7 +756,7 @@ void timing_calib(const char *filename,
     }
   }
 
-  auto shape_beta = fit_shape_model(shape_events, 9);
+  auto shape_beta = fit_shape_model(shape_events, 11);
   for (const auto &shape : shape_events)
     hDeltaShapeCorrected->Fill(shape.delta - eval_shape_model(shape, shape_beta));
 
@@ -756,8 +775,10 @@ void timing_calib(const char *filename,
   hDeltaShapeCorrected->Write();
   hDeltaVsSpread0->Write();
   hDeltaVsSpread1->Write();
-  hDeltaVsSlope0->Write();
-  hDeltaVsSlope1->Write();
+  hDeltaVsSlopeX0->Write();
+  hDeltaVsSlopeX1->Write();
+  hDeltaVsSlopeY0->Write();
+  hDeltaVsSlopeY1->Write();
   hDeltaVsLeftRight0->Write();
   hDeltaVsLeftRight1->Write();
   hTiming0SpreadBefore->Write();
