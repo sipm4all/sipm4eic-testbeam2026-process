@@ -30,6 +30,18 @@ struct fit_event_t {
   std::vector<double> time[2];
 };
 
+struct shape_event_t {
+  double delta = 0.;
+  double spread0 = 0.;
+  double spread1 = 0.;
+  double slope0 = 0.;
+  double slope1 = 0.;
+  double left_right0 = 0.;
+  double left_right1 = 0.;
+  double even_odd0 = 0.;
+  double even_odd1 = 0.;
+};
+
 int timing_detector(const hit_t &hit)
 {
   if (hit.device != 200)
@@ -326,6 +338,139 @@ bool run_full_minimization(const std::vector<fit_event_t> &events,
   return ierflg == 0;
 }
 
+
+bool event_shape(const frame_info_t &frame,
+                 int det,
+                 const double *offset,
+                 const std::vector<int> &channels,
+                 double mean,
+                 double &spread,
+                 double &slope,
+                 double &left_right,
+                 double &even_odd)
+{
+  if (channels.empty())
+    return false;
+
+  spread = 0.;
+  slope = 0.;
+  left_right = 0.;
+  even_odd = 0.;
+
+  double sx = 0.;
+  double sy = 0.;
+  double sxx = 0.;
+  double sxy = 0.;
+  double left = 0.;
+  double right = 0.;
+  double even = 0.;
+  double odd = 0.;
+  int nleft = 0;
+  int nright = 0;
+  int neven = 0;
+  int nodd = 0;
+
+  for (auto channel : channels) {
+    int gch = global_channel(det, channel);
+    double time = frame.time[det][channel] - offset[gch];
+    double residual = time - mean;
+    spread += residual * residual;
+    sx += channel;
+    sy += time;
+    sxx += channel * channel;
+    sxy += channel * time;
+
+    if (channel < nchannels / 2) {
+      left += time;
+      ++nleft;
+    } else {
+      right += time;
+      ++nright;
+    }
+
+    if (channel % 2 == 0) {
+      even += time;
+      ++neven;
+    } else {
+      odd += time;
+      ++nodd;
+    }
+  }
+
+  spread = std::sqrt(spread / channels.size());
+  double den = channels.size() * sxx - sx * sx;
+  slope = den != 0. ? (channels.size() * sxy - sx * sy) / den : 0.;
+  left_right = nleft > 0 && nright > 0 ? left / nleft - right / nright : 0.;
+  even_odd = neven > 0 && nodd > 0 ? even / neven - odd / nodd : 0.;
+  return true;
+}
+
+double shape_value(const shape_event_t &event, int index)
+{
+  switch (index) {
+  case 0: return 1.;
+  case 1: return event.spread0;
+  case 2: return event.spread1;
+  case 3: return event.slope0;
+  case 4: return event.slope1;
+  case 5: return event.left_right0;
+  case 6: return event.left_right1;
+  case 7: return event.even_odd0;
+  case 8: return event.even_odd1;
+  default: return 0.;
+  }
+}
+
+std::vector<double> fit_shape_model(const std::vector<shape_event_t> &events,
+                                    int nvariables)
+{
+  std::vector<std::vector<double>> a(nvariables, std::vector<double>(nvariables + 1, 0.));
+
+  for (const auto &event : events) {
+    for (int i = 0; i < nvariables; ++i) {
+      double xi = shape_value(event, i);
+      for (int j = 0; j < nvariables; ++j)
+        a[i][j] += xi * shape_value(event, j);
+      a[i][nvariables] += xi * event.delta;
+    }
+  }
+
+  for (int i = 0; i < nvariables; ++i) {
+    int pivot = i;
+    for (int k = i + 1; k < nvariables; ++k) {
+      if (std::fabs(a[k][i]) > std::fabs(a[pivot][i]))
+        pivot = k;
+    }
+    std::swap(a[i], a[pivot]);
+    if (std::fabs(a[i][i]) < 1.e-20)
+      continue;
+    double div = a[i][i];
+    for (int j = i; j <= nvariables; ++j)
+      a[i][j] /= div;
+    for (int k = 0; k < nvariables; ++k) {
+      if (k == i)
+        continue;
+      double factor = a[k][i];
+      for (int j = i; j <= nvariables; ++j)
+        a[k][j] -= factor * a[i][j];
+    }
+  }
+
+  std::vector<double> beta(nvariables, 0.);
+  for (int i = 0; i < nvariables; ++i)
+    beta[i] = a[i][nvariables];
+  return beta;
+}
+
+double eval_shape_model(const shape_event_t &event,
+                        const std::vector<double> &beta)
+{
+  double value = 0.;
+  for (size_t i = 0; i < beta.size(); ++i)
+    value += beta[i] * shape_value(event, i);
+  return value;
+}
+
 void write_channel_calibration(const char *filename, const double *offset)
 {
   std::ofstream out(filename);
@@ -465,6 +610,13 @@ bool timing_calib(const std::string &filename,
 
   auto hDeltaBefore = new TH1D("hDeltaBefore", "", 400, -delta_range, delta_range);
   auto hDeltaAfter = new TH1D("hDeltaAfter", "", 400, -delta_range, delta_range);
+  auto hDeltaShapeCorrected = new TH1D("hDeltaShapeCorrected", "", 400, -delta_range, delta_range);
+  auto hDeltaVsSpread0 = new TH2D("hDeltaVsSpread0", "", 200, 0., delta_range, 400, -delta_range, delta_range);
+  auto hDeltaVsSpread1 = new TH2D("hDeltaVsSpread1", "", 200, 0., delta_range, 400, -delta_range, delta_range);
+  auto hDeltaVsSlope0 = new TH2D("hDeltaVsSlope0", "", 200, -0.2, 0.2, 400, -delta_range, delta_range);
+  auto hDeltaVsSlope1 = new TH2D("hDeltaVsSlope1", "", 200, -0.2, 0.2, 400, -delta_range, delta_range);
+  auto hDeltaVsLeftRight0 = new TH2D("hDeltaVsLeftRight0", "", 200, -delta_range, delta_range, 400, -delta_range, delta_range);
+  auto hDeltaVsLeftRight1 = new TH2D("hDeltaVsLeftRight1", "", 200, -delta_range, delta_range, 400, -delta_range, delta_range);
   auto hTiming0SpreadBefore = new TH1D("hTiming0SpreadBefore", "", 400, 0., delta_range);
   auto hTiming1SpreadBefore = new TH1D("hTiming1SpreadBefore", "", 400, 0., delta_range);
   auto hTiming0SpreadAfter = new TH1D("hTiming0SpreadAfter", "", 400, 0., delta_range);
@@ -504,6 +656,9 @@ bool timing_calib(const std::string &filename,
     return channels.empty() ? 0. : std::sqrt(s2 / channels.size());
   };
 
+  std::vector<shape_event_t> shape_events;
+  shape_events.reserve(fit_frames.size());
+
   int ndiag = 0;
   for (const auto &frame : fit_frames) {
     double mean0_before = 0.;
@@ -540,6 +695,22 @@ bool timing_calib(const std::string &filename,
       hTiming1SpreadAfter->Fill(spread1);
       hExpectedDeltaFromSpreadAfter->Fill(std::sqrt(spread0 * spread0 / channels0_after.size() +
                                                     spread1 * spread1 / channels1_after.size()));
+
+      shape_event_t shape;
+      shape.delta = mean0_after - mean1_after;
+      shape.spread0 = spread0;
+      shape.spread1 = spread1;
+      event_shape(frame, 0, offset, channels0_after, mean0_after,
+                  shape.spread0, shape.slope0, shape.left_right0, shape.even_odd0);
+      event_shape(frame, 1, offset, channels1_after, mean1_after,
+                  shape.spread1, shape.slope1, shape.left_right1, shape.even_odd1);
+      shape_events.push_back(shape);
+      hDeltaVsSpread0->Fill(shape.spread0, shape.delta);
+      hDeltaVsSpread1->Fill(shape.spread1, shape.delta);
+      hDeltaVsSlope0->Fill(shape.slope0, shape.delta);
+      hDeltaVsSlope1->Fill(shape.slope1, shape.delta);
+      hDeltaVsLeftRight0->Fill(shape.left_right0, shape.delta);
+      hDeltaVsLeftRight1->Fill(shape.left_right1, shape.delta);
       ++ndiag;
 
       for (auto channel : channels0_after) {
@@ -567,6 +738,10 @@ bool timing_calib(const std::string &filename,
     }
   }
 
+  auto shape_beta = fit_shape_model(shape_events, 9);
+  for (const auto &shape : shape_events)
+    hDeltaShapeCorrected->Fill(shape.delta - eval_shape_model(shape, shape_beta));
+
   double timing0_spread_before = hTiming0SpreadBefore->GetMean();
   double timing0_spread_after = hTiming0SpreadAfter->GetMean();
   double timing1_spread_before = hTiming1SpreadBefore->GetMean();
@@ -575,9 +750,17 @@ bool timing_calib(const std::string &filename,
   double expected_delta_after = hExpectedDeltaFromSpreadAfter->GetMean();
   double observed_delta_rms_before = hDeltaBefore->GetRMS();
   double observed_delta_rms_after = hDeltaAfter->GetRMS();
+  double shape_corrected_delta_rms = hDeltaShapeCorrected->GetRMS();
 
   hDeltaBefore->Write();
   hDeltaAfter->Write();
+  hDeltaShapeCorrected->Write();
+  hDeltaVsSpread0->Write();
+  hDeltaVsSpread1->Write();
+  hDeltaVsSlope0->Write();
+  hDeltaVsSlope1->Write();
+  hDeltaVsLeftRight0->Write();
+  hDeltaVsLeftRight1->Write();
   hTiming0SpreadBefore->Write();
   hTiming1SpreadBefore->Write();
   hTiming0SpreadAfter->Write();
@@ -616,6 +799,7 @@ bool timing_calib(const std::string &filename,
             << " / " << expected_delta_after << std::endl;
   std::cout << "observed delta RMS before/after: " << observed_delta_rms_before
             << " / " << observed_delta_rms_after << std::endl;
+  std::cout << "shape-corrected delta RMS:       " << shape_corrected_delta_rms << std::endl;
   std::cout << "frames used for diagnostics:     " << ndiag << std::endl;
   std::cout << "reference channel fixed:         fifo=0 column=0 pixel=0 offset=0" << std::endl;
   std::cout << "ROOT output:                     " << outfilename << std::endl;

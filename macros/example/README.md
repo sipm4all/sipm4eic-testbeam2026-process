@@ -169,3 +169,14 @@ sqrt(spread0^2 / n0 + spread1^2 / n1)
 ```
 
 Comparing this estimate with the observed `hDelta` RMS is a useful check of whether the two timing scintillators are limited by independent channel jitter or by an event-by-event effect common to many channels.
+
+The timing diagnostic also writes first-order event-shape correlation histograms:
+
+```text
+hDeltaShapeCorrected
+hDeltaVsSpread0 / hDeltaVsSpread1
+hDeltaVsSlope0 / hDeltaVsSlope1
+hDeltaVsLeftRight0 / hDeltaVsLeftRight1
+```
+
+`hDeltaShapeCorrected` subtracts a linear diagnostic model of `timing0_mean - timing1_mean` using per-event shape variables measured inside the two scintillators: channel spread, channel-time slope, left/right asymmetry, and even/odd asymmetry. This correction is diagnostic only; it is not written into the `[CHANNEL]` calibration snippet, because it represents event topology or light-propagation information rather than fixed channel offsets.
