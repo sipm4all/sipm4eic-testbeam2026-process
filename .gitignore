@@ -1,0 +1,30 @@
+# Build output
+build/
+/bin/
+
+# Local compiled binaries if built in source directories
+/process/source/calibrator
+/process/source/sorter
+/process/source/after-pulse-suppressor
+/process/source/merger
+/process/source/trigger
+
+# ROOT data and generated analysis products
+*.root
+*.png
+*.pdf
+*.log
+
+# ROOT ACLiC generated files
+*_C.d
+*_C.so
+*_C_ACLiC_dict_rdict.pcm
+*.pcm
+*.so
+*.d
+
+# Backup/editor files
+*~
+*.save
+*.bak
+*.tmp
