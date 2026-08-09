@@ -23,6 +23,7 @@ Run:
 
 ```bash
 process/scripts/dcalib.sh --run RUN_NAME --period 10000
+process/scripts/dcalib.sh --run RUN_NAME --period 10000 --devices {192..195} --fifos {0..16}
 ```
 
 Required command-line options:
@@ -31,6 +32,22 @@ Required command-line options:
 --run RUN          run name/directory
 --period PERIOD    expected pulser period in coarse clock cycles
 ```
+
+Optional filters:
+
+```text
+--devices all              process all devices, default
+--devices 192 196          process only selected devices
+--devices {192..195}       process an inclusive device range
+--devices "{192..195}"     quoted inclusive ranges are also accepted
+
+--fifos all                process all FIFOs, default
+--fifos 0 4 8              process only selected FIFOs
+--fifos {0..16}            process an inclusive FIFO range
+--fifos "{0..16}"          quoted inclusive ranges are also accepted
+```
+
+The shell expands unquoted brace ranges before the script receives them. Quoted brace ranges are expanded by the script itself.
 
 For each input file like:
 
