@@ -3,6 +3,7 @@
 #include <TFile.h>
 #include <TH1D.h>
 #include <TH2D.h>
+#include <TMinuit.h>
 
 #include <algorithm>
 #include <cmath>
@@ -20,6 +21,11 @@ constexpr int reference_channel = 0;
 struct frame_info_t {
   bool have[2][nchannels] = {};
   double time[2][nchannels] = {};
+};
+
+struct fit_event_t {
+  std::vector<int> channel[2];
+  std::vector<double> time[2];
 };
 
 int timing_detector(const hit_t &hit)
@@ -96,6 +102,212 @@ bool selected_channels(const frame_info_t &frame,
   return true;
 }
 
+
+const std::vector<fit_event_t> *g_min_events = nullptr;
+int g_min_channels = 16;
+double g_outlier_window = 2.0;
+
+int par_to_global(int ipar)
+{
+  return ipar < reference_channel ? ipar : ipar + 1;
+}
+
+void normalize_reference(double *offset)
+{
+  double ref = offset[reference_channel];
+  for (int gch = 0; gch < ntiming; ++gch)
+    offset[gch] -= ref;
+  offset[reference_channel] = 0.;
+}
+
+int accumulate_residual_offsets(const std::vector<frame_info_t> &frames,
+                                double *offset,
+                                std::vector<frame_info_t> *fit_frames = nullptr)
+{
+  double residual_sum[ntiming] = {};
+  int residual_count[ntiming] = {};
+  std::vector<int> selected0;
+  std::vector<int> selected1;
+
+  if (fit_frames)
+    fit_frames->clear();
+
+  int nfit = 0;
+  for (const auto &frame : frames) {
+    double mean0 = 0.;
+    double mean1 = 0.;
+    bool ok0 = selected_channels(frame, 0, offset, g_min_channels,
+                                 g_outlier_window, selected0, mean0);
+    auto channels0 = selected0;
+    bool ok1 = selected_channels(frame, 1, offset, g_min_channels,
+                                 g_outlier_window, selected1, mean1);
+    auto channels1 = selected1;
+    if (!ok0 || !ok1)
+      continue;
+
+    for (auto channel : channels0) {
+      int gch = global_channel(0, channel);
+      residual_sum[gch] += frame.time[0][channel] - mean0;
+      ++residual_count[gch];
+    }
+    for (auto channel : channels1) {
+      int gch = global_channel(1, channel);
+      residual_sum[gch] += frame.time[1][channel] - mean1;
+      ++residual_count[gch];
+    }
+
+    if (fit_frames)
+      fit_frames->push_back(frame);
+    ++nfit;
+  }
+
+  for (int gch = 0; gch < ntiming; ++gch) {
+    if (residual_count[gch] == 0) {
+      std::cerr << "WARNING: timing channel " << gch
+                << " was never selected; offset unchanged" << std::endl;
+      continue;
+    }
+    offset[gch] += residual_sum[gch] / residual_count[gch];
+  }
+
+  normalize_reference(offset);
+  return nfit;
+}
+
+int shift_timing1_to_zero_delta(const std::vector<frame_info_t> &frames,
+                                double *offset)
+{
+  std::vector<int> selected0;
+  std::vector<int> selected1;
+  double delta_sum = 0.;
+  int delta_count = 0;
+
+  for (const auto &frame : frames) {
+    double mean0 = 0.;
+    double mean1 = 0.;
+    bool ok0 = selected_channels(frame, 0, offset, g_min_channels,
+                                 g_outlier_window, selected0, mean0);
+    bool ok1 = selected_channels(frame, 1, offset, g_min_channels,
+                                 g_outlier_window, selected1, mean1);
+    if (!ok0 || !ok1)
+      continue;
+    delta_sum += mean0 - mean1;
+    ++delta_count;
+  }
+
+  if (delta_count > 0) {
+    double timing1_shift = -delta_sum / delta_count;
+    for (int channel = 0; channel < nchannels; ++channel)
+      offset[global_channel(1, channel)] += timing1_shift;
+  }
+
+  normalize_reference(offset);
+  return delta_count;
+}
+
+double timing_objective(const double *offset)
+{
+  double chi2 = 0.;
+  int n = 0;
+
+  for (const auto &event : *g_min_events) {
+    if (event.channel[0].empty() || event.channel[1].empty())
+      continue;
+
+    double mean0 = 0.;
+    double mean1 = 0.;
+    for (size_t i = 0; i < event.channel[0].size(); ++i)
+      mean0 += event.time[0][i] - offset[global_channel(0, event.channel[0][i])];
+    for (size_t i = 0; i < event.channel[1].size(); ++i)
+      mean1 += event.time[1][i] - offset[global_channel(1, event.channel[1][i])];
+    mean0 /= event.channel[0].size();
+    mean1 /= event.channel[1].size();
+
+    double delta = mean0 - mean1;
+    chi2 += delta * delta;
+    ++n;
+  }
+
+  if (n == 0)
+    return 1.e30;
+  return chi2 / n;
+}
+
+void timing_fcn(Int_t &, Double_t *, Double_t &f, Double_t *par, Int_t)
+{
+  double offset[ntiming] = {};
+  offset[reference_channel] = 0.;
+  for (int ipar = 0; ipar < ntiming - 1; ++ipar)
+    offset[par_to_global(ipar)] = par[ipar];
+  f = timing_objective(offset);
+}
+
+
+std::vector<fit_event_t> make_fit_events(const std::vector<frame_info_t> &frames,
+                                         const double *offset)
+{
+  std::vector<fit_event_t> events;
+  events.reserve(frames.size());
+  std::vector<int> selected;
+
+  for (const auto &frame : frames) {
+    fit_event_t event;
+    bool ok = true;
+    for (int det = 0; det < 2; ++det) {
+      double mean = 0.;
+      if (!selected_channels(frame, det, offset, g_min_channels,
+                             g_outlier_window, selected, mean)) {
+        ok = false;
+        break;
+      }
+      for (auto channel : selected) {
+        event.channel[det].push_back(channel);
+        event.time[det].push_back(frame.time[det][channel]);
+      }
+    }
+    if (ok)
+      events.push_back(event);
+  }
+
+  return events;
+}
+
+bool run_full_minimization(const std::vector<fit_event_t> &events,
+                           double *offset,
+                           double step,
+                           int max_calls)
+{
+  g_min_events = &events;
+
+  TMinuit minuit(ntiming - 1);
+  minuit.SetFCN(timing_fcn);
+
+  Double_t arglist[2] = {-1., 0.};
+  Int_t ierflg = 0;
+  minuit.mnexcm("SET PRINT", arglist, 1, ierflg);
+
+  for (int ipar = 0; ipar < ntiming - 1; ++ipar) {
+    int gch = par_to_global(ipar);
+    minuit.DefineParameter(ipar, Form("offset_%02d", gch), offset[gch], step, 0., 0.);
+  }
+
+  arglist[0] = max_calls;
+  arglist[1] = 0.01;
+  minuit.mnexcm("MIGRAD", arglist, 2, ierflg);
+
+  for (int ipar = 0; ipar < ntiming - 1; ++ipar) {
+    int gch = par_to_global(ipar);
+    Double_t value = 0.;
+    Double_t error = 0.;
+    minuit.GetParameter(ipar, value, error);
+    offset[gch] = value;
+  }
+  offset[reference_channel] = 0.;
+  normalize_reference(offset);
+
+  return ierflg == 0;
+}
+
 void write_channel_calibration(const char *filename, const double *offset)
 {
   std::ofstream out(filename);
@@ -136,9 +348,11 @@ void timing_calib(const char *filename,
                   int min_channels = 16,
                   double outlier_window = 2.0,
                   double delta_range = 20.0,
-                  double offset_range = 20.0)
+                  double offset_range = 20.0,
+                  int pre_iterations = 5,
+                  double minimizer_step = 0.01,
+                  int minimizer_calls = 5000)
 {
-  (void)offset_range;
 
   trigger_reader_t reader;
   if (!reader.open(filename))
@@ -181,82 +395,38 @@ void timing_calib(const char *filename,
     }
   }
 
+  g_min_channels = min_channels;
+  g_outlier_window = outlier_window;
+
   double zero_offsets[ntiming] = {};
   double offset[ntiming] = {};
-  double residual_sum[ntiming] = {};
-  int residual_count[ntiming] = {};
-  std::vector<int> selected0;
-  std::vector<int> selected1;
   std::vector<frame_info_t> fit_frames;
   fit_frames.reserve(frames.size());
 
   int nfit = 0;
-  for (const auto &frame : frames) {
-    double mean0 = 0.;
-    double mean1 = 0.;
-    bool ok0 = selected_channels(frame, 0, zero_offsets, min_channels,
-                                 outlier_window, selected0, mean0);
-    auto channels0 = selected0;
-    bool ok1 = selected_channels(frame, 1, zero_offsets, min_channels,
-                                 outlier_window, selected1, mean1);
-    auto channels1 = selected1;
-    if (!ok0 || !ok1)
-      continue;
-
-    for (auto channel : channels0) {
-      int gch = global_channel(0, channel);
-      residual_sum[gch] += frame.time[0][channel] - mean0;
-      ++residual_count[gch];
+  for (int iter = 0; iter < pre_iterations; ++iter) {
+    nfit = accumulate_residual_offsets(frames, offset,
+                                       iter == pre_iterations - 1 ? &fit_frames : nullptr);
+    if (nfit == 0) {
+      std::cerr << "ERROR: no frames survived timing calibration selection" << std::endl;
+      return;
     }
-    for (auto channel : channels1) {
-      int gch = global_channel(1, channel);
-      residual_sum[gch] += frame.time[1][channel] - mean1;
-      ++residual_count[gch];
+    shift_timing1_to_zero_delta(fit_frames.empty() ? frames : fit_frames, offset);
+  }
+
+  if (fit_frames.empty()) {
+    nfit = accumulate_residual_offsets(frames, offset, &fit_frames);
+    if (nfit == 0) {
+      std::cerr << "ERROR: no frames survived timing calibration selection" << std::endl;
+      return;
     }
-
-    fit_frames.push_back(frame);
-    ++nfit;
   }
 
-  if (nfit == 0) {
-    std::cerr << "ERROR: no frames survived timing calibration selection" << std::endl;
-    return;
-  }
-
-  for (int gch = 0; gch < ntiming; ++gch) {
-    if (residual_count[gch] == 0) {
-      std::cerr << "WARNING: timing channel " << gch
-                << " was never selected; offset kept at 0" << std::endl;
-      continue;
-    }
-    offset[gch] = residual_sum[gch] / residual_count[gch];
-  }
-
-  double ref = offset[reference_channel];
-  for (int gch = 0; gch < ntiming; ++gch)
-    offset[gch] -= ref;
-  offset[reference_channel] = 0.;
-
-  double delta_sum = 0.;
-  int delta_count = 0;
-  for (const auto &frame : fit_frames) {
-    double mean0 = 0.;
-    double mean1 = 0.;
-    bool ok0 = selected_channels(frame, 0, offset, min_channels,
-                                 outlier_window, selected0, mean0);
-    bool ok1 = selected_channels(frame, 1, offset, min_channels,
-                                 outlier_window, selected1, mean1);
-    if (!ok0 || !ok1)
-      continue;
-    delta_sum += mean0 - mean1;
-    ++delta_count;
-  }
-
-  if (delta_count > 0) {
-    double timing1_shift = -delta_sum / delta_count;
-    for (int channel = 0; channel < nchannels; ++channel)
-      offset[global_channel(1, channel)] += timing1_shift;
-  }
+  auto fit_events = make_fit_events(fit_frames, offset);
+  g_min_events = &fit_events;
+  double objective_before = timing_objective(offset);
+  bool minuit_ok = run_full_minimization(fit_events, offset, minimizer_step, minimizer_calls);
+  double objective_after = timing_objective(offset);
 
   auto fout = TFile::Open(outfilename, "RECREATE");
   if (!fout || fout->IsZombie()) {
@@ -267,6 +437,7 @@ void timing_calib(const char *filename,
   auto hDeltaBefore = new TH1D("hDeltaBefore", "", 400, -delta_range, delta_range);
   auto hDeltaAfter = new TH1D("hDeltaAfter", "", 400, -delta_range, delta_range);
   auto hOffset = new TH1D("hOffset", "", ntiming, 0., ntiming);
+  auto hOffsetValue = new TH1D("hOffsetValue", "", 400, -offset_range, offset_range);
   auto hDeltaTiming0Before = new TH2D("hDeltaTiming0Before", "", nchannels, 0., nchannels,
                                       400, -delta_range, delta_range);
   auto hDeltaTiming1Before = new TH2D("hDeltaTiming1Before", "", nchannels, 0., nchannels,
@@ -276,8 +447,13 @@ void timing_calib(const char *filename,
   auto hDeltaTiming1After = new TH2D("hDeltaTiming1After", "", nchannels, 0., nchannels,
                                      400, -delta_range, delta_range);
 
-  for (int gch = 0; gch < ntiming; ++gch)
+  for (int gch = 0; gch < ntiming; ++gch) {
     hOffset->SetBinContent(gch + 1, offset[gch]);
+    hOffsetValue->Fill(offset[gch]);
+  }
+
+  std::vector<int> selected0;
+  std::vector<int> selected1;
 
   int ndiag = 0;
   for (const auto &frame : fit_frames) {
@@ -330,6 +506,7 @@ void timing_calib(const char *filename,
   hDeltaBefore->Write();
   hDeltaAfter->Write();
   hOffset->Write();
+  hOffsetValue->Write();
   hDeltaTiming0Before->Write();
   hDeltaTiming1Before->Write();
   hDeltaTiming0After->Write();
@@ -342,6 +519,12 @@ void timing_calib(const char *filename,
   std::cout << "frames with TIMING0 hits:        " << nwith0 << std::endl;
   std::cout << "frames with TIMING1 hits:        " << nwith1 << std::endl;
   std::cout << "frames used for calibration:     " << nfit << std::endl;
+  std::cout << "events used by Minuit:           " << fit_events.size() << std::endl;
+  std::cout << "pre-calibration iterations:      " << pre_iterations << std::endl;
+  std::cout << "Minuit max calls:                " << minimizer_calls << std::endl;
+  std::cout << "Minuit status:                   " << (minuit_ok ? "OK" : "WARNING") << std::endl;
+  std::cout << "objective before Minuit:         " << objective_before << std::endl;
+  std::cout << "objective after Minuit:          " << objective_after << std::endl;
   std::cout << "frames used for diagnostics:     " << ndiag << std::endl;
   std::cout << "reference channel fixed:         fifo=0 column=0 pixel=0 offset=0" << std::endl;
   std::cout << "ROOT output:                     " << outfilename << std::endl;
