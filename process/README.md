@@ -122,9 +122,14 @@ First-hit channel correlations are stored as:
 ```text
 hFirstDetectorChannel0Vs1
 hFirstElectronicsChannel0Vs1
+hFirstPositionDistance
+hDeltaVsFirstPositionDistance
+hFirstPositionDxDy
 ```
 
 `hFirstDetectorChannel0Vs1` uses the `eo2do` detector-channel mapping and is the preferred plot for checking whether the earliest-light position proxy is correlated between TIMING0 and TIMING1. `hFirstElectronicsChannel0Vs1` is kept as a mapping cross-check.
+
+For the position-distance diagnostics, the detector channel is converted to matrix coordinates with `x = detector_channel % 4` and `y = detector_channel / 4`. `hFirstPositionDistance` stores `sqrt((x0 - x1)^2 + (y0 - y1)^2)` between the TIMING0 and TIMING1 first-hit cell centers. `hFirstPositionDxDy` stores the signed displacement `(x0 - x1, y0 - y1)`, and `hDeltaVsFirstPositionDistance` checks whether the timing difference depends on that separation.
 
 The spread-sign check is written as:
 

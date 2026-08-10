@@ -691,6 +691,9 @@ void timing_calib(const char *filename,
   auto hFirstPosition1 = new TH2D("hFirstPosition1", "", 4, 0., 4., 8, 0., 8.);
   auto hFirstDetectorChannel0Vs1 = new TH2D("hFirstDetectorChannel0Vs1", "", nchannels, 0., nchannels, nchannels, 0., nchannels);
   auto hFirstElectronicsChannel0Vs1 = new TH2D("hFirstElectronicsChannel0Vs1", "", nchannels, 0., nchannels, nchannels, 0., nchannels);
+  auto hFirstPositionDistance = new TH1D("hFirstPositionDistance", "", 100, 0., 9.);
+  auto hDeltaVsFirstPositionDistance = new TH2D("hDeltaVsFirstPositionDistance", "", 100, 0., 9., 400, -delta_range, delta_range);
+  auto hFirstPositionDxDy = new TH2D("hFirstPositionDxDy", "", 15, -7.5, 7.5, 15, -7.5, 7.5);
   auto hTiming0SpreadBefore = new TH1D("hTiming0SpreadBefore", "", 400, 0., delta_range);
   auto hTiming1SpreadBefore = new TH1D("hTiming1SpreadBefore", "", 400, 0., delta_range);
   auto hTiming0SpreadAfter = new TH1D("hTiming0SpreadAfter", "", 400, 0., delta_range);
@@ -814,8 +817,15 @@ void timing_calib(const char *filename,
       hDeltaVsFirstY1->Fill(shape.first_y1, shape.delta);
       hFirstPosition0->Fill(shape.first_x0, shape.first_y0);
       hFirstPosition1->Fill(shape.first_x1, shape.first_y1);
-      if (first_detector0 >= 0 && first_detector1 >= 0)
+      if (first_detector0 >= 0 && first_detector1 >= 0) {
         hFirstDetectorChannel0Vs1->Fill(first_detector0, first_detector1);
+        double dx = shape.first_x0 - shape.first_x1;
+        double dy = shape.first_y0 - shape.first_y1;
+        double distance = std::sqrt(dx * dx + dy * dy);
+        hFirstPositionDistance->Fill(distance);
+        hDeltaVsFirstPositionDistance->Fill(distance, shape.delta);
+        hFirstPositionDxDy->Fill(dx, dy);
+      }
       if (first0 >= 0 && first1 >= 0)
         hFirstElectronicsChannel0Vs1->Fill(first0, first1);
       ++ndiag;
@@ -889,6 +899,9 @@ void timing_calib(const char *filename,
   hFirstPosition1->Write();
   hFirstDetectorChannel0Vs1->Write();
   hFirstElectronicsChannel0Vs1->Write();
+  hFirstPositionDistance->Write();
+  hDeltaVsFirstPositionDistance->Write();
+  hFirstPositionDxDy->Write();
   hTiming0SpreadBefore->Write();
   hTiming1SpreadBefore->Write();
   hTiming0SpreadAfter->Write();
