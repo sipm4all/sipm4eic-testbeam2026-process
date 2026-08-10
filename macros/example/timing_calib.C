@@ -340,6 +340,24 @@ bool run_full_minimization(const std::vector<fit_event_t> &events,
 }
 
 
+double first_selected_time(const frame_info_t &frame,
+                           int det,
+                           const double *offset,
+                           const std::vector<int> &channels)
+{
+  double first = 0.;
+  bool found = false;
+  for (auto channel : channels) {
+    int gch = global_channel(det, channel);
+    double time = frame.time[det][channel] - offset[gch];
+    if (!found || time < first) {
+      first = time;
+      found = true;
+    }
+  }
+  return first;
+}
+
 bool event_shape(const frame_info_t &frame,
                  int det,
                  const double *offset,
@@ -624,6 +642,8 @@ void timing_calib(const char *filename,
 
   auto hDeltaBefore = new TH1D("hDeltaBefore", "", 400, -delta_range, delta_range);
   auto hDeltaAfter = new TH1D("hDeltaAfter", "", 400, -delta_range, delta_range);
+  auto hDeltaFirstBefore = new TH1D("hDeltaFirstBefore", "", 400, -delta_range, delta_range);
+  auto hDeltaFirstAfter = new TH1D("hDeltaFirstAfter", "", 400, -delta_range, delta_range);
   auto hDeltaShapeCorrected = new TH1D("hDeltaShapeCorrected", "", 400, -delta_range, delta_range);
   auto hDeltaVsSpread0 = new TH2D("hDeltaVsSpread0", "", 200, 0., delta_range, 400, -delta_range, delta_range);
   auto hDeltaVsSpread1 = new TH2D("hDeltaVsSpread1", "", 200, 0., delta_range, 400, -delta_range, delta_range);
@@ -696,6 +716,8 @@ void timing_calib(const char *filename,
 
     if (ok0_before && ok1_before) {
       hDeltaBefore->Fill(mean0_before - mean1_before);
+      hDeltaFirstBefore->Fill(first_selected_time(frame, 0, zero_offsets, channels0_before) -
+                              first_selected_time(frame, 1, zero_offsets, channels1_before));
       double spread0 = selected_spread(frame, 0, zero_offsets, channels0_before, mean0_before);
       double spread1 = selected_spread(frame, 1, zero_offsets, channels1_before, mean1_before);
       hTiming0SpreadBefore->Fill(spread0);
@@ -705,6 +727,8 @@ void timing_calib(const char *filename,
     }
     if (ok0_after && ok1_after) {
       hDeltaAfter->Fill(mean0_after - mean1_after);
+      hDeltaFirstAfter->Fill(first_selected_time(frame, 0, offset, channels0_after) -
+                             first_selected_time(frame, 1, offset, channels1_after));
       double spread0 = selected_spread(frame, 0, offset, channels0_after, mean0_after);
       double spread1 = selected_spread(frame, 1, offset, channels1_after, mean1_after);
       hTiming0SpreadAfter->Fill(spread0);
@@ -768,10 +792,14 @@ void timing_calib(const char *filename,
   double expected_delta_after = hExpectedDeltaFromSpreadAfter->GetMean();
   double observed_delta_rms_before = hDeltaBefore->GetRMS();
   double observed_delta_rms_after = hDeltaAfter->GetRMS();
+  double observed_delta_first_rms_before = hDeltaFirstBefore->GetRMS();
+  double observed_delta_first_rms_after = hDeltaFirstAfter->GetRMS();
   double shape_corrected_delta_rms = hDeltaShapeCorrected->GetRMS();
 
   hDeltaBefore->Write();
   hDeltaAfter->Write();
+  hDeltaFirstBefore->Write();
+  hDeltaFirstAfter->Write();
   hDeltaShapeCorrected->Write();
   hDeltaVsSpread0->Write();
   hDeltaVsSpread1->Write();
@@ -819,6 +847,8 @@ void timing_calib(const char *filename,
             << " / " << expected_delta_after << std::endl;
   std::cout << "observed delta RMS before/after: " << observed_delta_rms_before
             << " / " << observed_delta_rms_after << std::endl;
+  std::cout << "first-hit delta RMS before/after: " << observed_delta_first_rms_before
+            << " / " << observed_delta_first_rms_after << std::endl;
   std::cout << "shape-corrected delta RMS:       " << shape_corrected_delta_rms << std::endl;
   std::cout << "frames used for diagnostics:     " << ndiag << std::endl;
   std::cout << "reference channel fixed:         fifo=0 column=0 pixel=0 offset=0" << std::endl;

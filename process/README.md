@@ -96,3 +96,12 @@ eo2do[32] = {22,20,18,16,24,26,28,30,25,27,29,31,23,21,19,17,
 ```
 
 The detector channel is interpreted as a 4x8 matrix with `x = detector_channel % 4` and `y = detector_channel / 4`. The diagnostic variables include spread, x/y time gradients, and left/right asymmetry in this detector coordinate system.
+
+The diagnostic ROOT output also includes first-hit timing comparisons:
+
+```text
+hDeltaFirstBefore
+hDeltaFirstAfter
+```
+
+For these histograms, each scintillator time is the earliest selected channel time in that frame, rather than the robust average of selected channels. The same outlier-selected channel set is used, so this compares the timing estimator itself rather than changing event selection.
