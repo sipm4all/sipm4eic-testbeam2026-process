@@ -105,3 +105,14 @@ hDeltaFirstAfter
 ```
 
 For these histograms, each scintillator time is the earliest selected channel time in that frame, rather than the robust average of selected channels. The same outlier-selected channel set is used, so this compares the timing estimator itself rather than changing event selection.
+
+First-hit detector position diagnostics are also written:
+
+```text
+hDeltaVsFirstX0 / hDeltaVsFirstX1
+hDeltaVsFirstY0 / hDeltaVsFirstY1
+hFirstPosition0 / hFirstPosition1
+hDeltaShapePositionCorrected
+```
+
+The first hit is interpreted as a beam-position proxy inside the 4x8 detector matrix. `hDeltaShapePositionCorrected` extends the diagnostic shape correction with the first-hit detector `(x,y)` coordinates for both scintillators.

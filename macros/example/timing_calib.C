@@ -41,6 +41,10 @@ struct shape_event_t {
   double left_right1 = 0.;
   double even_odd0 = 0.;
   double even_odd1 = 0.;
+  double first_x0 = 0.;
+  double first_x1 = 0.;
+  double first_y0 = 0.;
+  double first_y1 = 0.;
 };
 
 int timing_detector(const hit_t &hit)
@@ -340,6 +344,25 @@ bool run_full_minimization(const std::vector<fit_event_t> &events,
 }
 
 
+
+int first_selected_channel(const frame_info_t &frame,
+                           int det,
+                           const double *offset,
+                           const std::vector<int> &channels)
+{
+  int first_channel = -1;
+  double first_time = 0.;
+  for (auto channel : channels) {
+    int gch = global_channel(det, channel);
+    double time = frame.time[det][channel] - offset[gch];
+    if (first_channel < 0 || time < first_time) {
+      first_channel = channel;
+      first_time = time;
+    }
+  }
+  return first_channel;
+}
+
 double first_selected_time(const frame_info_t &frame,
                            int det,
                            const double *offset,
@@ -448,6 +471,10 @@ double shape_value(const shape_event_t &event, int index)
   case 8: return event.left_right1;
   case 9: return event.even_odd0;
   case 10: return event.even_odd1;
+  case 11: return event.first_x0;
+  case 12: return event.first_x1;
+  case 13: return event.first_y0;
+  case 14: return event.first_y1;
   default: return 0.;
   }
 }
@@ -645,6 +672,7 @@ void timing_calib(const char *filename,
   auto hDeltaFirstBefore = new TH1D("hDeltaFirstBefore", "", 400, -delta_range, delta_range);
   auto hDeltaFirstAfter = new TH1D("hDeltaFirstAfter", "", 400, -delta_range, delta_range);
   auto hDeltaShapeCorrected = new TH1D("hDeltaShapeCorrected", "", 400, -delta_range, delta_range);
+  auto hDeltaShapePositionCorrected = new TH1D("hDeltaShapePositionCorrected", "", 400, -delta_range, delta_range);
   auto hDeltaVsSpread0 = new TH2D("hDeltaVsSpread0", "", 200, 0., delta_range, 400, -delta_range, delta_range);
   auto hDeltaVsSpread1 = new TH2D("hDeltaVsSpread1", "", 200, 0., delta_range, 400, -delta_range, delta_range);
   auto hDeltaVsSlopeX0 = new TH2D("hDeltaVsSlopeX0", "", 200, -0.2, 0.2, 400, -delta_range, delta_range);
@@ -653,6 +681,12 @@ void timing_calib(const char *filename,
   auto hDeltaVsSlopeY1 = new TH2D("hDeltaVsSlopeY1", "", 200, -0.2, 0.2, 400, -delta_range, delta_range);
   auto hDeltaVsLeftRight0 = new TH2D("hDeltaVsLeftRight0", "", 200, -delta_range, delta_range, 400, -delta_range, delta_range);
   auto hDeltaVsLeftRight1 = new TH2D("hDeltaVsLeftRight1", "", 200, -delta_range, delta_range, 400, -delta_range, delta_range);
+  auto hDeltaVsFirstX0 = new TH2D("hDeltaVsFirstX0", "", 4, 0., 4., 400, -delta_range, delta_range);
+  auto hDeltaVsFirstX1 = new TH2D("hDeltaVsFirstX1", "", 4, 0., 4., 400, -delta_range, delta_range);
+  auto hDeltaVsFirstY0 = new TH2D("hDeltaVsFirstY0", "", 8, 0., 8., 400, -delta_range, delta_range);
+  auto hDeltaVsFirstY1 = new TH2D("hDeltaVsFirstY1", "", 8, 0., 8., 400, -delta_range, delta_range);
+  auto hFirstPosition0 = new TH2D("hFirstPosition0", "", 4, 0., 4., 8, 0., 8.);
+  auto hFirstPosition1 = new TH2D("hFirstPosition1", "", 4, 0., 4., 8, 0., 8.);
   auto hTiming0SpreadBefore = new TH1D("hTiming0SpreadBefore", "", 400, 0., delta_range);
   auto hTiming1SpreadBefore = new TH1D("hTiming1SpreadBefore", "", 400, 0., delta_range);
   auto hTiming0SpreadAfter = new TH1D("hTiming0SpreadAfter", "", 400, 0., delta_range);
@@ -744,6 +778,18 @@ void timing_calib(const char *filename,
                   shape.spread0, shape.slope_x0, shape.slope_y0, shape.left_right0, shape.even_odd0);
       event_shape(frame, 1, offset, channels1_after, mean1_after,
                   shape.spread1, shape.slope_x1, shape.slope_y1, shape.left_right1, shape.even_odd1);
+      int first0 = first_selected_channel(frame, 0, offset, channels0_after);
+      int first1 = first_selected_channel(frame, 1, offset, channels1_after);
+      if (first0 >= 0) {
+        int detector_channel = eo2do[first0];
+        shape.first_x0 = detector_channel % 4;
+        shape.first_y0 = detector_channel / 4;
+      }
+      if (first1 >= 0) {
+        int detector_channel = eo2do[first1];
+        shape.first_x1 = detector_channel % 4;
+        shape.first_y1 = detector_channel / 4;
+      }
       shape_events.push_back(shape);
       hDeltaVsSpread0->Fill(shape.spread0, shape.delta);
       hDeltaVsSpread1->Fill(shape.spread1, shape.delta);
@@ -753,6 +799,12 @@ void timing_calib(const char *filename,
       hDeltaVsSlopeY1->Fill(shape.slope_y1, shape.delta);
       hDeltaVsLeftRight0->Fill(shape.left_right0, shape.delta);
       hDeltaVsLeftRight1->Fill(shape.left_right1, shape.delta);
+      hDeltaVsFirstX0->Fill(shape.first_x0, shape.delta);
+      hDeltaVsFirstX1->Fill(shape.first_x1, shape.delta);
+      hDeltaVsFirstY0->Fill(shape.first_y0, shape.delta);
+      hDeltaVsFirstY1->Fill(shape.first_y1, shape.delta);
+      hFirstPosition0->Fill(shape.first_x0, shape.first_y0);
+      hFirstPosition1->Fill(shape.first_x1, shape.first_y1);
       ++ndiag;
 
       for (auto channel : channels0_after) {
@@ -781,8 +833,11 @@ void timing_calib(const char *filename,
   }
 
   auto shape_beta = fit_shape_model(shape_events, 11);
-  for (const auto &shape : shape_events)
+  auto shape_position_beta = fit_shape_model(shape_events, 15);
+  for (const auto &shape : shape_events) {
     hDeltaShapeCorrected->Fill(shape.delta - eval_shape_model(shape, shape_beta));
+    hDeltaShapePositionCorrected->Fill(shape.delta - eval_shape_model(shape, shape_position_beta));
+  }
 
   double timing0_spread_before = hTiming0SpreadBefore->GetMean();
   double timing0_spread_after = hTiming0SpreadAfter->GetMean();
@@ -795,12 +850,14 @@ void timing_calib(const char *filename,
   double observed_delta_first_rms_before = hDeltaFirstBefore->GetRMS();
   double observed_delta_first_rms_after = hDeltaFirstAfter->GetRMS();
   double shape_corrected_delta_rms = hDeltaShapeCorrected->GetRMS();
+  double shape_position_corrected_delta_rms = hDeltaShapePositionCorrected->GetRMS();
 
   hDeltaBefore->Write();
   hDeltaAfter->Write();
   hDeltaFirstBefore->Write();
   hDeltaFirstAfter->Write();
   hDeltaShapeCorrected->Write();
+  hDeltaShapePositionCorrected->Write();
   hDeltaVsSpread0->Write();
   hDeltaVsSpread1->Write();
   hDeltaVsSlopeX0->Write();
@@ -809,6 +866,12 @@ void timing_calib(const char *filename,
   hDeltaVsSlopeY1->Write();
   hDeltaVsLeftRight0->Write();
   hDeltaVsLeftRight1->Write();
+  hDeltaVsFirstX0->Write();
+  hDeltaVsFirstX1->Write();
+  hDeltaVsFirstY0->Write();
+  hDeltaVsFirstY1->Write();
+  hFirstPosition0->Write();
+  hFirstPosition1->Write();
   hTiming0SpreadBefore->Write();
   hTiming1SpreadBefore->Write();
   hTiming0SpreadAfter->Write();
@@ -850,6 +913,7 @@ void timing_calib(const char *filename,
   std::cout << "first-hit delta RMS before/after: " << observed_delta_first_rms_before
             << " / " << observed_delta_first_rms_after << std::endl;
   std::cout << "shape-corrected delta RMS:       " << shape_corrected_delta_rms << std::endl;
+  std::cout << "shape+first-position delta RMS:  " << shape_position_corrected_delta_rms << std::endl;
   std::cout << "frames used for diagnostics:     " << ndiag << std::endl;
   std::cout << "reference channel fixed:         fifo=0 column=0 pixel=0 offset=0" << std::endl;
   std::cout << "ROOT output:                     " << outfilename << std::endl;
