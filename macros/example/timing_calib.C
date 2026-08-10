@@ -585,12 +585,20 @@ void timing_calib(const char *filename,
 
   std::vector<frame_info_t> frames;
   int nframes = 0;
+  int nwith_trigger = 0;
+  int nwithout_trigger = 0;
   int nwith0 = 0;
   int nwith1 = 0;
 
   while (reader.next_spill()) {
     while (reader.next_frame()) {
       ++nframes;
+      if (reader.trigger_hits().empty()) {
+        ++nwithout_trigger;
+        continue;
+      }
+      ++nwith_trigger;
+
       frame_info_t frame;
 
       for (const auto &hit : reader.timing_hits()) {
@@ -937,6 +945,8 @@ void timing_calib(const char *filename,
   write_channel_calibration(calibfilename, offset);
 
   std::cout << "frames processed:               " << nframes << std::endl;
+  std::cout << "frames with trigger hits:        " << nwith_trigger << std::endl;
+  std::cout << "frames without trigger hits:     " << nwithout_trigger << std::endl;
   std::cout << "frames with TIMING0 hits:        " << nwith0 << std::endl;
   std::cout << "frames with TIMING1 hits:        " << nwith1 << std::endl;
   std::cout << "frames retained:                 " << frames.size() << std::endl;

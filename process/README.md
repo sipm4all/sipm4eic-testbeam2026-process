@@ -29,7 +29,7 @@ The key design point is that low-level timing calibration happens once, early, i
 
 ## Timing-Channel Calibration
 
-`timing_calib` is a compiled version of the timing-channel calibration workflow. It reads triggered-frame ROOT files, uses only the `timing` hit collection, and derives 64 channel offsets for the two timing scintillators:
+`timing_calib` is a compiled version of the timing-channel calibration workflow. It reads triggered-frame ROOT files, requires each used frame to contain at least one `trigger` hit, uses only the `timing` hit collection, and derives 64 channel offsets for the two timing scintillators:
 
 ```text
 TIMING0: device 200, FIFOs 0..3

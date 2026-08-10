@@ -86,6 +86,8 @@ The macro uses the calibrated `hit.time` value persisted in the triggered frame 
 
 ## timing_calib.C
 
+Only frames containing at least one `trigger` hit are used. Frames without a trigger hit are counted and skipped before timing-channel selection.
+
 Builds timing-channel calibration offsets from triggered timing data. It reads the `timing` hit collection through `trigger_reader.h` and fits 64 channel offsets:
 
 ```text
