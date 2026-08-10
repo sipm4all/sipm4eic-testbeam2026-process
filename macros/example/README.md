@@ -209,3 +209,12 @@ hDeltaShapePositionCorrected
 ```
 
 The first hit is interpreted as a beam-position proxy inside the 4x8 detector matrix. `hDeltaShapePositionCorrected` extends the diagnostic shape correction with the first-hit detector `(x,y)` coordinates for both scintillators.
+
+First-hit channel correlations are stored as:
+
+```text
+hFirstDetectorChannel0Vs1
+hFirstElectronicsChannel0Vs1
+```
+
+`hFirstDetectorChannel0Vs1` uses the `eo2do` detector-channel mapping and is the preferred plot for checking whether the earliest-light position proxy is correlated between TIMING0 and TIMING1. `hFirstElectronicsChannel0Vs1` is kept as a mapping cross-check.

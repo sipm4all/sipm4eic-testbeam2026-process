@@ -687,6 +687,8 @@ void timing_calib(const char *filename,
   auto hDeltaVsFirstY1 = new TH2D("hDeltaVsFirstY1", "", 8, 0., 8., 400, -delta_range, delta_range);
   auto hFirstPosition0 = new TH2D("hFirstPosition0", "", 4, 0., 4., 8, 0., 8.);
   auto hFirstPosition1 = new TH2D("hFirstPosition1", "", 4, 0., 4., 8, 0., 8.);
+  auto hFirstDetectorChannel0Vs1 = new TH2D("hFirstDetectorChannel0Vs1", "", nchannels, 0., nchannels, nchannels, 0., nchannels);
+  auto hFirstElectronicsChannel0Vs1 = new TH2D("hFirstElectronicsChannel0Vs1", "", nchannels, 0., nchannels, nchannels, 0., nchannels);
   auto hTiming0SpreadBefore = new TH1D("hTiming0SpreadBefore", "", 400, 0., delta_range);
   auto hTiming1SpreadBefore = new TH1D("hTiming1SpreadBefore", "", 400, 0., delta_range);
   auto hTiming0SpreadAfter = new TH1D("hTiming0SpreadAfter", "", 400, 0., delta_range);
@@ -780,15 +782,17 @@ void timing_calib(const char *filename,
                   shape.spread1, shape.slope_x1, shape.slope_y1, shape.left_right1, shape.even_odd1);
       int first0 = first_selected_channel(frame, 0, offset, channels0_after);
       int first1 = first_selected_channel(frame, 1, offset, channels1_after);
+      int first_detector0 = -1;
+      int first_detector1 = -1;
       if (first0 >= 0) {
-        int detector_channel = eo2do[first0];
-        shape.first_x0 = detector_channel % 4;
-        shape.first_y0 = detector_channel / 4;
+        first_detector0 = eo2do[first0];
+        shape.first_x0 = first_detector0 % 4;
+        shape.first_y0 = first_detector0 / 4;
       }
       if (first1 >= 0) {
-        int detector_channel = eo2do[first1];
-        shape.first_x1 = detector_channel % 4;
-        shape.first_y1 = detector_channel / 4;
+        first_detector1 = eo2do[first1];
+        shape.first_x1 = first_detector1 % 4;
+        shape.first_y1 = first_detector1 / 4;
       }
       shape_events.push_back(shape);
       hDeltaVsSpread0->Fill(shape.spread0, shape.delta);
@@ -805,6 +809,10 @@ void timing_calib(const char *filename,
       hDeltaVsFirstY1->Fill(shape.first_y1, shape.delta);
       hFirstPosition0->Fill(shape.first_x0, shape.first_y0);
       hFirstPosition1->Fill(shape.first_x1, shape.first_y1);
+      if (first_detector0 >= 0 && first_detector1 >= 0)
+        hFirstDetectorChannel0Vs1->Fill(first_detector0, first_detector1);
+      if (first0 >= 0 && first1 >= 0)
+        hFirstElectronicsChannel0Vs1->Fill(first0, first1);
       ++ndiag;
 
       for (auto channel : channels0_after) {
@@ -872,6 +880,8 @@ void timing_calib(const char *filename,
   hDeltaVsFirstY1->Write();
   hFirstPosition0->Write();
   hFirstPosition1->Write();
+  hFirstDetectorChannel0Vs1->Write();
+  hFirstElectronicsChannel0Vs1->Write();
   hTiming0SpreadBefore->Write();
   hTiming1SpreadBefore->Write();
   hTiming0SpreadAfter->Write();
