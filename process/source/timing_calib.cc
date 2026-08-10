@@ -676,6 +676,8 @@ bool timing_calib(const std::string &filename,
   auto hDeltaShapePositionCorrected = new TH1D("hDeltaShapePositionCorrected", "", 400, -delta_range, delta_range);
   auto hDeltaVsSpread0 = new TH2D("hDeltaVsSpread0", "", 200, 0., delta_range, 400, -delta_range, delta_range);
   auto hDeltaVsSpread1 = new TH2D("hDeltaVsSpread1", "", 200, 0., delta_range, 400, -delta_range, delta_range);
+  auto hTiming0RelativeVsSpread0 = new TH2D("hTiming0RelativeVsSpread0", "", 200, 0., delta_range, 400, -delta_range, delta_range);
+  auto hTiming1RelativeVsSpread1 = new TH2D("hTiming1RelativeVsSpread1", "", 200, 0., delta_range, 400, -delta_range, delta_range);
   auto hDeltaVsSlopeX0 = new TH2D("hDeltaVsSlopeX0", "", 200, -0.2, 0.2, 400, -delta_range, delta_range);
   auto hDeltaVsSlopeX1 = new TH2D("hDeltaVsSlopeX1", "", 200, -0.2, 0.2, 400, -delta_range, delta_range);
   auto hDeltaVsSlopeY0 = new TH2D("hDeltaVsSlopeY0", "", 200, -0.2, 0.2, 400, -delta_range, delta_range);
@@ -798,6 +800,9 @@ bool timing_calib(const std::string &filename,
       shape_events.push_back(shape);
       hDeltaVsSpread0->Fill(shape.spread0, shape.delta);
       hDeltaVsSpread1->Fill(shape.spread1, shape.delta);
+      double event_reference = 0.5 * (mean0_after + mean1_after);
+      hTiming0RelativeVsSpread0->Fill(shape.spread0, mean0_after - event_reference);
+      hTiming1RelativeVsSpread1->Fill(shape.spread1, mean1_after - event_reference);
       hDeltaVsSlopeX0->Fill(shape.slope_x0, shape.delta);
       hDeltaVsSlopeX1->Fill(shape.slope_x1, shape.delta);
       hDeltaVsSlopeY0->Fill(shape.slope_y0, shape.delta);
@@ -869,6 +874,8 @@ bool timing_calib(const std::string &filename,
   hDeltaShapePositionCorrected->Write();
   hDeltaVsSpread0->Write();
   hDeltaVsSpread1->Write();
+  hTiming0RelativeVsSpread0->Write();
+  hTiming1RelativeVsSpread1->Write();
   hDeltaVsSlopeX0->Write();
   hDeltaVsSlopeX1->Write();
   hDeltaVsSlopeY0->Write();

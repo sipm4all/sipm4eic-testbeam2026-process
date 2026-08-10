@@ -218,3 +218,12 @@ hFirstElectronicsChannel0Vs1
 ```
 
 `hFirstDetectorChannel0Vs1` uses the `eo2do` detector-channel mapping and is the preferred plot for checking whether the earliest-light position proxy is correlated between TIMING0 and TIMING1. `hFirstElectronicsChannel0Vs1` is kept as a mapping cross-check.
+
+The spread-sign check is written as:
+
+```text
+hTiming0RelativeVsSpread0
+hTiming1RelativeVsSpread1
+```
+
+Here the event reference is `0.5 * (timing0_mean + timing1_mean)`. The plotted values are `timing0_mean - reference` and `timing1_mean - reference` versus the corresponding scintillator spread. This tests directly whether each scintillator becomes later when its own internal channel-time spread grows.
