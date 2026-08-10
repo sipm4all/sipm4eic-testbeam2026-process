@@ -695,6 +695,17 @@ bool timing_calib(const std::string &filename,
   auto hFirstPositionDistance = new TH1D("hFirstPositionDistance", "", 100, 0., 9.);
   auto hDeltaVsFirstPositionDistance = new TH2D("hDeltaVsFirstPositionDistance", "", 100, 0., 9., 400, -delta_range, delta_range);
   auto hFirstPositionDxDy = new TH2D("hFirstPositionDxDy", "", 15, -7.5, 7.5, 15, -7.5, 7.5);
+  auto hDeltaSameFirstDetectorChannel = new TH2D("hDeltaSameFirstDetectorChannel", "", nchannels, 0., nchannels,
+                                                400, -delta_range, delta_range);
+  std::array<TH1D *, nchannels> hDeltaSameFirstDetectorChannel1D{};
+  for (int channel = 0; channel < nchannels; ++channel) {
+    std::ostringstream name;
+    name << "hDeltaSameFirstDetectorChannel";
+    if (channel < 10)
+      name << "0";
+    name << channel;
+    hDeltaSameFirstDetectorChannel1D[channel] = new TH1D(name.str().c_str(), "", 400, -delta_range, delta_range);
+  }
   auto hTiming0SpreadBefore = new TH1D("hTiming0SpreadBefore", "", 400, 0., delta_range);
   auto hTiming1SpreadBefore = new TH1D("hTiming1SpreadBefore", "", 400, 0., delta_range);
   auto hTiming0SpreadAfter = new TH1D("hTiming0SpreadAfter", "", 400, 0., delta_range);
@@ -826,6 +837,10 @@ bool timing_calib(const std::string &filename,
         hFirstPositionDistance->Fill(distance);
         hDeltaVsFirstPositionDistance->Fill(distance, shape.delta);
         hFirstPositionDxDy->Fill(dx, dy);
+        if (first_detector0 == first_detector1) {
+          hDeltaSameFirstDetectorChannel->Fill(first_detector0, shape.delta);
+          hDeltaSameFirstDetectorChannel1D[first_detector0]->Fill(shape.delta);
+        }
       }
       if (first0 >= 0 && first1 >= 0)
         hFirstElectronicsChannel0Vs1->Fill(first0, first1);
@@ -903,6 +918,9 @@ bool timing_calib(const std::string &filename,
   hFirstPositionDistance->Write();
   hDeltaVsFirstPositionDistance->Write();
   hFirstPositionDxDy->Write();
+  hDeltaSameFirstDetectorChannel->Write();
+  for (auto hist : hDeltaSameFirstDetectorChannel1D)
+    hist->Write();
   hTiming0SpreadBefore->Write();
   hTiming1SpreadBefore->Write();
   hTiming0SpreadAfter->Write();

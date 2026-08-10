@@ -218,11 +218,15 @@ hFirstElectronicsChannel0Vs1
 hFirstPositionDistance
 hDeltaVsFirstPositionDistance
 hFirstPositionDxDy
+hDeltaSameFirstDetectorChannel
+hDeltaSameFirstDetectorChannel00 ... hDeltaSameFirstDetectorChannel31
 ```
 
 `hFirstDetectorChannel0Vs1` uses the `eo2do` detector-channel mapping and is the preferred plot for checking whether the earliest-light position proxy is correlated between TIMING0 and TIMING1. `hFirstElectronicsChannel0Vs1` is kept as a mapping cross-check.
 
 For the position-distance diagnostics, the detector channel is converted to matrix coordinates with `x = detector_channel % 4` and `y = detector_channel / 4`. `hFirstPositionDistance` stores `sqrt((x0 - x1)^2 + (y0 - y1)^2)` between the TIMING0 and TIMING1 first-hit cell centers. `hFirstPositionDxDy` stores the signed displacement `(x0 - x1, y0 - y1)`, and `hDeltaVsFirstPositionDistance` checks whether the timing difference depends on that separation.
+
+`hDeltaSameFirstDetectorChannel` and the 32 per-channel histograms `hDeltaSameFirstDetectorChannel00` through `hDeltaSameFirstDetectorChannel31` use only events where TIMING0 and TIMING1 have the same first-hit detector channel. These plots isolate the residual `timing0_mean - timing1_mean` separately for each matched detector cell.
 
 The spread-sign check is written as:
 
