@@ -113,6 +113,33 @@ Repeated section headers from input fragments are collapsed, so many per-FIFO `d
 
 The script does not resolve duplicate calibration rows. If two fragments contain the same concrete calibration address, `calibrator` will later reject the merged file as ambiguous/duplicate.
 
+
+## complete_tdc_calibration.py
+
+`complete_tdc_calibration.py` inspects a merged `[TDC]` calibration file, reports missing concrete TDC rows, and writes a calibration file with global wildcard fallback rows:
+
+```bash
+process/scripts/complete_tdc_calibration.py \
+  --input tdc.cherenkov.conf \
+  --output tdc.cherenkov.with_global_fallback.conf \
+  --report tdc.cherenkov.global_fallback.md
+```
+
+The expected geometry is derived from the devices and FIFOs found in the input unless `--devices` or `--fifos` are specified explicitly. Valid columns for each FIFO follow the DAQ mapping:
+
+```text
+column = 2 * (fifo % 4)
+column = 2 * (fifo % 4) + 1
+```
+
+The script does not fill missing concrete rows. Instead it appends a separate `[TDC]` section containing one low-specificity wildcard row per TDC:
+
+```text
+* * * * tdc off iif
+```
+
+The fallback values are global medians computed from measured rows with the same TDC index. Concrete measured rows remain more specific and therefore take precedence in `calibrator`.
+
 ## process.sh
 
 `process.sh` is the full processing workflow. It currently performs:
