@@ -58,6 +58,26 @@ def parse_int_list(expr):
     return sorted(set(out))
 
 
+def parse_expect(expr):
+    if ':' not in expr:
+        raise ValueError(f"expected DEVICES:FIFOS, got {expr}")
+    devices_expr, fifos_expr = expr.split(':', 1)
+    devices = parse_int_list(devices_expr)
+    fifos = parse_int_list(fifos_expr)
+    if not devices:
+        raise ValueError(f"empty device list in {expr}")
+    if not fifos:
+        raise ValueError(f"empty FIFO list in {expr}")
+    return devices, fifos
+
+
+def expected_keys_from_campaigns(campaigns):
+    keys = []
+    for devices, fifos in campaigns:
+        keys.extend(expected_keys(devices, fifos))
+    return sorted(set(keys))
+
+
 def median(values):
     return statistics.median(values)
 
@@ -380,7 +400,7 @@ def pattern_comparison(rows, expected):
     return out
 
 
-def write_report(filename, input_file, output_file, rows, expected, fallback, single_global):
+def write_report(filename, input_file, output_file, rows, expected, fallback, single_global, expect_exprs=None):
     expected_set = set(expected)
     measured_expected = [k for k in rows if k in expected_set]
     missing = sorted(k for k in expected if k not in rows)
@@ -398,6 +418,13 @@ def write_report(filename, input_file, output_file, rows, expected, fallback, si
         f.write("- single global fallback rows written: 1\n")
         f.write(f"- rows outside expected geometry: {len(extra)}\n\n")
         f.write("Missing concrete rows are not filled explicitly. Instead, the output file appends one low-specificity wildcard row in a separate `[TDC]` section. Existing concrete rows remain more specific and therefore take precedence in `calibrator`.\n\n")
+
+        if expect_exprs:
+            f.write("## Expected Calibration Campaigns\n\n")
+            f.write("These expectations define the concrete TDC rows used for coverage and missing-row accounting. They should match the dcalib merge campaigns.\n\n")
+            for expr in expect_exprs:
+                f.write(f"- `{expr}`\n")
+            f.write("\n")
 
         f.write("## Single Global Fallback Row\n\n")
         f.write("| fallback | off | iif | source rows | iif rms |\n")
@@ -474,23 +501,34 @@ def main():
     ap.add_argument('--input', '-i', required=True, help='input calibration .conf file')
     ap.add_argument('--output', '-o', required=True, help='completed output calibration .conf file')
     ap.add_argument('--report', '-r', required=True, help='markdown report output')
-    ap.add_argument('--devices', help='comma list/ranges of devices, e.g. 192..199. Default: devices observed in input')
-    ap.add_argument('--fifos', help='comma list/ranges of FIFOs, e.g. 0..31. Default: FIFOs observed in input')
+    ap.add_argument('--expect', action='append', default=[],
+                    help='expected calibration campaign as DEVICES:FIFOS, e.g. 200:0..7 or 192..199:0..31; may be repeated')
+    ap.add_argument('--devices', help='legacy comma list/ranges of devices, e.g. 192..199. Default: devices observed in input')
+    ap.add_argument('--fifos', help='legacy comma list/ranges of FIFOs, e.g. 0..31. Default: FIFOs observed in input')
     args = ap.parse_args()
 
     rows = load_tdc(args.input)
     if not rows:
         raise SystemExit('ERROR: no [TDC] rows found')
 
-    devices = parse_int_list(args.devices) if args.devices else sorted({k.device for k in rows})
-    fifos = parse_int_list(args.fifos) if args.fifos else sorted({k.fifo for k in rows})
-    expected = expected_keys(devices, fifos)
+    if args.expect:
+        campaigns = []
+        try:
+            for expr in args.expect:
+                campaigns.append(parse_expect(expr))
+        except ValueError as e:
+            raise SystemExit(f"ERROR: {e}")
+        expected = expected_keys_from_campaigns(campaigns)
+    else:
+        devices = parse_int_list(args.devices) if args.devices else sorted({k.device for k in rows})
+        fifos = parse_int_list(args.fifos) if args.fifos else sorted({k.fifo for k in rows})
+        expected = expected_keys(devices, fifos)
     fallback = global_tdc_rows(rows, expected)
     single_global = single_global_zero_off_row(rows, expected)
     missing = [k for k in expected if k not in rows]
 
     write_output(args.output, rows, expected, single_global)
-    write_report(args.report, args.input, args.output, rows, expected, fallback, single_global)
+    write_report(args.report, args.input, args.output, rows, expected, fallback, single_global, args.expect)
 
     print(f"measured rows:        {len(rows)}")
     print(f"expected rows:        {len(expected)}")
