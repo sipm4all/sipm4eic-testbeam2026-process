@@ -269,7 +269,24 @@ sipm4eic-testbeam2026-process/process/scripts/merge_calibration_file.sh \
     --output /data/2026-testbeam/process/tdc.20260618.conf
 ```
 
-The final `tdc.20260618.conf` still contains only the `[TDC]` calibration section. To run `calibrator`, this TDC file must be combined with `[CHANNEL]` and `[TRIGGER]` sections, or with explicit wildcard defaults for those sections.
+The merged `tdc.20260618.conf` contains only measured concrete `[TDC]` rows. Some channels may be missing because not all FIFO calibration snippets were available or not all channels had enough statistics. Complete the TDC file with one low-specificity global fallback row:
+
+```bash
+sipm4eic-testbeam2026-process/process/scripts/complete_tdc_calibration.py \
+    --input /data/2026-testbeam/process/tdc.20260618.conf \
+    --output sipm4eic-testbeam2026-process/process/config/calibration/tdc.20260618.conf \
+    --report sipm4eic-testbeam2026-process/process/config/calibration/tdc.20260618.md
+```
+
+The completed output keeps all measured concrete rows and appends a separate `[TDC]` section containing a single fallback row:
+
+```text
+* * * * * 0 <global_iif>
+```
+
+The wildcard row has lower specificity than every measured concrete calibration row, so it is used only when a concrete TDC calibration is absent. The generated report documents missing rows, coverage by device/chip, leave-one-out pattern comparisons, and the phase error expected from the fallback.
+
+The final `process/config/calibration/tdc.20260618.conf` still contains only the `[TDC]` calibration section. To run `calibrator`, this TDC file must be combined with `[CHANNEL]` and `[TRIGGER]` sections, or with explicit wildcard defaults for those sections.
 
 ## Notes And Checks
 
