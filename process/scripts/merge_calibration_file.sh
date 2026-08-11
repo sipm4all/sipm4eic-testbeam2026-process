@@ -8,17 +8,16 @@ usage()
 {
     cat <<EOF_USAGE
 usage:
-  $0 --input FILE [--input FILE ...] --output FILE
+  $0 --input FILE [FILE ...] [--input FILE ...] --output FILE
 
 options:
-  --input, -i FILE      calibration fragment to merge; may be repeated
+  --input, -i FILE      calibration fragment(s) to merge; may be repeated
   --output, -o FILE     merged calibration output file
   --help, -h            show this help message
 
 example:
   $0 \
-    --input dcalib.fifo_0.conf \
-    --input dcalib.fifo_1.conf \
+    --input dcalib.fifo_0.conf dcalib.fifo_1.conf \
     --output calibration.merged.conf
 EOF_USAGE
 }
@@ -34,9 +33,14 @@ fail()
 while [ $# -gt 0 ]; do
     case "$1" in
         --input|-i)
-            [ $# -ge 2 ] || fail "$1 requires FILE"
-            inputs+=("$2")
-            shift 2
+            shift
+            [ $# -ge 1 ] || fail "--input requires at least one FILE"
+            while [ $# -gt 0 ]; do
+                case "$1" in
+                    --*|-*) break ;;
+                    *) inputs+=("$1"); shift ;;
+                esac
+            done
             ;;
         --output|-o)
             [ $# -ge 2 ] || fail "$1 requires FILE"

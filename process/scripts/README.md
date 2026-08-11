@@ -97,12 +97,11 @@ MIN_PAIRS=1000
 
 ```bash
 process/scripts/merge_calibration_file.sh \
-  --input dcalib.fifo_0.conf \
-  --input dcalib.fifo_1.conf \
+  --input dcalib.fifo_0.conf dcalib.fifo_1.conf \
   --output calibration.merged.conf
 ```
 
-`--input` may be repeated. The script understands the standard calibration sections:
+`--input` may be repeated, and each `--input` may be followed by more than one file. This supports shell-expanded patterns such as `--input rdo-{192..199}/dcalib.fifo_{0..15}.conf`. The script understands the standard calibration sections:
 
 ```text
 [TDC]
