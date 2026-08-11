@@ -273,7 +273,7 @@ deltat(const std::string filename,
               hist->Fill(channel, delta_t);
               int tdc = (*target.cat->tdc)[target.index];
               if (tdc >= 0 && tdc < 4 && hist_tdc && hist_tdc[tdc])
-                hist_tdc[tdc]->Fill(channel, delta_t);
+                hist_tdc[tdc]->Fill((*target.cat->fine)[target.index], delta_t);
               ++nfills;
             } else if (!have_dt) {
               dtmin = dtmax = delta_t;
@@ -323,7 +323,7 @@ deltat(const std::string filename,
 
   TH2D *hDeltaT_tdc[4] = {nullptr, nullptr, nullptr, nullptr};
   for (int itdc = 0; itdc < 4; ++itdc)
-    hDeltaT_tdc[itdc] = new TH2D(Form("hDeltaT_tdc%d", itdc), "", nchannels, 0., nchannels, nbins, dtmin, dtmax);
+    hDeltaT_tdc[itdc] = new TH2D(Form("hDeltaT_tdc%d", itdc), "", 256, 0., 256., nbins, dtmin, dtmax);
 
   nframes_used = 0;
   nfills = 0;

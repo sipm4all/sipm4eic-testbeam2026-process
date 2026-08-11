@@ -35,10 +35,10 @@ It fills:
 
 ```text
 hDeltaT       delta_t = target.time - reference.time vs target channel
-hDeltaT_tdc0  same quantity for target hits with tdc == 0
-hDeltaT_tdc1  same quantity for target hits with tdc == 1
-hDeltaT_tdc2  same quantity for target hits with tdc == 2
-hDeltaT_tdc3  same quantity for target hits with tdc == 3
+hDeltaT_tdc0  delta_t vs target fine for target hits with tdc == 0
+hDeltaT_tdc1  delta_t vs target fine for target hits with tdc == 1
+hDeltaT_tdc2  delta_t vs target fine for target hits with tdc == 2
+hDeltaT_tdc3  delta_t vs target fine for target hits with tdc == 3
 ```
 
 For example, compare LASER-side target hits on device 192 FIFOs `16..31` against the test-pulse reference channel `fifo=0,column=0,pixel=0`:
