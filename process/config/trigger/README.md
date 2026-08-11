@@ -107,14 +107,20 @@ The examples in this directory demonstrate single-channel, coincidence, multipli
 
 ## Calibration-Check Triggers
 
-Two dedicated single-channel trigger files are provided for checking the `2026-06-18` TDC calibration with the laser/test-pulse runs:
+Dedicated single-channel trigger files are provided for checking the `2026-06-18` TDC calibration with the laser/test-pulse runs. These runs are synchronous only within one RDO, so the validation uses one trigger file per RDO:
 
 ```text
-calib_check_20260618-183625.conf
+calib_check_20260618-183625_rdo-192.conf
   seed: type=1, device=192, fifo=0, column=0, pixel=0
+...
+calib_check_20260618-183625_rdo-199.conf
+  seed: type=1, device=199, fifo=0, column=0, pixel=0
 
-calib_check_20260618-185127.conf
+calib_check_20260618-185127_rdo-192.conf
   seed: type=1, device=192, fifo=16, column=0, pixel=0
+...
+calib_check_20260618-185127_rdo-199.conf
+  seed: type=1, device=199, fifo=16, column=0, pixel=0
 ```
 
-These are intended for the validation workflow documented in `process/docs/calibration.md`.
+These are intended for the same-RDO validation workflow documented in `process/docs/calibration.md`.

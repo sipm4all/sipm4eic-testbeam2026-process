@@ -292,7 +292,19 @@ The final `process/config/calibration/tdc.20260618.conf` still contains only the
 
 ## Checking The Calibration With The Laser/Test-Pulse Runs
 
-A useful closure check is to run the normal processing chain on the same two runs used to derive the TDC calibration. In these runs one group of chips receives direct test pulses while the opposite group records LASER light triggered synchronously with the test pulse. After calibration, the LASER-side hits should be aligned in the calibrated `time` coordinate relative to the selected test-pulse trigger.
+A useful closure check is to run the normal processing chain on the same two runs used to derive the TDC calibration. These runs need one important qualification: they do not provide reliable timing synchronisation across different devices.
+
+During these test-pulse runs, the hardware SPILL input of each device was used to send test pulses to ALCOR channels configured in `opMode = 2`. The data-taking spill was therefore generated in software. As a result, `kc705-200` and the individual RDO devices are not guaranteed to share a common synchronous time reference in these runs.
+
+The calibration check must therefore be done per RDO device:
+
+```text
+trigger on one test-pulse channel in rdo-N
+inspect only channels from the same rdo-N
+ignore relative timing to other devices for this check
+```
+
+This is still a useful closure check. Within one RDO, the channels are read by the same electronics stream and are synchronous to the selected test-pulse trigger.
 
 The completed TDC file described above contains only `[TDC]` rows. For this check, build a complete calibrator configuration by adding explicit zero defaults for channel and trigger offsets:
 
@@ -323,36 +335,43 @@ chips 0,1,2,3: opMode = 2
 chips 4,5,6,7: opMode = 1
 ```
 
-Therefore FIFOs `0..15` receive direct test pulses, while FIFOs `16..31` should record LASER light triggered at each test pulse. Use a single test-pulse channel as the trigger:
+Therefore FIFOs `0..15` receive direct test pulses, while FIFOs `16..31` should record LASER light triggered at each test pulse. For each RDO, trigger on a test-pulse channel in that same RDO:
 
 ```text
-device = 192
+device = RDO number
 fifo   = 0
 column = 0
 pixel  = 0
 ```
 
-The corresponding trigger configuration is:
+Dedicated trigger files are provided for `rdo-192` through `rdo-199`:
 
 ```text
-process/config/trigger/calib_check_20260618-183625.conf
+process/config/trigger/calib_check_20260618-183625_rdo-192.conf
+...
+process/config/trigger/calib_check_20260618-183625_rdo-199.conf
 ```
 
-Run the normal processing chain with:
+Run the normal processing chain once per RDO device:
 
 ```bash
-sipm4eic-testbeam2026-process/process/scripts/process.sh \
-    --run 20260618-183625 \
-    --run-type testpulse \
-    --calibration /data/2026-testbeam/process/calibration.20260618.check.conf \
-    --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-183625.conf calibcheck \
-    --window 32
+for dev in {192..199}; do
+    sipm4eic-testbeam2026-process/process/scripts/process.sh \
+        --run 20260618-183625 \
+        --run-type testpulse \
+        --devices rdo-${dev} \
+        --calibration /data/2026-testbeam/process/calibration.20260618.check.conf \
+        --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-183625_rdo-${dev}.conf calibcheck_rdo-${dev} \
+        --window 32
+done
 ```
 
-The output triggered file is expected at:
+The output triggered files are expected at:
 
 ```text
-/data/2026-testbeam/process/20260618-183625/triggered.calibcheck.root
+/data/2026-testbeam/process/20260618-183625/triggered.calibcheck_rdo-192.root
+...
+/data/2026-testbeam/process/20260618-183625/triggered.calibcheck_rdo-199.root
 ```
 
 ### Run `20260618-185127`
@@ -364,36 +383,43 @@ chips 4,5,6,7: opMode = 2
 chips 0,1,2,3: opMode = 1
 ```
 
-Therefore FIFOs `16..31` receive direct test pulses, while FIFOs `0..15` should record LASER light triggered at each test pulse. Use this test-pulse channel as the trigger:
+Therefore FIFOs `16..31` receive direct test pulses, while FIFOs `0..15` should record LASER light triggered at each test pulse. For each RDO, trigger on a test-pulse channel in that same RDO:
 
 ```text
-device = 192
+device = RDO number
 fifo   = 16
 column = 0
 pixel  = 0
 ```
 
-The corresponding trigger configuration is:
+Dedicated trigger files are provided for `rdo-192` through `rdo-199`:
 
 ```text
-process/config/trigger/calib_check_20260618-185127.conf
+process/config/trigger/calib_check_20260618-185127_rdo-192.conf
+...
+process/config/trigger/calib_check_20260618-185127_rdo-199.conf
 ```
 
-Run the normal processing chain with:
+Run the normal processing chain once per RDO device:
 
 ```bash
-sipm4eic-testbeam2026-process/process/scripts/process.sh \
-    --run 20260618-185127 \
-    --run-type testpulse \
-    --calibration /data/2026-testbeam/process/calibration.20260618.check.conf \
-    --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-185127.conf calibcheck \
-    --window 32
+for dev in {192..199}; do
+    sipm4eic-testbeam2026-process/process/scripts/process.sh \
+        --run 20260618-185127 \
+        --run-type testpulse \
+        --devices rdo-${dev} \
+        --calibration /data/2026-testbeam/process/calibration.20260618.check.conf \
+        --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-185127_rdo-${dev}.conf calibcheck_rdo-${dev} \
+        --window 32
+done
 ```
 
-The output triggered file is expected at:
+The output triggered files are expected at:
 
 ```text
-/data/2026-testbeam/process/20260618-185127/triggered.calibcheck.root
+/data/2026-testbeam/process/20260618-185127/triggered.calibcheck_rdo-192.root
+...
+/data/2026-testbeam/process/20260618-185127/triggered.calibcheck_rdo-199.root
 ```
 
 ### Analysis With `deltat.C`
@@ -412,19 +438,23 @@ delta_t = hit.time - trigger.time
 
 Here `time` is the calibrated time stored by the processing chain in the triggered-frame output. The histogram x axis is the global channel index, and the y axis is `delta_t`. The histogram is normalised by the number of trigger hits found.
 
-For run `20260618-183625`, use the same test-pulse trigger channel as the processing step:
+For run `20260618-183625`, use the same per-RDO test-pulse trigger channel as the processing step:
 
 ```bash
-root -l -b -q 'sipm4eic-testbeam2026-process/macros/example/deltat.C("/data/2026-testbeam/process/20260618-183625/triggered.calibcheck.root", 1, 192, 0, 0, 0, "/data/2026-testbeam/process/20260618-183625/deltat.calibcheck.root")'
+for dev in {192..199}; do
+    root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/20260618-183625/triggered.calibcheck_rdo-${dev}.root\", 1, ${dev}, 0, 0, 0, \"/data/2026-testbeam/process/20260618-183625/deltat.calibcheck_rdo-${dev}.root\")"
+done
 ```
 
 For run `20260618-185127`, use the FIFO-16 test-pulse trigger channel:
 
 ```bash
-root -l -b -q 'sipm4eic-testbeam2026-process/macros/example/deltat.C("/data/2026-testbeam/process/20260618-185127/triggered.calibcheck.root", 1, 192, 16, 0, 0, "/data/2026-testbeam/process/20260618-185127/deltat.calibcheck.root")'
+for dev in {192..199}; do
+    root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/20260618-185127/triggered.calibcheck_rdo-${dev}.root\", 1, ${dev}, 16, 0, 0, \"/data/2026-testbeam/process/20260618-185127/deltat.calibcheck_rdo-${dev}.root\")"
+done
 ```
 
-The useful closure check is whether the LASER-side channels produce narrow, stable `delta_t` structures relative to the direct test-pulse trigger. For `20260618-183625`, the LASER-side channels are expected on FIFOs `16..31`; for `20260618-185127`, they are expected on FIFOs `0..15`.
+The useful closure check is whether channels in the same RDO produce narrow, stable `delta_t` structures relative to that RDO's direct test-pulse trigger. For `20260618-183625`, the LASER-side channels are expected on FIFOs `16..31`; for `20260618-185127`, they are expected on FIFOs `0..15`. Do not use these runs to judge timing offsets between different devices.
 
 ### What To Inspect
 
@@ -434,7 +464,7 @@ These validation runs are not used to derive new TDC constants. They are a closu
 decode -> calibrate -> sort -> merge -> trigger/frame -> deltat analysis
 ```
 
-The trigger is a direct test-pulse channel. The interesting check is the time distribution of the LASER-side channels in the same triggered frames. A narrow distribution around a stable relative time indicates that the calibrated `time` branch is being propagated correctly through calibration, sorting, merging, frame building, and analysis.
+The trigger is a direct test-pulse channel in the same RDO being checked. The interesting check is the time distribution of same-RDO channels in the triggered frames. A narrow distribution around a stable relative time indicates that the calibrated `time` branch is being propagated correctly through calibration, sorting, merging, frame building, and analysis.
 
 ## Notes And Checks
 

@@ -178,6 +178,8 @@ Optional command-line options:
 ```text
 --run-type TYPE            input run type under /data/2026-testbeam/actual, default physics
                            supported values: physics, testpulse
+--devices DEVICE ...       device directory names to process, default all
+                           accepts names such as kc705-200, rdo-192, rdo-{192..199}
 --window VALUE             trigger frame window, default 256
 --help                     print usage
 ```
@@ -201,7 +203,7 @@ Input files are read from:
 /data/2026-testbeam/actual/<run-type>/<run>/...
 ```
 
-Use the default `--run-type physics` for normal physics data and `--run-type testpulse` for calibration/test-pulse runs.
+Use the default `--run-type physics` for normal physics data and `--run-type testpulse` for calibration/test-pulse runs. Use `--devices` when a workflow should process only selected device directories, for example a same-RDO calibration closure check.
 
 Important variables still configured near the top of the script:
 

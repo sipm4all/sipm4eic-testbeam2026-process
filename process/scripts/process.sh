@@ -22,6 +22,8 @@ TRIGGER_TAGS=()
 SORT_WINDOW=32768
 APS_WINDOW=50
 TRIGGER_WINDOW=256
+DEVICE_FILTER=()
+DEVICE_ALL=1
 
 WRITE_LOGS=0
 CLEAN_DEVICE_SPILLS=1
@@ -42,13 +44,14 @@ required:
 options:
   --run-type TYPE                input run type under /data/2026-testbeam/actual, default: physics
                                   supported: physics, testpulse
+  --devices DEVICE ...           device directory names to process, default: all
   --window, -w VALUE             trigger frame window, default: 256
   --help, -h                     show this help message
 
 example:
   $0 --run 12345
   $0 --run 12345 --calibration process/config/calibration/calibration_example.conf --trigger process/config/trigger/trigger_range.conf range --trigger process/config/trigger/trigger_set.conf set --window 256
-  $0 --run 20260618-183625 --run-type testpulse --calibration calibration.conf --trigger trigger.conf calibcheck --window 32
+  $0 --run 20260618-183625 --run-type testpulse --devices rdo-192 --calibration calibration.conf --trigger trigger.conf calibcheck_rdo-192 --window 32
 EOF
 }
 
@@ -70,6 +73,70 @@ run_job()
     else
         ( "$@" )
     fi
+}
+
+
+add_device_range_or_value()
+{
+    local target=$1
+    local value=$2
+
+    if [[ "${value}" =~ ^([A-Za-z0-9_.-]*)\{([0-9]+)\.\.([0-9]+)\}$ ]]; then
+        local prefix=${BASH_REMATCH[1]}
+        local first=${BASH_REMATCH[2]}
+        local last=${BASH_REMATCH[3]}
+        [ "${first}" -le "${last}" ] || fail "invalid device range ${value}"
+        local width=${#first}
+        local v
+        for ((v = first; v <= last; ++v)); do
+            printf -v formatted "%0${width}d" "${v}"
+            eval "${target}+=(\"${prefix}${formatted}\")"
+        done
+        return
+    fi
+
+    [[ "${value}" =~ ^[A-Za-z0-9_.-]+$ ]] || fail "expected device name or prefixed range, got '${value}'"
+    eval "${target}+=(\"${value}\")"
+}
+
+parse_device_filter_values()
+{
+    local values=()
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            --*|-*) break ;;
+            *) values+=("$1"); shift ;;
+        esac
+    done
+
+    [ ${#values[@]} -gt 0 ] || fail "--devices requires at least one value"
+
+    PARSE_FILTER_MODE="list"
+    PARSE_FILTER_CONSUMED=$((1 + ${#values[@]}))
+
+    if [ ${#values[@]} -eq 1 ] && [ "${values[0]}" = "all" ]; then
+        PARSE_FILTER_MODE="all"
+        return
+    fi
+
+    for value in "${values[@]}"; do
+        [ "${value}" != "all" ] || fail "'all' must be the only value for --devices"
+        add_device_range_or_value DEVICE_FILTER "${value}"
+    done
+}
+
+contains_value()
+{
+    local value=$1
+    shift
+    local item
+    for item in "$@"; do
+        if [ "${item}" = "${value}" ]; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 cleanup_empty_device_dirs()
@@ -98,6 +165,16 @@ while [ $# -gt 0 ]; do
             [ $# -ge 2 ] || fail "$1 requires TYPE"
             run_type=$2
             shift 2
+            ;;
+        --devices)
+            parse_device_filter_values "${@:2}"
+            if [ "${PARSE_FILTER_MODE}" = "all" ]; then
+                DEVICE_ALL=1
+                DEVICE_FILTER=()
+            else
+                DEVICE_ALL=0
+            fi
+            shift "${PARSE_FILTER_CONSUMED}"
             ;;
         --calibration|-c)
             [ $# -ge 2 ] || fail "$1 requires FILE"
@@ -170,6 +247,9 @@ for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
     [ -d "${idpath}" ] || continue
 
     device=$(basename "${idpath}")
+    if [ "${DEVICE_ALL}" -ne 1 ] && ! contains_value "${device}" "${DEVICE_FILTER[@]}"; then
+        continue
+    fi
     odpath="${orpath}/${device}"
     mkdir -p "${odpath}"
     echo " --- processing device ${device}: ${idpath} "
