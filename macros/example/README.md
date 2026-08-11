@@ -14,7 +14,7 @@ It iterates over spills and frames and prints the number of trigger, timing, and
 
 ## deltat.C
 
-Reads the triggered-frame `frames` tree and fills 2D delta-t histograms using hits contained in each stored frame. Selector values of `-1` are wildcards.
+Reads the triggered-frame `frames` tree and fills 2D delta-t histograms using hits contained in each stored frame. Selector values of `-1` are wildcards. All delta-t histograms use 2048 bins over `[-32, 32]`.
 
 The original trigger-relative form finds one reference trigger hit and fills `hDeltaT` for all other hits:
 

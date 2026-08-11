@@ -10,6 +10,10 @@
 #include <string>
 #include <vector>
 
+constexpr int deltat_nbins = 2048;
+constexpr double deltat_min = -32.;
+constexpr double deltat_max = 32.;
+
 struct category_reader_t {
   TTreeReaderArray<int> *frame_start;
   TTreeReaderArray<int> *frame_nhits;
@@ -90,7 +94,7 @@ deltat(const std::string filename,
     return;
   }
 
-  auto scan = [&](TH2D *hist, double &dtmin, double &dtmax, bool &have_dt, int &ntriggers, int &nfills) {
+  auto scan = [&](TH2D *hist, int &ntriggers, int &nfills) {
     TTreeReader reader(tin);
     TTreeReaderValue<int> nframes(reader, "nframes");
     category_reader_t trigger(reader, "trigger");
@@ -135,37 +139,12 @@ deltat(const std::string filename,
             if (hist) {
               hist->Fill(cat->channel(i), delta_t);
               ++nfills;
-            } else if (!have_dt) {
-              dtmin = dtmax = delta_t;
-              have_dt = true;
-            } else {
-              if (delta_t < dtmin) dtmin = delta_t;
-              if (delta_t > dtmax) dtmax = delta_t;
             }
           }
         }
       }
     }
   };
-
-  double dtmin = 0.;
-  double dtmax = 0.;
-  bool have_dt = false;
-  int ntriggers = 0;
-  int nfills = 0;
-  scan(nullptr, dtmin, dtmax, have_dt, ntriggers, nfills);
-
-  if (!have_dt) {
-    dtmin = -1.;
-    dtmax = 1.;
-  } else if (dtmin == dtmax) {
-    dtmin -= 1.;
-    dtmax += 1.;
-  } else {
-    auto margin = 0.001 * (dtmax - dtmin);
-    dtmin -= margin;
-    dtmax += margin;
-  }
 
   auto fout = TFile::Open(outfilename.c_str(), "RECREATE");
   if (!fout || fout->IsZombie()) {
@@ -178,12 +157,11 @@ deltat(const std::string filename,
   constexpr int max_device = 200;
   constexpr int channels_per_device = 256;
   constexpr int nchannels = (max_device - min_device + 1) * channels_per_device;
-  int nbins = std::max(1, (int)std::ceil(16. * (dtmax - dtmin)));
-  auto hDeltaT = new TH2D("hDeltaT", "", nchannels, 0., nchannels, nbins, dtmin, dtmax);
+  auto hDeltaT = new TH2D("hDeltaT", "", nchannels, 0., nchannels, deltat_nbins, deltat_min, deltat_max);
 
-  ntriggers = 0;
-  nfills = 0;
-  scan(hDeltaT, dtmin, dtmax, have_dt, ntriggers, nfills);
+  int ntriggers = 0;
+  int nfills = 0;
+  scan(hDeltaT, ntriggers, nfills);
 
   if (ntriggers == 0)
     std::cerr << " --- no matching trigger hit found inside the stored frames" << std::endl;
@@ -232,8 +210,7 @@ deltat(const std::string filename,
     return;
   }
 
-  auto scan = [&](TH2D *hist, TH2D **hist_tdc, double &dtmin, double &dtmax,
-                  bool &have_dt, int &nframes_used, int &nfills) {
+  auto scan = [&](TH2D *hist, TH2D **hist_tdc, int &nframes_used, int &nfills) {
     TTreeReader reader(tin);
     TTreeReaderValue<int> nframes(reader, "nframes");
     category_reader_t trigger(reader, "trigger");
@@ -275,37 +252,12 @@ deltat(const std::string filename,
               if (tdc >= 0 && tdc < 4 && hist_tdc && hist_tdc[tdc])
                 hist_tdc[tdc]->Fill((*target.cat->fine)[target.index], delta_t);
               ++nfills;
-            } else if (!have_dt) {
-              dtmin = dtmax = delta_t;
-              have_dt = true;
-            } else {
-              if (delta_t < dtmin) dtmin = delta_t;
-              if (delta_t > dtmax) dtmax = delta_t;
             }
           }
         }
       }
     }
   };
-
-  double dtmin = 0.;
-  double dtmax = 0.;
-  bool have_dt = false;
-  int nframes_used = 0;
-  int nfills = 0;
-  scan(nullptr, nullptr, dtmin, dtmax, have_dt, nframes_used, nfills);
-
-  if (!have_dt) {
-    dtmin = -1.;
-    dtmax = 1.;
-  } else if (dtmin == dtmax) {
-    dtmin -= 1.;
-    dtmax += 1.;
-  } else {
-    auto margin = 0.001 * (dtmax - dtmin);
-    dtmin -= margin;
-    dtmax += margin;
-  }
 
   auto fout = TFile::Open(outfilename.c_str(), "RECREATE");
   if (!fout || fout->IsZombie()) {
@@ -318,16 +270,15 @@ deltat(const std::string filename,
   constexpr int max_device = 200;
   constexpr int channels_per_device = 256;
   constexpr int nchannels = (max_device - min_device + 1) * channels_per_device;
-  int nbins = std::max(1, (int)std::ceil(16. * (dtmax - dtmin)));
-  auto hDeltaT = new TH2D("hDeltaT", "", nchannels, 0., nchannels, nbins, dtmin, dtmax);
+  auto hDeltaT = new TH2D("hDeltaT", "", nchannels, 0., nchannels, deltat_nbins, deltat_min, deltat_max);
 
   TH2D *hDeltaT_tdc[4] = {nullptr, nullptr, nullptr, nullptr};
   for (int itdc = 0; itdc < 4; ++itdc)
-    hDeltaT_tdc[itdc] = new TH2D(Form("hDeltaT_tdc%d", itdc), "", 256, 0., 256., nbins, dtmin, dtmax);
+    hDeltaT_tdc[itdc] = new TH2D(Form("hDeltaT_tdc%d", itdc), "", 256, 0., 256., deltat_nbins, deltat_min, deltat_max);
 
-  nframes_used = 0;
-  nfills = 0;
-  scan(hDeltaT, hDeltaT_tdc, dtmin, dtmax, have_dt, nframes_used, nfills);
+  int nframes_used = 0;
+  int nfills = 0;
+  scan(hDeltaT, hDeltaT_tdc, nframes_used, nfills);
 
   if (nframes_used == 0)
     std::cerr << " --- no frames with both target and reference hits found" << std::endl;
