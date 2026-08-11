@@ -18,6 +18,8 @@ run=""
 CALIBRATION_CONFIG=""
 TRIGGER_CONFIGS=()
 TRIGGER_TAGS=()
+SORT_WINDOW=32768
+APS_WINDOW=50
 TRIGGER_WINDOW=256
 
 WRITE_LOGS=0
@@ -178,17 +180,21 @@ for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
             sorted=$6
             output=$7
             calibration_config=$8
+            sort_window=$9
+            aps_window=${10}
 
             "${calibrator}" --input "${input}" --output "${calibrated}" --config "${calibration_config}"
-            "${sorter}" --input "${calibrated}" --output "${sorted}" --window 32768
-            "${aps}" --input "${sorted}" --output "${output}" --window 50
+            "${sorter}" --input "${calibrated}" --output "${sorted}" --window "${sort_window}"
+            "${aps}" --input "${sorted}" --output "${output}" --window "${aps_window}"
             rm -f "${calibrated}" "${sorted}"
         ' _ "${CALIBRATOR}" "${SORTER}" "${APS}" \
             "${fpath}" \
             "${odpath}/calibrated.${fifo}.root" \
             "${odpath}/sorted.${fifo}.root" \
             "${odpath}/aps.sorted.${fifo}.root" \
-            "${CALIBRATION_CONFIG}" &
+            "${CALIBRATION_CONFIG}" \
+            "${SORT_WINDOW}" \
+            "${APS_WINDOW}" &
         pids+=($!)
 
     done
