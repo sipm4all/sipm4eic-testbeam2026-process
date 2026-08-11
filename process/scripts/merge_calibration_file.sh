@@ -2,6 +2,7 @@
 set -euo pipefail
 
 inputs=()
+valid_inputs=()
 output=""
 
 usage()
@@ -61,8 +62,14 @@ done
 [ -n "${output}" ] || fail "missing --output FILE"
 
 for input in "${inputs[@]}"; do
-    [ -f "${input}" ] || fail "input file does not exist: ${input}"
+    if [ ! -f "${input}" ]; then
+        echo "WARNING: input file does not exist, skipping: ${input}" >&2
+        continue
+    fi
+    valid_inputs+=("${input}")
 done
+
+[ ${#valid_inputs[@]} -gt 0 ] || fail "no existing input files to merge"
 
 awk '
 function print_section_header(section) {
@@ -122,7 +129,7 @@ FNR == 1 {
     print_section_header(current)
     print $0
 }
-' "${inputs[@]}" > "${output}.tmp"
+' "${valid_inputs[@]}" > "${output}.tmp"
 
 mv "${output}.tmp" "${output}"
-echo "merged ${#inputs[@]} input files into ${output}"
+echo "merged ${#valid_inputs[@]} input files into ${output}"

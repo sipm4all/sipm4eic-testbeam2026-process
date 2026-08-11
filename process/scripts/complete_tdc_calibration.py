@@ -217,6 +217,51 @@ def global_tdc_rows(rows, expected):
     return out
 
 
+def single_global_zero_off_row(rows, expected):
+    expected_set = set(expected)
+    selected = [r for k, r in rows.items() if k in expected_set]
+    if not selected:
+        return None
+    iifs = [r.iif for r in selected]
+    return Row(key=Key(-1, -1, -1, -1, -1),
+               off=0.0,
+               iif=median(iifs),
+               source="global_fallback",
+               method="single_global_zero_off",
+               nsource=len(selected),
+               off_rms=0.0,
+               iif_rms=rms(iifs))
+
+
+def phase_delta_summary(rows, expected, fallback_rows, single_global=None):
+    expected_set = set(expected)
+    measured = [r for k, r in rows.items() if k in expected_set]
+    out = []
+
+    def add(name, predictor):
+        deltas = []
+        for row in measured:
+            for fine in (60, 70, 80, 90, 100, 110, 120):
+                pred_off, pred_iif = predictor(row, fine)
+                pred_phase = pred_off + pred_iif * fine
+                true_phase = row.off + row.iif * fine
+                deltas.append(pred_phase - true_phase)
+        mean = sum(deltas) / len(deltas) if deltas else 0.0
+        out.append({
+            "name": name,
+            "mean": mean,
+            "rms": rms(deltas),
+            "std": rms([x - mean for x in deltas]),
+            "rms_ps": rms(deltas) * 3125.0,
+        })
+
+    if fallback_rows:
+        add("per_tdc_global", lambda row, fine: (fallback_rows[row.key.tdc].off, fallback_rows[row.key.tdc].iif))
+    if single_global is not None:
+        add("single_global_off0", lambda row, fine: (0.0, single_global.iif))
+    return out
+
+
 def write_output(filename, rows, expected, fallback):
     expected_set = set(expected)
     with open(filename, 'w') as f:
@@ -337,7 +382,7 @@ def pattern_comparison(rows, expected):
     return out
 
 
-def write_report(filename, input_file, output_file, rows, expected, fallback):
+def write_report(filename, input_file, output_file, rows, expected, fallback, single_global):
     expected_set = set(expected)
     measured_expected = [k for k in rows if k in expected_set]
     missing = sorted(k for k in expected if k not in rows)
@@ -362,6 +407,19 @@ def write_report(filename, input_file, output_file, rows, expected, fallback):
         for tdc in sorted(fallback):
             r = fallback[tdc]
             f.write(f"| {tdc} | {r.off:.8g} | {r.iif:.8g} | {r.nsource} | {r.off_rms:.8g} | {r.iif_rms:.8g} |\n")
+        if single_global is not None:
+            f.write("\nSingle global comparison row, not written to the output calibration by default:\n\n")
+            f.write("| fallback | off | iif | source rows | iif rms |\n")
+            f.write("|---|---:|---:|---:|---:|\n")
+            f.write(f"| single_global_off0 | 0 | {single_global.iif:.8g} | {single_global.nsource} | {single_global.iif_rms:.8g} |\n")
+        f.write("\n")
+
+        f.write("## Phase Delta Comparison\n\n")
+        f.write("This compares fallback phase against measured concrete calibration phase using deterministic fine values `60,70,...,120`. At 320 MHz, one clock is 3125 ps.\n\n")
+        f.write("| fallback | mean clocks | RMS clocks | std clocks | RMS ps |\n")
+        f.write("|---|---:|---:|---:|---:|\n")
+        for item in phase_delta_summary(rows, expected, fallback, single_global):
+            f.write("| {name} | {mean:.8g} | {rms:.8g} | {std:.8g} | {rms_ps:.3f} |\n".format(**item))
         f.write("\n")
 
         f.write("## Leave-One-Out Pattern Comparison\n\n")
@@ -437,10 +495,11 @@ def main():
     fifos = parse_int_list(args.fifos) if args.fifos else sorted({k.fifo for k in rows})
     expected = expected_keys(devices, fifos)
     fallback = global_tdc_rows(rows, expected)
+    single_global = single_global_zero_off_row(rows, expected)
     missing = [k for k in expected if k not in rows]
 
     write_output(args.output, rows, expected, fallback)
-    write_report(args.report, args.input, args.output, rows, expected, fallback)
+    write_report(args.report, args.input, args.output, rows, expected, fallback, single_global)
 
     print(f"measured rows:        {len(rows)}")
     print(f"expected rows:        {len(expected)}")
