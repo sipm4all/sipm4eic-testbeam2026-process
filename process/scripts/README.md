@@ -12,7 +12,13 @@ cmake --install process/build
 
 ## dcalib.sh
 
-`dcalib.sh` runs TDC calibration over all decoded FIFO files in a run. It uses the same input and output base directories as `process.sh`:
+`dcalib.sh` runs TDC calibration over all decoded FIFO files in a run. For each FIFO file the workflow is:
+
+```text
+clean -> sort -> dcalib
+```
+
+It uses the same input and output base directories as `process.sh`:
 
 ```bash
 ipath="/data/2026-testbeam/actual/testpulse"
@@ -64,15 +70,25 @@ the script writes outputs in the corresponding device directory:
 /data/2026-testbeam/process/<run>/<device>/dcalib.fifo_0.conf
 ```
 
-The `.root` file contains compact TDC diagnostic histograms. The `.conf` file is the per-FIFO TDC calibration snippet; it contains only a `[TDC]` section in the format consumed by `calibrator`. These calibration outputs are not deleted by the script.
+The final `.root` file contains compact TDC diagnostic histograms. The `.conf` file is the per-FIFO TDC calibration snippet; it contains only a `[TDC]` section in the format consumed by `calibrator`. These calibration outputs are not deleted by the script.
+
+The script also writes intermediate files in the same device output directory:
+
+```text
+/data/2026-testbeam/process/<run>/<device>/cleaned.fifo_0.root
+/data/2026-testbeam/process/<run>/<device>/sorted.fifo_0.root
+```
+
+`cleaned.*.root` is produced by `cleaner`; `sorted.*.root` is produced by `sorter` and is the input to `dcalib`.
 
 `dcalib.sh` currently hardcodes:
 
 ```bash
+SORT_WINDOW=32768
 MIN_PAIRS=1000
 ```
 
-Channels with fewer than this number of adjacent-hit pairs are skipped by `dcalib`.
+`SORT_WINDOW` is passed to `sorter --window`. Channels with fewer than `MIN_PAIRS` adjacent-hit pairs are skipped by `dcalib`.
 
 ## process.sh
 

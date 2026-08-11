@@ -7,7 +7,10 @@ ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 ipath="/data/2026-testbeam/actual/testpulse"
 opath="/data/2026-testbeam/process"
 
+CLEANER="${ROOT_DIR}/process/bin/cleaner"
+SORTER="${ROOT_DIR}/process/bin/sorter"
 DCALIB="${ROOT_DIR}/process/bin/dcalib"
+SORT_WINDOW=32768
 MIN_PAIRS=1000
 WRITE_LOGS=0
 
@@ -199,9 +202,11 @@ done
 [[ "${period}" =~ ^[0-9]+$ ]] || fail "--period must be a positive integer"
 [ "${period}" -gt 0 ] || fail "--period must be greater than zero"
 
-if [ ! -x "${DCALIB}" ]; then
-    fail "${DCALIB} does not exist or is not executable"
-fi
+for executable in "${CLEANER}" "${SORTER}" "${DCALIB}"; do
+    if [ ! -x "${executable}" ]; then
+        fail "${executable} does not exist or is not executable"
+    fi
+done
 
 irpath="${ipath}/${run}"
 if [ ! -d "${irpath}" ]; then
@@ -239,16 +244,41 @@ for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
             continue
         fi
 
+        cleaned_output="${odpath}/cleaned.${fifo}.root"
+        sorted_output="${odpath}/sorted.${fifo}.root"
         root_output="${odpath}/dcalib.${fifo}.root"
         txt_output="${odpath}/dcalib.${fifo}.conf"
 
         run_job "${odpath}/dcalib.${fifo}.log" \
-            "${DCALIB}" \
-                --input "${fpath}" \
-                --output "${root_output}" \
-                --calibration-output "${txt_output}" \
-                --period "${period}" \
-                --min-pairs "${MIN_PAIRS}" &
+            bash -c '
+                set -euo pipefail
+                cleaner=$1
+                sorter=$2
+                dcalib=$3
+                input=$4
+                cleaned=$5
+                sorted=$6
+                root_output=$7
+                txt_output=$8
+                period=$9
+                sort_window=${10}
+                min_pairs=${11}
+
+                "${cleaner}" --input "${input}" --output "${cleaned}"
+                "${sorter}" --input "${cleaned}" --output "${sorted}" --window "${sort_window}"
+                "${dcalib}" --input "${sorted}" --output "${root_output}" --calibration-output "${txt_output}" --period "${period}" --min-pairs "${min_pairs}"
+            ' bash \
+                "${CLEANER}" \
+                "${SORTER}" \
+                "${DCALIB}" \
+                "${fpath}" \
+                "${cleaned_output}" \
+                "${sorted_output}" \
+                "${root_output}" \
+                "${txt_output}" \
+                "${period}" \
+                "${SORT_WINDOW}" \
+                "${MIN_PAIRS}" &
         pids+=("$!")
     done
 done

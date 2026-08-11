@@ -6,6 +6,7 @@ Recommended order:
 
 ```text
 decoded ROOT file
+  -> cleaner
   -> calibrator
   -> sorter
   -> after-pulse-suppressor
@@ -25,4 +26,4 @@ config/calibration/     timing calibration files
 config/trigger/         trigger-definition files
 ```
 
-The key design point is that low-level timing calibration happens once, early, in `calibrator`. Downstream tools prefer the calibrated `time` branch when present and only use the old nominal timing expression for legacy uncalibrated files.
+The `cleaner` stage removes malformed stream words before calibration, currently ALCOR hits with invalid `fifo`/`column` combinations. The key design point is that low-level timing calibration happens once, early, in `calibrator`. Downstream tools prefer the calibrated `time` branch when present and only use the old nominal timing expression for legacy uncalibrated files.

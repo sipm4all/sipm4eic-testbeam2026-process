@@ -36,6 +36,16 @@ iif_0..iif_3
 
 The text output contains only a `[TDC]` section and can be concatenated with other `dcalib` outputs, provided the same concrete TDC row is not repeated. ROOT diagnostics are stored one directory per channel, each containing `hParam` and `hDelta`.
 
+### cleaner
+
+Clones the input `alcor` tree to a new ROOT file while dropping entries that fail the stream-cleaning predicate:
+
+```bash
+process/bin/cleaner --input decoded.root --output cleaned.root
+```
+
+The output tree preserves the input tree name and branch layout through ROOT `CloneTree(0)`. The current cleaning criterion removes malformed ALCOR hits whose `column` is not valid for the corresponding `fifo`. For a given FIFO, the allowed columns are `2 * (fifo % 4)` and `2 * (fifo % 4) + 1`. Spill markers, trigger tags, and other non-ALCOR words are preserved. The program checks ROOT `GetEntry()` return values and prints input/kept/dropped/output entry counts, including the number dropped by the column test.
+
 ### calibrator
 
 Creates or updates the calibrated `time` branch in the `alcor` tree:
