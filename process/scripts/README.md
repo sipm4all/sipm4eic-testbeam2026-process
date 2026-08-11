@@ -90,6 +90,30 @@ MIN_PAIRS=1000
 
 `SORT_WINDOW` is passed to `sorter --window`. Channels with fewer than `MIN_PAIRS` adjacent-hit pairs are skipped by `dcalib`.
 
+
+## merge_calibration_file.sh
+
+`merge_calibration_file.sh` merges calibration text fragments into one calibration file:
+
+```bash
+process/scripts/merge_calibration_file.sh \
+  --input dcalib.fifo_0.conf \
+  --input dcalib.fifo_1.conf \
+  --output calibration.merged.conf
+```
+
+`--input` may be repeated. The script understands the standard calibration sections:
+
+```text
+[TDC]
+[CHANNEL]
+[TRIGGER]
+```
+
+Repeated section headers from input fragments are collapsed, so many per-FIFO `dcalib.fifo_*.conf` files, each containing a `[TDC]` section, become one file with a single `[TDC]` section. Comments and blank lines from input fragments are not copied; the merged file gets fresh section headers and column comments.
+
+The script does not resolve duplicate calibration rows. If two fragments contain the same concrete calibration address, `calibrator` will later reject the merged file as ambiguous/duplicate.
+
 ## process.sh
 
 `process.sh` is the full processing workflow. It currently performs:
