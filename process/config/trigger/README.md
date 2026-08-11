@@ -104,3 +104,17 @@ trigger {
 This uses `DETECTOR.time_offset` as a timing calibration reference; it does not search for a particular detector hit.
 
 The examples in this directory demonstrate single-channel, coincidence, multiplicity, veto, range, set, and self-coincidence triggers.
+
+## Calibration-Check Triggers
+
+Two dedicated single-channel trigger files are provided for checking the `2026-06-18` TDC calibration with the laser/test-pulse runs:
+
+```text
+calib_check_20260618-183625.conf
+  seed: type=1, device=192, fifo=0, column=0, pixel=0
+
+calib_check_20260618-185127.conf
+  seed: type=1, device=192, fifo=16, column=0, pixel=0
+```
+
+These are intended for the validation workflow documented in `process/docs/calibration.md`.

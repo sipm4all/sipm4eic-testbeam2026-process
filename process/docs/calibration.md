@@ -290,6 +290,120 @@ The wildcard row has lower specificity than every measured concrete calibration 
 
 The final `process/config/calibration/tdc.20260618.conf` still contains only the `[TDC]` calibration section. To run `calibrator`, this TDC file must be combined with `[CHANNEL]` and `[TRIGGER]` sections, or with explicit wildcard defaults for those sections.
 
+## Checking The Calibration With The Laser/Test-Pulse Runs
+
+A useful closure check is to run the normal processing chain on the same two runs used to derive the TDC calibration. In these runs one group of chips receives direct test pulses while the opposite group records LASER light triggered synchronously with the test pulse. After calibration, the LASER-side hits should be aligned in the calibrated `time` coordinate relative to the selected test-pulse trigger.
+
+The completed TDC file described above contains only `[TDC]` rows. For this check, build a complete calibrator configuration by adding explicit zero defaults for channel and trigger offsets:
+
+```bash
+cp sipm4eic-testbeam2026-process/process/config/calibration/tdc.20260618.conf \
+   /data/2026-testbeam/process/calibration.20260618.check.conf
+
+cat >> /data/2026-testbeam/process/calibration.20260618.check.conf <<'EOF'
+
+[CHANNEL]
+# device fifo column pixel offset
+* * * * 0.0
+
+[TRIGGER]
+# device fifo offset
+* * 0.0
+EOF
+```
+
+This keeps the check focused on the TDC calibration only. If channel or trigger offsets are later measured independently, they can replace these wildcard zero defaults.
+
+### Run `20260618-183625`
+
+The ALCOR configuration for this run was:
+
+```text
+chips 0,1,2,3: opMode = 2
+chips 4,5,6,7: opMode = 1
+```
+
+Therefore FIFOs `0..15` receive direct test pulses, while FIFOs `16..31` should record LASER light triggered at each test pulse. Use a single test-pulse channel as the trigger:
+
+```text
+device = 192
+fifo   = 0
+column = 0
+pixel  = 0
+```
+
+The corresponding trigger configuration is:
+
+```text
+process/config/trigger/calib_check_20260618-183625.conf
+```
+
+Run the normal processing chain with:
+
+```bash
+sipm4eic-testbeam2026-process/process/scripts/process.sh \
+    --run 20260618-183625 \
+    --calibration /data/2026-testbeam/process/calibration.20260618.check.conf \
+    --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-183625.conf calibcheck \
+    --window 32
+```
+
+The output triggered file is expected at:
+
+```text
+/data/2026-testbeam/process/20260618-183625/triggered.calibcheck.root
+```
+
+### Run `20260618-185127`
+
+The ALCOR configuration for this run was the opposite:
+
+```text
+chips 4,5,6,7: opMode = 2
+chips 0,1,2,3: opMode = 1
+```
+
+Therefore FIFOs `16..31` receive direct test pulses, while FIFOs `0..15` should record LASER light triggered at each test pulse. Use this test-pulse channel as the trigger:
+
+```text
+device = 192
+fifo   = 16
+column = 0
+pixel  = 0
+```
+
+The corresponding trigger configuration is:
+
+```text
+process/config/trigger/calib_check_20260618-185127.conf
+```
+
+Run the normal processing chain with:
+
+```bash
+sipm4eic-testbeam2026-process/process/scripts/process.sh \
+    --run 20260618-185127 \
+    --calibration /data/2026-testbeam/process/calibration.20260618.check.conf \
+    --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-185127.conf calibcheck \
+    --window 32
+```
+
+The output triggered file is expected at:
+
+```text
+/data/2026-testbeam/process/20260618-185127/triggered.calibcheck.root
+```
+
+### What To Inspect
+
+These validation runs are not used to derive new TDC constants. They are a closure check of the calibrated processing chain:
+
+```text
+decode -> calibrate -> sort -> merge -> trigger/frame
+```
+
+The trigger is a direct test-pulse channel. The interesting check is the time distribution of the LASER-side channels in the same triggered frames. A narrow distribution around a stable relative time indicates that the calibrated `time` branch is being propagated correctly through calibration, sorting, merging, and frame building.
+
 ## Notes And Checks
 
 - The commands above assume the executables have already been built and installed with CMake.
