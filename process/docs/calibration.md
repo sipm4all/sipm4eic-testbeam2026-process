@@ -343,6 +343,7 @@ Run the normal processing chain with:
 ```bash
 sipm4eic-testbeam2026-process/process/scripts/process.sh \
     --run 20260618-183625 \
+    --run-type testpulse \
     --calibration /data/2026-testbeam/process/calibration.20260618.check.conf \
     --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-183625.conf calibcheck \
     --window 32
@@ -383,6 +384,7 @@ Run the normal processing chain with:
 ```bash
 sipm4eic-testbeam2026-process/process/scripts/process.sh \
     --run 20260618-185127 \
+    --run-type testpulse \
     --calibration /data/2026-testbeam/process/calibration.20260618.check.conf \
     --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-185127.conf calibcheck \
     --window 32
@@ -394,15 +396,45 @@ The output triggered file is expected at:
 /data/2026-testbeam/process/20260618-185127/triggered.calibcheck.root
 ```
 
+### Analysis With `deltat.C`
+
+The triggered files can be checked with the example macro:
+
+```text
+macros/example/deltat.C
+```
+
+The macro reads the triggered-frame output, finds the requested trigger hit in each frame, and fills the 2D histogram `hDeltaT` with:
+
+```text
+delta_t = hit.time - trigger.time
+```
+
+Here `time` is the calibrated time stored by the processing chain in the triggered-frame output. The histogram x axis is the global channel index, and the y axis is `delta_t`. The histogram is normalised by the number of trigger hits found.
+
+For run `20260618-183625`, use the same test-pulse trigger channel as the processing step:
+
+```bash
+root -l -b -q 'sipm4eic-testbeam2026-process/macros/example/deltat.C("/data/2026-testbeam/process/20260618-183625/triggered.calibcheck.root", 1, 192, 0, 0, 0, "/data/2026-testbeam/process/20260618-183625/deltat.calibcheck.root")'
+```
+
+For run `20260618-185127`, use the FIFO-16 test-pulse trigger channel:
+
+```bash
+root -l -b -q 'sipm4eic-testbeam2026-process/macros/example/deltat.C("/data/2026-testbeam/process/20260618-185127/triggered.calibcheck.root", 1, 192, 16, 0, 0, "/data/2026-testbeam/process/20260618-185127/deltat.calibcheck.root")'
+```
+
+The useful closure check is whether the LASER-side channels produce narrow, stable `delta_t` structures relative to the direct test-pulse trigger. For `20260618-183625`, the LASER-side channels are expected on FIFOs `16..31`; for `20260618-185127`, they are expected on FIFOs `0..15`.
+
 ### What To Inspect
 
 These validation runs are not used to derive new TDC constants. They are a closure check of the calibrated processing chain:
 
 ```text
-decode -> calibrate -> sort -> merge -> trigger/frame
+decode -> calibrate -> sort -> merge -> trigger/frame -> deltat analysis
 ```
 
-The trigger is a direct test-pulse channel. The interesting check is the time distribution of the LASER-side channels in the same triggered frames. A narrow distribution around a stable relative time indicates that the calibrated `time` branch is being propagated correctly through calibration, sorting, merging, and frame building.
+The trigger is a direct test-pulse channel. The interesting check is the time distribution of the LASER-side channels in the same triggered frames. A narrow distribution around a stable relative time indicates that the calibrated `time` branch is being propagated correctly through calibration, sorting, merging, frame building, and analysis.
 
 ## Notes And Checks
 

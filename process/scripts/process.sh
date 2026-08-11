@@ -4,7 +4,8 @@ shopt -s nullglob
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
-ipath="/data/2026-testbeam/actual/physics"
+actual_base="/data/2026-testbeam/actual"
+run_type="physics"
 opath="/data/2026-testbeam/process"
 
 CALIBRATOR="${ROOT_DIR}/process/bin/calibrator"
@@ -39,12 +40,15 @@ required:
   --trigger, -t FILE TAG         trigger configuration and output tag; may be repeated
 
 options:
+  --run-type TYPE                input run type under /data/2026-testbeam/actual, default: physics
+                                  supported: physics, testpulse
   --window, -w VALUE             trigger frame window, default: 256
   --help, -h                     show this help message
 
 example:
   $0 --run 12345
   $0 --run 12345 --calibration process/config/calibration/calibration_example.conf --trigger process/config/trigger/trigger_range.conf range --trigger process/config/trigger/trigger_set.conf set --window 256
+  $0 --run 20260618-183625 --run-type testpulse --calibration calibration.conf --trigger trigger.conf calibcheck --window 32
 EOF
 }
 
@@ -90,6 +94,11 @@ while [ $# -gt 0 ]; do
             run=$2
             shift 2
             ;;
+        --run-type)
+            [ $# -ge 2 ] || fail "$1 requires TYPE"
+            run_type=$2
+            shift 2
+            ;;
         --calibration|-c)
             [ $# -ge 2 ] || fail "$1 requires FILE"
             CALIBRATION_CONFIG=$2
@@ -117,6 +126,14 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "${run}" ] || fail "missing --run"
+case "${run_type}" in
+    physics|testpulse)
+        ;;
+    *)
+        fail "unsupported --run-type: ${run_type}"
+        ;;
+esac
+ipath="${actual_base}/${run_type}"
 [ -n "${CALIBRATION_CONFIG}" ] || fail "missing --calibration"
 [ ${#TRIGGER_CONFIGS[@]} -gt 0 ] || fail "at least one --trigger FILE TAG is required"
 [[ "${TRIGGER_WINDOW}" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "--window must be a positive number"

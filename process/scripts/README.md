@@ -176,11 +176,13 @@ Required command-line options:
 Optional command-line options:
 
 ```text
+--run-type TYPE            input run type under /data/2026-testbeam/actual, default physics
+                           supported values: physics, testpulse
 --window VALUE             trigger frame window, default 256
 --help                     print usage
 ```
 
-Short aliases are also accepted:
+Short aliases are also accepted for the older single-argument options:
 
 ```text
 -r, -c, -t, -w, -h
@@ -193,10 +195,18 @@ triggered.<tag>.spill_0000.root
 triggered.<tag>.root
 ```
 
+Input files are read from:
+
+```text
+/data/2026-testbeam/actual/<run-type>/<run>/...
+```
+
+Use the default `--run-type physics` for normal physics data and `--run-type testpulse` for calibration/test-pulse runs.
+
 Important variables still configured near the top of the script:
 
 ```bash
-ipath                  input decoded-data base directory
+actual_base            input decoded-data base directory before run type
 opath                  output processing base directory
 WRITE_LOGS             0 prints to terminal, 1 writes log files
 CLEAN_DEVICE_SPILLS    remove intermediate device spill files
