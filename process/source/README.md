@@ -34,16 +34,11 @@ device fifo type counter column pixel tdc rollover coarse fine
 
 For control words such as START_SPILL, END_SPILL, and trigger tags, fields that do not belong to the control word payload are written with placeholder value `0` rather than `-1`. ALCOR hits likewise use `counter = 0` because the hit counter field is not meaningful for them. This keeps the decoded format compatible with a possible future move to unsigned field types. The word identity must be taken from `type`, not from placeholder hit fields.
 
-START_SPILL and END_SPILL use `fine` as a spill-status tag:
-
-```text
-fine = 0  normal spill marker
-fine = 1  decoder suppressed the spill payload because --allowed-spill-errors was exceeded
-```
+START_SPILL and END_SPILL markers written by the decoder use `fine = 0`. The decoder no longer writes artificial status-only spill markers for bad spills.
 
 DAQ readout records marked by `0xdeadbeef` are never written as spill markers by the decoder. They are counted in the summary and skipped, because they do not provide reliable spill-boundary information.
 
-The decoder is stateful and conservative. For each ALCOR FIFO it searches for START_SPILL (`type == 7`), then accepts data only until the matching END_SPILL (`type == 15`) with the same counter is found. END_SPILL-looking words with the wrong counter are treated as decoding errors and skipped rather than accepted as real spill boundaries.
+The decoder is stateful and conservative. For each ALCOR FIFO it searches for START_SPILL (`type == 7`), then accepts data only until the matching END_SPILL (`type == 15`) with the same counter is found. END_SPILL-looking words with the wrong counter are treated as decoding errors and skipped rather than accepted as real spill boundaries. A spill is written to the output ROOT tree only after its matching END_SPILL has been found. If EOF is reached while a spill is open, that incomplete spill and its buffered payload are discarded; the decoded output remains spill-balanced and the summary records `incomplete_spills_discarded` and `incomplete_payload_words_discarded`.
 
 ALCOR hit words are accepted only when their decoded column is valid for the FIFO:
 
@@ -60,7 +55,7 @@ This rejects garbage words that decode into impossible FIFO/column combinations.
 --allowed-spill-errors 0
 ```
 
-If a completed spill has more errors than this threshold, the decoded output still writes the START_SPILL and END_SPILL markers for that spill, but omits all payload hits/tags from that spill. Both spill markers get `fine = 1` to tag the spill as decoder-suppressed. This preserves spill boundaries for downstream synchronization while preventing corrupted payload from entering the processing chain.
+If a completed spill has more errors than this threshold, the decoder suppresses the entire spill: it writes neither START_SPILL, payload, nor END_SPILL for that spill. The summary records `spills_suppressed_by_errors` and `payload_words_suppressed_by_errors`. This keeps decoded ROOT files internally spill-balanced and lets `checker.sh` identify FIFOs whose spill counts no longer match the rest of the run.
 
 A separate DAQ-level suppression case is recognized when a buffer payload is exactly:
 
@@ -70,7 +65,7 @@ START_SPILL 0xdeadbeef END_SPILL 0xdeadbeef
 
 in the raw buffer. This record is counted as `daq_suppressed_records` and skipped. It is not written to the output tree.
 
-The decoder prints summary counters including spills found/written/emptied, DAQ-suppressed records, wrong END_SPILL candidates, invalid-column hits, malformed words, and skipped words outside spills. The same summary is also written to a sidecar text file derived from the output name: `output.root` produces `output.summary`.
+The decoder prints summary counters including spills found/written, completed spills suppressed by errors, incomplete spills discarded at EOF, DAQ-suppressed records, wrong END_SPILL candidates, invalid-column hits, malformed words, and skipped words outside spills. The same summary is also written to a sidecar text file derived from the output name: `output.root` produces `output.summary`.
 
 ### dcalib
 

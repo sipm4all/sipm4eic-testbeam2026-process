@@ -62,6 +62,8 @@ struct stats_t {
   uint64_t spills_found = 0;
   uint64_t spills_written = 0;
   uint64_t spills_emptied = 0;
+  uint64_t spills_suppressed_by_errors = 0;
+  uint64_t payload_words_suppressed_by_errors = 0;
   uint64_t spills_incomplete = 0;
   uint64_t alcor_hits = 0;
   uint64_t trigger_tags = 0;
@@ -74,6 +76,8 @@ struct stats_t {
   uint64_t malformed_words = 0;
   uint64_t killed_fifo = 0;
   uint64_t daq_suppressed_records = 0;
+  uint64_t incomplete_spills_discarded = 0;
+  uint64_t incomplete_payload_words_discarded = 0;
 };
 
 struct fifo_state_t {
@@ -194,28 +198,24 @@ write_spill(TTree *tree,
             int allowed_spill_errors,
             stats_t &stats)
 {
-  auto out_start = start;
-  auto out_end = end;
-  bool suppress_payload = spill_errors > allowed_spill_errors;
-  if (suppress_payload) {
-    out_start.fine = 1;
-    out_end.fine = 1;
+  bool suppress_spill = spill_errors > allowed_spill_errors;
+  if (suppress_spill) {
+    ++stats.spills_emptied;
+    ++stats.spills_suppressed_by_errors;
+    stats.payload_words_suppressed_by_errors += payload.size();
+    return;
   }
 
-  fill(tree, out_start);
+  fill(tree, start);
   ++stats.start_spill;
 
-  if (!suppress_payload) {
-    for (const auto &word : payload) {
-      fill(tree, word);
-      if (word.type == 1) ++stats.alcor_hits;
-      if (word.type == 9) ++stats.trigger_tags;
-    }
-  } else {
-    ++stats.spills_emptied;
+  for (const auto &word : payload) {
+    fill(tree, word);
+    if (word.type == 1) ++stats.alcor_hits;
+    if (word.type == 9) ++stats.trigger_tags;
   }
 
-  fill(tree, out_end);
+  fill(tree, end);
   ++stats.end_spill;
   ++stats.spills_written;
 }
@@ -475,6 +475,8 @@ make_summary(const std::string &input,
   out << "spills_found: " << stats.spills_found << '\n';
   out << "spills_written: " << stats.spills_written << '\n';
   out << "spills_emptied: " << stats.spills_emptied << '\n';
+  out << "spills_suppressed_by_errors: " << stats.spills_suppressed_by_errors << '\n';
+  out << "payload_words_suppressed_by_errors: " << stats.payload_words_suppressed_by_errors << '\n';
   out << "spills_incomplete: " << stats.spills_incomplete << '\n';
   out << "start_spill_type7: " << stats.start_spill << '\n';
   out << "end_spill_type15: " << stats.end_spill << '\n';
@@ -487,6 +489,8 @@ make_summary(const std::string &input,
   out << "malformed_words: " << stats.malformed_words << '\n';
   out << "killed_fifo_markers: " << stats.killed_fifo << '\n';
   out << "daq_suppressed_records: " << stats.daq_suppressed_records << '\n';
+  out << "incomplete_spills_discarded: " << stats.incomplete_spills_discarded << '\n';
+  out << "incomplete_payload_words_discarded: " << stats.incomplete_payload_words_discarded << '\n';
   out << "output_entries: " << output_entries << '\n';
   return out.str();
 }
@@ -589,10 +593,13 @@ decoder(const std::string &input,
   for (size_t i = 0; i < states.size(); ++i) {
     if (states[i].in_spill) {
       ++stats.spills_incomplete;
-      std::cerr << "ERROR: EOF with open spill in fifo=" << i
-                << " counter=" << states[i].start.counter << std::endl;
-      fout->Close();
-      return false;
+      ++stats.incomplete_spills_discarded;
+      stats.incomplete_payload_words_discarded += states[i].payload.size();
+      std::cerr << "WARNING: discarding incomplete spill at EOF fifo=" << i
+                << " counter=" << states[i].start.counter
+                << " payload_words=" << states[i].payload.size() << std::endl;
+      states[i].in_spill = false;
+      states[i].payload.clear();
     }
   }
 

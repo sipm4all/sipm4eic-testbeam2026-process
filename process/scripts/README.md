@@ -40,7 +40,7 @@ Options:
 --devices DEV ...            process selected device directories
 --fifos all                  process all FIFOs, default
 --fifos FIFO ...             process selected FIFO numbers or inclusive ranges
---allowed-spill-errors N     maximum errors before a spill payload is emptied, default 0
+--allowed-spill-errors N     maximum errors before a completed spill is suppressed, default 0
 --overwrite                  overwrite existing decoded ROOT files
 ```
 
@@ -57,7 +57,7 @@ it writes:
 /data/2026-testbeam/process/<run>/<device>/decoded/alcdaq.fifo_13.summary
 ```
 
-The `.summary` file is produced by `decoder` and records spills found/written/emptied, DAQ-readout-suppressed `0xdeadbeef` records, and raw decoding error counters. Normal spill markers use `fine = 0`; decoder-suppressed spills use `fine = 1`. `0xdeadbeef` records are counted and skipped, never written as fake spill markers.
+The `.summary` file is produced by `decoder` and records spills found/written, completed spills suppressed by errors, incomplete spills discarded at EOF, DAQ-readout-suppressed `0xdeadbeef` records, and raw decoding error counters. Spill markers written by the decoder use `fine = 0`. Bad completed spills are suppressed entirely; no artificial START/END marker pair is emitted for them. `0xdeadbeef` records are counted and skipped, never written as fake spill markers. If EOF occurs while a spill is open, that incomplete spill is not emitted to the decoded ROOT tree; this prevents downstream workflows from seeing unmatched START_SPILL markers.
 
 ## checker.sh
 
