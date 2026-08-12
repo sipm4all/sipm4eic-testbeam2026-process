@@ -159,6 +159,7 @@ print_streams(const std::vector<stream_t> &streams)
               << " valid=" << s.valid;
     if (s.valid)
       std::cerr << " type=" << s.data.type
+                << " counter=" << s.data.counter
                 << " device=" << s.data.device
                 << " fifo=" << s.data.fifo;
     if (s.read_error)
@@ -244,6 +245,16 @@ merger(const std::vector<std::string> filenames, const std::string outfilename, 
     return true;
   };
 
+  auto same_spill_counter = [&]() {
+    if (streams.empty() || !streams[0].valid)
+      return false;
+    auto counter = streams[0].data.counter;
+    for (auto &stream : streams)
+      if (!stream.valid || stream.data.counter != counter)
+        return false;
+    return true;
+  };
+
   auto best_stream = [&]() {
     int ibest = -1;
     for (int i = 0; i < (int)streams.size(); ++i) {
@@ -258,6 +269,7 @@ merger(const std::vector<std::string> filenames, const std::string outfilename, 
 
   Long64_t nspill = 0;
   bool in_spill = false;
+  int current_spill_counter = -1;
 
   for (;;) {
     if (!check_eof_consistency())
@@ -272,6 +284,10 @@ merger(const std::vector<std::string> filenames, const std::string outfilename, 
     if (!in_spill) {
       if (!all_start_spill())
         return fail("streams are not synchronized at START_SPILL");
+      if (!same_spill_counter())
+        return fail("streams have different START_SPILL counters");
+
+      current_spill_counter = streams[0].data.counter;
 
       if (split_spills && !output.open(streams[0].tree, spill_filename(outfilename, nspill)))
         return fail("could not open split-spill output file");
@@ -296,6 +312,11 @@ merger(const std::vector<std::string> filenames, const std::string outfilename, 
     }
 
     if (all_end_spill()) {
+      if (!same_spill_counter())
+        return fail("streams have different END_SPILL counters");
+      if (streams[0].data.counter != current_spill_counter)
+        return fail("END_SPILL counter does not match current START_SPILL counter");
+
       output.fill(streams[0].data);
       for (auto &stream : streams) {
         ++stream.end_spills;
@@ -303,6 +324,7 @@ merger(const std::vector<std::string> filenames, const std::string outfilename, 
           return fail("failed while advancing past END_SPILL");
       }
       in_spill = false;
+      current_spill_counter = -1;
 
       if (split_spills && !output.close_success())
         return fail("could not close split-spill output file successfully");

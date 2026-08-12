@@ -57,7 +57,7 @@ it writes:
 /data/2026-testbeam/process/<run>/<device>/decoded/alcdaq.fifo_13.summary
 ```
 
-The `.summary` file is produced by `decoder` and records spills found/written/emptied and raw decoding error counters.
+The `.summary` file is produced by `decoder` and records spills found/written/emptied, DAQ-readout-suppressed `0xdeadbeef` records, and raw decoding error counters. Normal spill markers use `fine = 0`; decoder-suppressed spills use `fine = 1`. `0xdeadbeef` records are counted and skipped, never written as fake spill markers.
 
 ## checker.sh
 

@@ -18,7 +18,7 @@ raw per-FIFO DAT file
   -> triggered frame ROOT files
 ```
 
-Most compiled programs operate on ROOT files; `decoder` is the raw `.dat` to ROOT entry point. The common raw input tree name is `alcor`. Triggered output files contain a `frames` tree with one entry per spill and flattened frame contents split into trigger, timing, and Cherenkov collections. The spill entry `id` is copied from the DAQ START_SPILL word `counter`, so it preserves the original spill number even when spills are processed as separate files.
+Most compiled programs operate on ROOT files; `decoder` is the raw `.dat` to ROOT entry point. The common raw input tree name is `alcor`. Triggered output files contain a `frames` tree with one entry per spill and flattened frame contents split into trigger, timing, and Cherenkov collections. The spill entry `id` is copied from the DAQ START_SPILL word `counter`, so it preserves the original spill number even when spills are processed as separate files. The merger enforces spill alignment by requiring all input streams to have the same START/END spill counters at every boundary.
 
 
 Workflow scripts use `/data/2026-testbeam/process/<run>/` as the common run workspace. Device-local products are separated by stage:
@@ -44,4 +44,4 @@ The `cleaner` stage removes malformed stream words before calibration, currently
 
 The optional `checker` program scans decoded per-FIFO files before processing and writes ASCII `.check` reports with word counts and spill-counter consistency checks. It is read-only: it does not create ROOT data products and does not affect the normal processing chain.
 
-The `decoder` stage is intentionally conservative. It first finds START_SPILL and then requires a matching END_SPILL with the same counter. ALCOR payload words are accepted only if their decoded column is valid for the FIFO: `2 * (fifo % 4)` or `2 * (fifo % 4) + 1`. If a completed spill has more decoding errors than `--allowed-spill-errors`, the output still contains the START/END spill markers but the spill payload is omitted. Suppressed spills are tagged by setting `fine = 1` on both START_SPILL and END_SPILL; normal spill markers have `fine = 0`.
+The `decoder` stage is intentionally conservative. It first finds START_SPILL and then requires a matching END_SPILL with the same counter. ALCOR payload words are accepted only if their decoded column is valid for the FIFO: `2 * (fifo % 4)` or `2 * (fifo % 4) + 1`. Normal spill markers use `fine = 0`. If a completed spill has more decoding errors than `--allowed-spill-errors`, the output still contains the START/END spill markers but the spill payload is omitted and both markers use `fine = 1`. DAQ-readout-suppressed records marked by `0xdeadbeef` are counted in the decoder summary and skipped; they are never written as fake spill markers.

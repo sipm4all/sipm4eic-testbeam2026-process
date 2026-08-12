@@ -73,6 +73,7 @@ struct stats_t {
   uint64_t invalid_column_hits = 0;
   uint64_t malformed_words = 0;
   uint64_t killed_fifo = 0;
+  uint64_t daq_suppressed_records = 0;
 };
 
 struct fifo_state_t {
@@ -102,6 +103,12 @@ static bool
 is_trigger_tag(uint32_t word)
 {
   return (word & 0xf0000000u) == 0x90000000u;
+}
+
+static bool
+is_deadbeef(uint32_t word)
+{
+  return word == 0xdeadbeefu;
 }
 
 static int
@@ -167,6 +174,17 @@ fill(TTree *tree, const data_t &word)
   tree->Fill();
 }
 
+
+static bool
+is_daq_suppressed_record(const uint32_t *words, uint32_t nwords)
+{
+  if (nwords != 4)
+    return false;
+  if (!is_start_spill(words[0]) || !is_deadbeef(words[1]))
+    return false;
+  return is_end_spill(words[2]) && is_deadbeef(words[3]);
+}
+
 static void
 write_spill(TTree *tree,
             const data_t &start,
@@ -212,6 +230,17 @@ decode_alcor_buffer(const uint32_t *words,
                     stats_t &stats,
                     fifo_state_t &state)
 {
+  if (!state.in_spill && is_daq_suppressed_record(words, nwords)) {
+    ++stats.daq_suppressed_records;
+    if (verbose) {
+      std::cerr << "WARNING: skipping DAQ-suppressed deadbeef record fifo=" << fifo
+                << " start_counter=" << control_counter(words[0])
+                << " end_counter=" << control_counter(words[2])
+                << std::endl;
+    }
+    return true;
+  }
+
   uint32_t pos = 0;
 
   while (pos < nwords) {
@@ -457,6 +486,7 @@ make_summary(const std::string &input,
   out << "invalid_column_hits: " << stats.invalid_column_hits << '\n';
   out << "malformed_words: " << stats.malformed_words << '\n';
   out << "killed_fifo_markers: " << stats.killed_fifo << '\n';
+  out << "daq_suppressed_records: " << stats.daq_suppressed_records << '\n';
   out << "output_entries: " << output_entries << '\n';
   return out.str();
 }

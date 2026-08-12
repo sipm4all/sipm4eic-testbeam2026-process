@@ -32,7 +32,16 @@ The output tree branches are compatible with the downstream processing chain:
 device fifo type counter column pixel tdc rollover coarse fine
 ```
 
-For control words such as START_SPILL, END_SPILL, and trigger tags, fields that do not belong to the control word payload are written with placeholder value `0` rather than `-1`. ALCOR hits likewise use `counter = 0` because the hit counter field is not meaningful for them. This keeps the decoded format compatible with a possible future move to unsigned field types. The word identity must be taken from `type`, not from placeholder hit fields. START_SPILL and END_SPILL use `fine = 0` for normal spills. If the decoder suppresses a spill payload because the spill exceeded `--allowed-spill-errors`, both the START_SPILL and END_SPILL words are written with `fine = 1`.
+For control words such as START_SPILL, END_SPILL, and trigger tags, fields that do not belong to the control word payload are written with placeholder value `0` rather than `-1`. ALCOR hits likewise use `counter = 0` because the hit counter field is not meaningful for them. This keeps the decoded format compatible with a possible future move to unsigned field types. The word identity must be taken from `type`, not from placeholder hit fields.
+
+START_SPILL and END_SPILL use `fine` as a spill-status tag:
+
+```text
+fine = 0  normal spill marker
+fine = 1  decoder suppressed the spill payload because --allowed-spill-errors was exceeded
+```
+
+DAQ readout records marked by `0xdeadbeef` are never written as spill markers by the decoder. They are counted in the summary and skipped, because they do not provide reliable spill-boundary information.
 
 The decoder is stateful and conservative. For each ALCOR FIFO it searches for START_SPILL (`type == 7`), then accepts data only until the matching END_SPILL (`type == 15`) with the same counter is found. END_SPILL-looking words with the wrong counter are treated as decoding errors and skipped rather than accepted as real spill boundaries.
 
@@ -51,9 +60,17 @@ This rejects garbage words that decode into impossible FIFO/column combinations.
 --allowed-spill-errors 0
 ```
 
-If a completed spill has more errors than this threshold, the decoded output still writes the START_SPILL and END_SPILL markers for that spill, but omits all payload hits/tags from that spill. Both spill markers get `fine = 1` to tag the spill as suppressed. This preserves spill boundaries for downstream synchronization while preventing corrupted payload from entering the processing chain.
+If a completed spill has more errors than this threshold, the decoded output still writes the START_SPILL and END_SPILL markers for that spill, but omits all payload hits/tags from that spill. Both spill markers get `fine = 1` to tag the spill as decoder-suppressed. This preserves spill boundaries for downstream synchronization while preventing corrupted payload from entering the processing chain.
 
-The decoder prints summary counters including spills found/written/emptied, wrong END_SPILL candidates, invalid-column hits, malformed words, and skipped words outside spills. The same summary is also written to a sidecar text file derived from the output name: `output.root` produces `output.summary`.
+A separate DAQ-level suppression case is recognized when a buffer payload is exactly:
+
+```text
+START_SPILL 0xdeadbeef END_SPILL 0xdeadbeef
+```
+
+in the raw buffer. This record is counted as `daq_suppressed_records` and skipped. It is not written to the output tree.
+
+The decoder prints summary counters including spills found/written/emptied, DAQ-suppressed records, wrong END_SPILL candidates, invalid-column hits, malformed words, and skipped words outside spills. The same summary is also written to a sidecar text file derived from the output name: `output.root` produces `output.summary`.
 
 ### dcalib
 
@@ -161,6 +178,8 @@ Merges multiple sorted streams and collapses duplicate spill markers:
 ```bash
 process/bin/merger --input lane0.root lane1.root --output merged.root
 ```
+
+The merger is strict about spill alignment. At every START_SPILL and END_SPILL boundary, all input streams must be positioned on the same marker type with the same `counter`. The END_SPILL counter must also match the current START_SPILL counter. If a FIFO is missing a spill, for example because the decoder skipped unrecoverable `0xdeadbeef` DAQ-suppressed records, the merger fails loudly and prints each stream state.
 
 Optional split-spill output:
 

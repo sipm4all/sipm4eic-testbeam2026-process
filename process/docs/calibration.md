@@ -171,7 +171,7 @@ The default decoder policy is strict:
 --allowed-spill-errors 0
 ```
 
-If a completed spill exceeds this threshold, the decoder still writes the START_SPILL and END_SPILL markers but suppresses the payload. Suppressed spill markers are tagged with `fine = 1`; normal spill markers have `fine = 0`. Each decoded file also has a sidecar `.summary` file with counts of spills written/emptied and decoding errors.
+If a completed spill exceeds this threshold, the decoder still writes the START_SPILL and END_SPILL markers but suppresses the payload. Decoder-suppressed spill markers are tagged with `fine = 1`; normal spill markers have `fine = 0`. If the DAQ readout already discarded a spill payload and wrote `0xdeadbeef` markers, the decoder counts those DAQ-suppressed records and skips them; it never writes fake spill markers for them. Each decoded file also has a sidecar `.summary` file with counts of spills written/emptied, DAQ-suppressed records, and decoding errors.
 
 After decoding, run the independent checker workflow on the decoded files. This is a read-only preflight step; it does not modify the data and it is not part of `dcalib.sh`. It writes one ASCII `.check` report next to each decoded FIFO file and verifies basic stream consistency, including spill-marker counts and START/END spill-counter pairing.
 
