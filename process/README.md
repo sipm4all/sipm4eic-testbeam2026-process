@@ -15,7 +15,7 @@ decoded ROOT file
   -> triggered frame ROOT files
 ```
 
-All compiled programs operate on ROOT files. The common raw input tree name is `alcor`. Triggered output files contain a `frames` tree with one entry per spill and flattened frame contents split into trigger, timing, and Cherenkov collections.
+All compiled programs operate on ROOT files. The common raw input tree name is `alcor`. Triggered output files contain a `frames` tree with one entry per spill and flattened frame contents split into trigger, timing, and Cherenkov collections. The spill entry `id` is copied from the DAQ START_SPILL word `counter`, so it preserves the original spill number even when spills are processed as separate files.
 
 Directory contents:
 

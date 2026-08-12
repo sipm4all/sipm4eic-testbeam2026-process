@@ -75,7 +75,7 @@ and fill:
 
 ```text
 hDeltaT       delta_t vs target channel
-hDeltaT_spill delta_t vs spill id, 100 bins over [0,100]
+hDeltaT_spill delta_t vs spill id, 100 bins over [0,100] using the `frames.id` value written by `trigger`; this id is the DAQ START_SPILL counter.
 hDeltaT_tdc0  delta_t vs target fine for target hits with tdc == 0
 hDeltaT_tdc1  delta_t vs target fine for target hits with tdc == 1
 hDeltaT_tdc2  delta_t vs target fine for target hits with tdc == 2

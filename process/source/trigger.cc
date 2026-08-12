@@ -1006,7 +1006,7 @@ trigger(const std::string filename,
       fill_spill();
       reset();
       /** do any needed reset action **/
-      ++spill_id;
+      spill_id = data.counter;
       ++nspills;
       spill.reset(spill_id);
       in_spill = true;
