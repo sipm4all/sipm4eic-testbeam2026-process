@@ -69,6 +69,14 @@ spill_count_balance
 errors
 ```
 
+Aggregate device/run `.check` files also include diagnostic pointers for failed inputs:
+
+```text
+problem_check: <path-to-fifo-or-device-check>
+```
+
+Use `problem_check` to find the detailed per-FIFO report when an aggregate has `consistent: no` or nonzero `errors`.
+
 The DAQ end-of-spill word used by the current codebase is `type == 15`.
 
 ## dcalib.sh

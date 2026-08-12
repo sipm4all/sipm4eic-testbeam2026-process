@@ -222,6 +222,15 @@ write_aggregate_check()
         for file in "${files[@]}"; do
             echo "input_check: ${file}"
         done
+        for file in "${files[@]}"; do
+            local file_consistent file_errors
+            file_consistent=$(value_from_check "${file}" consistent)
+            file_errors=$(value_from_check "${file}" errors)
+            [[ "${file_errors}" =~ ^[0-9]+$ ]] || file_errors=0
+            if [ "${file_consistent}" = "no" ] || [ "${file_errors}" -ne 0 ]; then
+                echo "problem_check: ${file}"
+            fi
+        done
     } > "${output}"
 }
 
