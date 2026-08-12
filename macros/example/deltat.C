@@ -5,7 +5,6 @@
 #include <TTreeReaderArray.h>
 #include <TTreeReaderValue.h>
 
-#include <array>
 #include <cmath>
 #include <iostream>
 #include <string>
@@ -18,8 +17,28 @@ constexpr int spill_nbins = 100;
 constexpr double spill_min = 0.;
 constexpr double spill_max = 100.;
 
-using field_selector_t = std::array<int, 5>;    // type, device, fifo, column, pixel
-using channel_selector_t = std::array<int, 2>;  // type, channel or trigger device
+struct field_selector_t {
+  int type;
+  int device;
+  int fifo;
+  int column;
+  int pixel;
+
+  field_selector_t(int type_, int device_, int fifo_, int column_, int pixel_)
+    : type(type_), device(device_), fifo(fifo_), column(column_), pixel(pixel_)
+  {
+  }
+};
+
+struct channel_selector_t {
+  int type;
+  int channel;
+
+  channel_selector_t(int type_, int channel_)
+    : type(type_), channel(channel_)
+  {
+  }
+};
 
 struct category_reader_t {
   TTreeReaderArray<int> *frame_start;
@@ -70,17 +89,17 @@ struct category_reader_t {
 
   bool match(int i, field_selector_t selector) const
   {
-    return match_field((*type)[i], selector[0]) &&
-           match_field((*device)[i], selector[1]) &&
-           match_field((*fifo)[i], selector[2]) &&
-           match_field((*column)[i], selector[3]) &&
-           match_field((*pixel)[i], selector[4]);
+    return match_field((*type)[i], selector.type) &&
+           match_field((*device)[i], selector.device) &&
+           match_field((*fifo)[i], selector.fifo) &&
+           match_field((*column)[i], selector.column) &&
+           match_field((*pixel)[i], selector.pixel);
   }
 
   bool match(int i, channel_selector_t selector) const
   {
-    int requested_type = selector[0];
-    int requested_channel = selector[1];
+    int requested_type = selector.type;
+    int requested_channel = selector.channel;
 
     if (requested_type == 9)
       return match(i, field_selector_t{9, requested_channel, 32, -1, -1});

@@ -22,26 +22,28 @@ The original trigger-relative form finds one reference trigger hit and fills `hD
 root -l 'macros/example/deltat.C("frames.root", 9, 200, 32, -1, -1)'
 ```
 
-The macro also defines selector aliases:
+The macro also defines selector types with fixed constructor arity:
 
 ```cpp
-using field_selector_t = std::array<int, 5>;    // type, device, fifo, column, pixel
-using channel_selector_t = std::array<int, 2>;  // type, channel or trigger device
+field_selector_t(type, device, fifo, column, pixel)
+channel_selector_t(type, channel_or_trigger_device)
 ```
+
+The exact constructor arity is intentional: missing selector fields are not silently zero-initialised.
 
 Field selectors work for all stored hit categories, including trigger tags:
 
 ```cpp
 deltat("frames.root",
-       field_selector_t{1, 192, -1, -1, -1},
-       field_selector_t{1, 192, 0, 0, 0},
+       field_selector_t(1, 192, -1, -1, -1),
+       field_selector_t(1, 192, 0, 0, 0),
        "deltat.root");
 ```
 
 Channel selectors use the same global channel index as the `hDeltaT` x axis for ALCOR hits:
 
 ```cpp
-channel_selector_t{1, channel}
+channel_selector_t(1, channel)
 ```
 
 where:
@@ -54,13 +56,13 @@ channel = pixel + 4 * column + 32 * (fifo / 4)
 For trigger tags, the compact convention is:
 
 ```cpp
-channel_selector_t{9, device}
+channel_selector_t(9, device)
 ```
 
 which is interpreted as:
 
 ```cpp
-field_selector_t{9, device, 32, -1, -1}
+field_selector_t(9, device, 32, -1, -1)
 ```
 
 The target/reference overloads compute:
@@ -84,8 +86,8 @@ For example, compare all ALCOR target channels against trigger tags from device 
 
 ```cpp
 deltat("triggered.root",
-       channel_selector_t{1, -1},
-       channel_selector_t{9, 200},
+       channel_selector_t(1, -1),
+       channel_selector_t(9, 200),
        "deltat.root");
 ```
 
