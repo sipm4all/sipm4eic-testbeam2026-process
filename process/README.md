@@ -18,7 +18,7 @@ raw per-FIFO DAT file
   -> triggered frame ROOT files
 ```
 
-Most compiled programs operate on ROOT files; `decoder` is the raw `.dat` to ROOT entry point. The common raw input tree name is `alcor`. Triggered output files contain a `frames` tree with one entry per spill and flattened frame contents split into trigger, timing, and Cherenkov collections. The spill entry `id` is copied from the DAQ START_SPILL word `counter`, so it preserves the original spill number even when spills are processed as separate files. The merger enforces spill alignment by requiring all input streams to have the same START/END spill counters at every boundary.
+Most compiled programs operate on ROOT files; `decoder` is the raw `.dat` to ROOT entry point. The common raw input tree name is `alcor`. Triggered output files contain a `frames` tree with one entry per spill and flattened frame contents split into trigger, timing, and Cherenkov collections. The spill entry `id` is copied from the DAQ START_SPILL word `counter`, so it preserves the original spill number even when spills are processed as separate files. The merger aligns spills by the START_SPILL/END_SPILL counter. If one input stream is missing a suppressed spill, that stream is absent from that merged spill rather than forcing all streams to fail synchronization. The output still collapses duplicate spill markers in the `alcor` tree, and also writes a `spill_participation` tree with one entry per merged spill and the contributing `(device,fifo)` sources.
 
 
 Workflow scripts use `/data/2026-testbeam/process/<run>/` as the common run workspace. Device-local products are separated by stage:

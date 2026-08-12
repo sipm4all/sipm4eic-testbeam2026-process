@@ -363,6 +363,36 @@ Input files are read from decoded output produced by `decoder.sh`:
 
 Run `decoder.sh` with the appropriate `--run-type` first. `process.sh` keeps accepting `--run-type` so command lines can mirror the decoder command, but it no longer reads directly from `/data/2026-testbeam/actual`. Use `--devices` when a workflow should process only selected device directories, for example a same-RDO calibration closure check. Final spill merging uses only the devices processed by the current invocation, so stale split-spill files from earlier per-device runs in the same output directory are ignored.
 
+
+### Merger Spill Alignment
+
+`merger` aligns input streams by spill counter. At the start of each merge step it selects the lowest current START_SPILL counter among the input streams and merges only the streams that currently contain that counter. Streams whose next spill has a larger counter are left untouched until their counter becomes the selected counter. This supports decoded inputs where a bad or incomplete spill was suppressed entirely in one FIFO. For example:
+
+```text
+FIFO-1: spill 0, spill 1, spill 2
+FIFO-2: spill 0,          spill 2
+```
+
+produces:
+
+```text
+merged spill 0: FIFO-1, FIFO-2
+merged spill 1: FIFO-1
+merged spill 2: FIFO-1, FIFO-2
+```
+
+The duplicate START_SPILL and END_SPILL words are still collapsed in the output `alcor` tree. In addition, every merged output file contains a `spill_participation` tree with one entry per merged spill:
+
+```text
+spill/I
+counter/I
+nsources/I
+source_device[nsources]/I
+source_fifo[nsources]/I
+```
+
+Only contributing sources are recorded. If an input file already contains `spill_participation`, the merger propagates those original sources into the new metadata tree. This lets the final cross-device merge preserve the FIFO-level participation recorded by the earlier per-device split merge.
+
 By default, `process.sh` does not overwrite existing workflow outputs. If an output from a previous stopped or failed processing attempt is found, the corresponding stage is skipped and the existing file is reused. Stages that do run successfully still perform the normal cleanup of their inputs/intermediate files. Pass `--overwrite` to force regeneration of existing outputs.
 
 Important variables still configured near the top of the script:
