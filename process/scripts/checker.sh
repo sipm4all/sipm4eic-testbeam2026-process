@@ -296,6 +296,29 @@ max_spill_count()
     echo "${max:-0}"
 }
 
+mode_spill_count()
+{
+    local key=$1
+    shift
+    local max_key file value candidate best_value best_count
+    max_key=$(max_spill_count_key "${key}")
+    declare -A counts=()
+    for file in "$@"; do
+        value=$(value_or_fallback "${file}" "${max_key}" "${key}")
+        counts["${value}"]=$(( ${counts["${value}"]:-0} + 1 ))
+    done
+
+    best_value=0
+    best_count=-1
+    for candidate in "${!counts[@]}"; do
+        if [ "${counts["${candidate}"]}" -gt "${best_count}" ] || { [ "${counts["${candidate}"]}" -eq "${best_count}" ] && [ "${candidate}" -gt "${best_value}" ]; }; then
+            best_value=${candidate}
+            best_count=${counts["${candidate}"]}
+        fi
+    done
+    echo "${best_value}"
+}
+
 write_aggregate_check()
 {
     local level=$1
@@ -313,7 +336,7 @@ write_aggregate_check()
     errors=$(sum_key errors "${files[@]}")
 
     local counters_ok open_ok balance_ok start_uniform end_uniform consistent
-    local min_start max_start min_end max_end
+    local min_start max_start min_end max_end mode_start mode_end
     counters_ok=$(all_yes_key spill_counter_consistent "${files[@]}")
     open_ok=$(all_no_key open_spill_at_eof "${files[@]}")
     balance_ok=$(all_yes_key spill_count_balance "${files[@]}")
@@ -323,8 +346,10 @@ write_aggregate_check()
     max_start=$(max_spill_count start_spill_type7 "${files[@]}")
     min_end=$(min_spill_count end_spill_type15 "${files[@]}")
     max_end=$(max_spill_count end_spill_type15 "${files[@]}")
-    start_spill=${min_start}
-    end_spill=${min_end}
+    mode_start=$(mode_spill_count start_spill_type7 "${files[@]}")
+    mode_end=$(mode_spill_count end_spill_type15 "${files[@]}")
+    start_spill=${mode_start}
+    end_spill=${mode_end}
 
     consistent="yes"
     if [ "${counters_ok}" != "yes" ] || [ "${open_ok}" != "no" ] || [ "${balance_ok}" != "yes" ] || [ "${start_uniform}" != "yes" ] || [ "${end_uniform}" != "yes" ] || [ "${unknown_words}" -ne 0 ] || [ "${errors}" -ne 0 ]; then
@@ -356,8 +381,8 @@ write_aggregate_check()
             echo "input_check: ${file}"
         done
         local reference_start reference_end file_start_min file_start_max file_end_min file_end_max
-        reference_start="${min_start}"
-        reference_end="${min_end}"
+        reference_start="${mode_start}"
+        reference_end="${mode_end}"
         for file in "${files[@]}"; do
             local file_consistent file_errors
             file_consistent=$(value_from_check "${file}" consistent)
