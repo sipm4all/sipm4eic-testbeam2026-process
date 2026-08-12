@@ -14,6 +14,9 @@
 constexpr int deltat_nbins = 2048;
 constexpr double deltat_min = -32.;
 constexpr double deltat_max = 32.;
+constexpr int spill_nbins = 100;
+constexpr double spill_min = 0.;
+constexpr double spill_max = 100.;
 
 using field_selector_t = std::array<int, 5>;    // type, device, fifo, column, pixel
 using channel_selector_t = std::array<int, 2>;  // type, channel or trigger device
@@ -218,8 +221,9 @@ deltat(const std::string filename,
     return;
   }
 
-  auto scan = [&](TH2D *hist, TH2D **hist_tdc, int &nframes_used, int &nfills) {
+  auto scan = [&](TH2D *hist, TH2D **hist_tdc, TH2D *hist_spill, int &nframes_used, int &nfills) {
     TTreeReader reader(tin);
+    TTreeReaderValue<int> spill_id(reader, "id");
     TTreeReaderValue<int> nframes(reader, "nframes");
     category_reader_t trigger(reader, "trigger");
     category_reader_t timing(reader, "timing");
@@ -256,6 +260,8 @@ deltat(const std::string filename,
             if (hist) {
               int channel = target.cat->channel(target.index);
               hist->Fill(channel, delta_t);
+              if (hist_spill)
+                hist_spill->Fill(*spill_id, delta_t);
               int tdc = (*target.cat->tdc)[target.index];
               if (tdc >= 0 && tdc < 4 && hist_tdc && hist_tdc[tdc])
                 hist_tdc[tdc]->Fill((*target.cat->fine)[target.index], delta_t);
@@ -279,6 +285,7 @@ deltat(const std::string filename,
   constexpr int channels_per_device = 256;
   constexpr int nchannels = (max_device - min_device + 1) * channels_per_device;
   auto hDeltaT = new TH2D("hDeltaT", "", nchannels, 0., nchannels, deltat_nbins, deltat_min, deltat_max);
+  auto hDeltaT_spill = new TH2D("hDeltaT_spill", "", spill_nbins, spill_min, spill_max, deltat_nbins, deltat_min, deltat_max);
 
   TH2D *hDeltaT_tdc[4] = {nullptr, nullptr, nullptr, nullptr};
   for (int itdc = 0; itdc < 4; ++itdc)
@@ -286,7 +293,7 @@ deltat(const std::string filename,
 
   int nframes_used = 0;
   int nfills = 0;
-  scan(hDeltaT, hDeltaT_tdc, nframes_used, nfills);
+  scan(hDeltaT, hDeltaT_tdc, hDeltaT_spill, nframes_used, nfills);
 
   if (nframes_used == 0)
     std::cerr << " --- no frames with both target and reference hits found" << std::endl;
@@ -297,6 +304,11 @@ deltat(const std::string filename,
   if (nframes_used > 0)
     hDeltaT->Scale(1. / nframes_used);
   hDeltaT->Write();
+
+  hDeltaT_spill->Sumw2();
+  if (nframes_used > 0)
+    hDeltaT_spill->Scale(1. / nframes_used);
+  hDeltaT_spill->Write();
 
   for (int itdc = 0; itdc < 4; ++itdc) {
     hDeltaT_tdc[itdc]->Sumw2();
@@ -329,8 +341,9 @@ deltat(const std::string filename,
     return;
   }
 
-  auto scan = [&](TH2D *hist, TH2D **hist_tdc, int &nframes_used, int &nfills) {
+  auto scan = [&](TH2D *hist, TH2D **hist_tdc, TH2D *hist_spill, int &nframes_used, int &nfills) {
     TTreeReader reader(tin);
+    TTreeReaderValue<int> spill_id(reader, "id");
     TTreeReaderValue<int> nframes(reader, "nframes");
     category_reader_t trigger(reader, "trigger");
     category_reader_t timing(reader, "timing");
@@ -367,6 +380,8 @@ deltat(const std::string filename,
             if (hist) {
               int channel = target.cat->channel(target.index);
               hist->Fill(channel, delta_t);
+              if (hist_spill)
+                hist_spill->Fill(*spill_id, delta_t);
               int tdc = (*target.cat->tdc)[target.index];
               if (tdc >= 0 && tdc < 4 && hist_tdc && hist_tdc[tdc])
                 hist_tdc[tdc]->Fill((*target.cat->fine)[target.index], delta_t);
@@ -390,6 +405,7 @@ deltat(const std::string filename,
   constexpr int channels_per_device = 256;
   constexpr int nchannels = (max_device - min_device + 1) * channels_per_device;
   auto hDeltaT = new TH2D("hDeltaT", "", nchannels, 0., nchannels, deltat_nbins, deltat_min, deltat_max);
+  auto hDeltaT_spill = new TH2D("hDeltaT_spill", "", spill_nbins, spill_min, spill_max, deltat_nbins, deltat_min, deltat_max);
 
   TH2D *hDeltaT_tdc[4] = {nullptr, nullptr, nullptr, nullptr};
   for (int itdc = 0; itdc < 4; ++itdc)
@@ -397,7 +413,7 @@ deltat(const std::string filename,
 
   int nframes_used = 0;
   int nfills = 0;
-  scan(hDeltaT, hDeltaT_tdc, nframes_used, nfills);
+  scan(hDeltaT, hDeltaT_tdc, hDeltaT_spill, nframes_used, nfills);
 
   if (nframes_used == 0)
     std::cerr << " --- no frames with both target and reference hits found" << std::endl;
@@ -408,6 +424,11 @@ deltat(const std::string filename,
   if (nframes_used > 0)
     hDeltaT->Scale(1. / nframes_used);
   hDeltaT->Write();
+
+  hDeltaT_spill->Sumw2();
+  if (nframes_used > 0)
+    hDeltaT_spill->Scale(1. / nframes_used);
+  hDeltaT_spill->Write();
 
   for (int itdc = 0; itdc < 4; ++itdc) {
     hDeltaT_tdc[itdc]->Sumw2();
