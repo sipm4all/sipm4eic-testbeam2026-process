@@ -151,7 +151,43 @@ and writes outputs under:
 /data/2026-testbeam/process/<run>/<device>/
 ```
 
-For each FIFO input file, the workflow is:
+Before running the calibration jobs, run the independent checker workflow on the same decoded files. This is a read-only preflight step; it does not modify the data and it is not part of `dcalib.sh`. It writes one ASCII `.check` report per decoded FIFO file and verifies basic stream consistency, including spill-marker counts and START/END spill-counter pairing.
+
+For the three calibration data sets used below, the corresponding checks are:
+
+```bash
+sipm4eic-testbeam2026-process/process/scripts/checker.sh \
+    --run 20260618-183625 \
+    --run-type testpulse \
+    --devices kc705-200 \
+    --fifos {0..7}
+
+sipm4eic-testbeam2026-process/process/scripts/checker.sh \
+    --run 20260618-183625 \
+    --run-type testpulse \
+    --devices rdo-{192..199} \
+    --fifos {0..15}
+
+sipm4eic-testbeam2026-process/process/scripts/checker.sh \
+    --run 20260618-185127 \
+    --run-type testpulse \
+    --devices rdo-{192..199} \
+    --fifos {16..31}
+```
+
+Each command follows the same hierarchy as the processing workflow: per-FIFO `.check` files are produced first, then one device-level `.check` file is written for each selected device, and finally one run-level `.check` file is written for the selected data set. The most important fields in each `.check` file are:
+
+```text
+start_spill_type7
+end_spill_type15
+unknown_words
+spill_counter_consistent
+open_spill_at_eof
+spill_count_balance
+errors
+```
+
+The calibration jobs should be launched only after the relevant `.check` files are understood. For each FIFO input file, the `dcalib.sh` workflow itself remains:
 
 ```text
 clean -> sort -> dcalib

@@ -46,6 +46,31 @@ process/bin/cleaner --input decoded.root --output cleaned.root
 
 The output tree preserves the input tree name and branch layout through ROOT `CloneTree(0)`. The current cleaning criterion removes malformed ALCOR hits whose `column` is not valid for the corresponding `fifo`. For a given FIFO, the allowed columns are `2 * (fifo % 4)` and `2 * (fifo % 4) + 1`. Spill markers, trigger tags, and other non-ALCOR words are preserved. The program checks ROOT `GetEntry()` return values and prints input/kept/dropped/output entry counts, including the number dropped by the column test.
 
+
+### checker
+
+Runs a read-only sanity check over one decoded per-FIFO `alcor` tree and writes an ASCII report:
+
+```bash
+process/bin/checker --input decoded.root --output decoded.check
+```
+
+The report contains the input entry count, counts of known word types, unknown-word count, and spill-boundary checks:
+
+```text
+start_spill_type7
+end_spill_type15
+alcor_hits_type1
+trigger_tags_type9
+unknown_words
+spill_counter_consistent
+open_spill_at_eof
+spill_count_balance
+errors
+```
+
+The current DAQ control-word convention is `type == 7` for START_SPILL and `type == 15` for END_SPILL. START and END spill counters are expected to pair with the same `counter` value, and counters are expected to increase by one spill-to-spill.
+
 ### calibrator
 
 Creates or updates the calibrated `time` branch in the `alcor` tree:

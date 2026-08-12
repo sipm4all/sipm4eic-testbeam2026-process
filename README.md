@@ -3,7 +3,7 @@
 This repository contains ROOT-based tools for processing SiPM4EIC 2026 test-beam data after decoding. The processing chain is organized as:
 
 ```text
-decode -> clean -> calibrate -> sort -> merge -> trigger/frame -> analysis macros
+decode -> optional check -> clean -> calibrate -> sort -> merge -> trigger/frame -> analysis macros
 ```
 
 The repository is intentionally split between compiled processing programs and ROOT analysis macros:
@@ -31,6 +31,7 @@ After install, this creates the processing executables in `process/bin/`:
 ```text
 dcalib
 cleaner
+checker
 calibrator
 sorter
 after-pulse-suppressor
@@ -42,11 +43,14 @@ trigger
 
 - `dcalib`: derives TDC `off/iif` calibration rows from decoded data.
 - `cleaner`: clones the `alcor` tree while dropping malformed ALCOR hits, currently invalid `fifo`/`column` combinations.
+- `checker`: scans a per-FIFO `alcor` tree and writes an ASCII `.check` sanity report.
 - `calibrator`: creates or updates the calibrated `time` branch in the decoded `alcor` tree.
 - `sorter`: sorts each single-lane stream in calibrated time.
 - `after-pulse-suppressor`: suppresses close repeated ALCOR hits per channel.
 - `merger`: merges sorted lane/device streams while preserving spill boundaries.
 - `trigger`: creates triggered frame trees using declarative trigger configurations.
 - `macros/lib/trigger_reader.h`: header-only helper for reading triggered frame output.
+
+Run `process/scripts/checker.sh` first when you want a non-destructive sanity pass over decoded per-FIFO files before launching the full processing workflow.
 
 Generated ROOT files, logs, build products, and local binaries are ignored by git.

@@ -6,6 +6,7 @@ Recommended order:
 
 ```text
 decoded ROOT file
+  -> optional checker
   -> cleaner
   -> calibrator
   -> sorter
@@ -27,3 +28,5 @@ config/trigger/         trigger-definition files
 ```
 
 The `cleaner` stage removes malformed stream words before calibration, currently ALCOR hits with invalid `fifo`/`column` combinations. The key design point is that low-level timing calibration happens once, early, in `calibrator`. Downstream tools prefer the calibrated `time` branch when present and only use the old nominal timing expression for legacy uncalibrated files.
+
+The optional `checker` program scans decoded per-FIFO files before processing and writes ASCII `.check` reports with word counts and spill-counter consistency checks. It is read-only: it does not create ROOT data products and does not affect the normal processing chain.

@@ -10,6 +10,67 @@ cmake --build process/build -j
 cmake --install process/build
 ```
 
+
+## checker.sh
+
+`checker.sh` runs the lightweight data sanity checker over decoded per-FIFO ROOT files. It does not modify data. For each input file it writes one ASCII `.check` report in the matching process output device directory.
+
+Run:
+
+```bash
+process/scripts/checker.sh --run RUN_NAME
+process/scripts/checker.sh --run RUN_NAME --run-type testpulse --devices kc705-200 rdo-{192..195} --fifos {0..16}
+```
+
+The accepted filters mirror the `dcalib.sh` style:
+
+```text
+--run RUN            run name/directory
+--run-type TYPE      input run type, default physics; supported: physics, testpulse
+--devices all        process all devices, default
+--devices DEV ...    process selected device directories
+--fifos all          process all FIFOs, default
+--fifos FIFO ...     process selected FIFO numbers or inclusive ranges
+```
+
+For an input file:
+
+```text
+/data/2026-testbeam/actual/<run-type>/<run>/<device>/decoded/alcdaq.fifo_0.root
+```
+
+it writes per-FIFO reports such as:
+
+```text
+/data/2026-testbeam/process/<run>/<device>/alcdaq.fifo_0.check
+```
+
+The workflow is hierarchical: per-FIFO checks are produced first, then one device-level check is written for that device, and finally one run-level check is written after all selected devices are complete. Aggregate reports are:
+
+```text
+/data/2026-testbeam/process/<run>/<device>/<device>.check
+/data/2026-testbeam/process/<run>/<run>.check
+```
+
+The device-level report sums the selected FIFO reports for that device. The run-level report sums the selected device reports from the current invocation.
+
+Each `.check` file contains:
+
+```text
+entries
+start_spill_type7
+end_spill_type15
+alcor_hits_type1
+trigger_tags_type9
+unknown_words
+spill_counter_consistent
+open_spill_at_eof
+spill_count_balance
+errors
+```
+
+The DAQ end-of-spill word used by the current codebase is `type == 15`.
+
 ## dcalib.sh
 
 `dcalib.sh` runs TDC calibration over all decoded FIFO files in a run. For each FIFO file the workflow is:
