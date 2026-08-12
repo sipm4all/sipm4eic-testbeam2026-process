@@ -22,27 +22,77 @@ The original trigger-relative form finds one reference trigger hit and fills `hD
 root -l 'macros/example/deltat.C("frames.root", 9, 200, 32, -1, -1)'
 ```
 
-A second overload compares two selected hit sets directly:
+The macro also defines selector aliases:
 
 ```cpp
-deltat(filename,
-       target_type, target_device, target_fifo, target_column, target_pixel,
-       reference_type, reference_device, reference_fifo, reference_column, reference_pixel,
-       outfilename)
+using field_selector_t = std::array<int, 5>;    // type, device, fifo, column, pixel
+using channel_selector_t = std::array<int, 2>;  // type, channel or trigger device
 ```
 
-It fills:
+Field selectors work for all stored hit categories, including trigger tags:
+
+```cpp
+deltat("frames.root",
+       field_selector_t{1, 192, -1, -1, -1},
+       field_selector_t{1, 192, 0, 0, 0},
+       "deltat.root");
+```
+
+Channel selectors use the same global channel index as the `hDeltaT` x axis for ALCOR hits:
+
+```cpp
+channel_selector_t{1, channel}
+```
+
+where:
+
+```cpp
+channel = pixel + 4 * column + 32 * (fifo / 4)
+        + 256 * (device - 192);
+```
+
+For trigger tags, the compact convention is:
+
+```cpp
+channel_selector_t{9, device}
+```
+
+which is interpreted as:
+
+```cpp
+field_selector_t{9, device, 32, -1, -1}
+```
+
+The target/reference overloads compute:
 
 ```text
-hDeltaT       delta_t = target.time - reference.time vs target channel
+delta_t = target.time - reference.time
+```
+
+and fill:
+
+```text
+hDeltaT       delta_t vs target channel
 hDeltaT_tdc0  delta_t vs target fine for target hits with tdc == 0
 hDeltaT_tdc1  delta_t vs target fine for target hits with tdc == 1
 hDeltaT_tdc2  delta_t vs target fine for target hits with tdc == 2
 hDeltaT_tdc3  delta_t vs target fine for target hits with tdc == 3
 ```
 
-For example, compare LASER-side target hits on device 192 FIFOs `16..31` against the test-pulse reference channel `fifo=0,column=0,pixel=0`:
+For example, compare all ALCOR target channels against trigger tags from device 200:
 
-```bash
-root -l 'macros/example/deltat.C("triggered.root", 1, 192, -1, -1, -1, 1, 192, 0, 0, 0, "deltat.root")'
+```cpp
+deltat("triggered.root",
+       channel_selector_t{1, -1},
+       channel_selector_t{9, 200},
+       "deltat.root");
+```
+
+The old positional target/reference form remains available as a wrapper:
+
+```cpp
+deltat(filename,
+       target_type, target_device, target_fifo, target_column, target_pixel,
+       reference_type, reference_device, reference_fifo, reference_column, reference_pixel,
+       outfilename);
 ```

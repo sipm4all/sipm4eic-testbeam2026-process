@@ -5,6 +5,7 @@
 #include <TTreeReaderArray.h>
 #include <TTreeReaderValue.h>
 
+#include <array>
 #include <cmath>
 #include <iostream>
 #include <string>
@@ -13,6 +14,9 @@
 constexpr int deltat_nbins = 2048;
 constexpr double deltat_min = -32.;
 constexpr double deltat_max = 32.;
+
+using field_selector_t = std::array<int, 5>;    // type, device, fifo, column, pixel
+using channel_selector_t = std::array<int, 2>;  // type, channel or trigger device
 
 struct category_reader_t {
   TTreeReaderArray<int> *frame_start;
@@ -61,24 +65,36 @@ struct category_reader_t {
     return requested < 0 || value == requested;
   }
 
-  bool match(int i, int trigger_type, int trigger_device, int trigger_fifo,
-             int trigger_column, int trigger_pixel) const
+  bool match(int i, field_selector_t selector) const
   {
-    return match_field((*type)[i], trigger_type) &&
-           match_field((*device)[i], trigger_device) &&
-           match_field((*fifo)[i], trigger_fifo) &&
-           match_field((*column)[i], trigger_column) &&
-           match_field((*pixel)[i], trigger_pixel);
+    return match_field((*type)[i], selector[0]) &&
+           match_field((*device)[i], selector[1]) &&
+           match_field((*fifo)[i], selector[2]) &&
+           match_field((*column)[i], selector[3]) &&
+           match_field((*pixel)[i], selector[4]);
+  }
+
+  bool match(int i, channel_selector_t selector) const
+  {
+    int requested_type = selector[0];
+    int requested_channel = selector[1];
+
+    if (requested_type == 9)
+      return match(i, field_selector_t{9, requested_channel, 32, -1, -1});
+
+    if (!match_field((*type)[i], requested_type))
+      return false;
+
+    if ((*type)[i] != 1)
+      return false;
+
+    return match_field(channel(i), requested_channel);
   }
 };
 
 void
 deltat(const std::string filename,
-       int trigger_type,
-       int trigger_device,
-       int trigger_fifo,
-       int trigger_column,
-       int trigger_pixel,
+       field_selector_t reference,
        const std::string outfilename = "deltat.root")
 {
   auto fin = TFile::Open(filename.c_str());
@@ -111,7 +127,7 @@ deltat(const std::string filename,
           int nhits = (*cat->frame_nhits)[iframe];
           for (int ihit = 0; ihit < nhits; ++ihit) {
             int i = first + ihit;
-            if (!cat->match(i, trigger_type, trigger_device, trigger_fifo, trigger_column, trigger_pixel))
+            if (!cat->match(i, reference))
               continue;
             trigger_cat = cat;
             itrigger = i;
@@ -185,16 +201,8 @@ struct hit_ref_t {
 
 void
 deltat(const std::string filename,
-       int target_type,
-       int target_device,
-       int target_fifo,
-       int target_column,
-       int target_pixel,
-       int reference_type,
-       int reference_device,
-       int reference_fifo,
-       int reference_column,
-       int reference_pixel,
+       field_selector_t target_selector,
+       field_selector_t reference_selector,
        const std::string outfilename = "deltat.root")
 {
   auto fin = TFile::Open(filename.c_str());
@@ -228,9 +236,9 @@ deltat(const std::string filename,
           int nhits = (*cat->frame_nhits)[iframe];
           for (int ihit = 0; ihit < nhits; ++ihit) {
             int i = first + ihit;
-            if (cat->match(i, target_type, target_device, target_fifo, target_column, target_pixel))
+            if (cat->match(i, target_selector))
               targets.push_back({cat, i});
-            if (cat->match(i, reference_type, reference_device, reference_fifo, reference_column, reference_pixel))
+            if (cat->match(i, reference_selector))
               references.push_back({cat, i});
           }
         }
@@ -299,4 +307,149 @@ deltat(const std::string filename,
 
   fout->Close();
   fin->Close();
+}
+
+
+void
+deltat(const std::string filename,
+       channel_selector_t target_selector,
+       channel_selector_t reference_selector,
+       const std::string outfilename = "deltat.root")
+{
+  auto fin = TFile::Open(filename.c_str());
+  if (!fin || fin->IsZombie()) {
+    std::cerr << " --- could not open input file: " << filename << std::endl;
+    return;
+  }
+
+  auto tin = (TTree *)fin->Get("frames");
+  if (!tin) {
+    std::cerr << " --- could not find 'frames' tree in input file" << std::endl;
+    fin->Close();
+    return;
+  }
+
+  auto scan = [&](TH2D *hist, TH2D **hist_tdc, int &nframes_used, int &nfills) {
+    TTreeReader reader(tin);
+    TTreeReaderValue<int> nframes(reader, "nframes");
+    category_reader_t trigger(reader, "trigger");
+    category_reader_t timing(reader, "timing");
+    category_reader_t cherenkov(reader, "cherenkov");
+    category_reader_t *cats[] = {&trigger, &timing, &cherenkov};
+
+    while (reader.Next()) {
+      for (int iframe = 0; iframe < *nframes; ++iframe) {
+        std::vector<hit_ref_t> targets;
+        std::vector<hit_ref_t> references;
+
+        for (auto cat : cats) {
+          int first = (*cat->frame_start)[iframe];
+          int nhits = (*cat->frame_nhits)[iframe];
+          for (int ihit = 0; ihit < nhits; ++ihit) {
+            int i = first + ihit;
+            if (cat->match(i, target_selector))
+              targets.push_back({cat, i});
+            if (cat->match(i, reference_selector))
+              references.push_back({cat, i});
+          }
+        }
+
+        if (targets.empty() || references.empty())
+          continue;
+
+        ++nframes_used;
+        for (const auto &target : targets) {
+          for (const auto &reference : references) {
+            if (target.cat == reference.cat && target.index == reference.index)
+              continue;
+
+            auto delta_t = target.cat->hit_time(target.index) - reference.cat->hit_time(reference.index);
+            if (hist) {
+              int channel = target.cat->channel(target.index);
+              hist->Fill(channel, delta_t);
+              int tdc = (*target.cat->tdc)[target.index];
+              if (tdc >= 0 && tdc < 4 && hist_tdc && hist_tdc[tdc])
+                hist_tdc[tdc]->Fill((*target.cat->fine)[target.index], delta_t);
+              ++nfills;
+            }
+          }
+        }
+      }
+    }
+  };
+
+  auto fout = TFile::Open(outfilename.c_str(), "RECREATE");
+  if (!fout || fout->IsZombie()) {
+    std::cerr << " --- could not create output file: " << outfilename << std::endl;
+    fin->Close();
+    return;
+  }
+
+  constexpr int min_device = 192;
+  constexpr int max_device = 200;
+  constexpr int channels_per_device = 256;
+  constexpr int nchannels = (max_device - min_device + 1) * channels_per_device;
+  auto hDeltaT = new TH2D("hDeltaT", "", nchannels, 0., nchannels, deltat_nbins, deltat_min, deltat_max);
+
+  TH2D *hDeltaT_tdc[4] = {nullptr, nullptr, nullptr, nullptr};
+  for (int itdc = 0; itdc < 4; ++itdc)
+    hDeltaT_tdc[itdc] = new TH2D(Form("hDeltaT_tdc%d", itdc), "", 256, 0., 256., deltat_nbins, deltat_min, deltat_max);
+
+  int nframes_used = 0;
+  int nfills = 0;
+  scan(hDeltaT, hDeltaT_tdc, nframes_used, nfills);
+
+  if (nframes_used == 0)
+    std::cerr << " --- no frames with both target and reference hits found" << std::endl;
+  std::cout << " --- frames with target/reference hits: " << nframes_used << std::endl;
+  std::cout << " --- histogram fills: " << nfills << std::endl;
+
+  hDeltaT->Sumw2();
+  if (nframes_used > 0)
+    hDeltaT->Scale(1. / nframes_used);
+  hDeltaT->Write();
+
+  for (int itdc = 0; itdc < 4; ++itdc) {
+    hDeltaT_tdc[itdc]->Sumw2();
+    if (nframes_used > 0)
+      hDeltaT_tdc[itdc]->Scale(1. / nframes_used);
+    hDeltaT_tdc[itdc]->Write();
+  }
+
+  fout->Close();
+  fin->Close();
+}
+
+void
+deltat(const std::string filename,
+       int trigger_type,
+       int trigger_device,
+       int trigger_fifo,
+       int trigger_column,
+       int trigger_pixel,
+       const std::string outfilename = "deltat.root")
+{
+  deltat(filename,
+         field_selector_t{trigger_type, trigger_device, trigger_fifo, trigger_column, trigger_pixel},
+         outfilename);
+}
+
+void
+deltat(const std::string filename,
+       int target_type,
+       int target_device,
+       int target_fifo,
+       int target_column,
+       int target_pixel,
+       int reference_type,
+       int reference_device,
+       int reference_fifo,
+       int reference_column,
+       int reference_pixel,
+       const std::string outfilename = "deltat.root")
+{
+  deltat(filename,
+         field_selector_t{target_type, target_device, target_fifo, target_column, target_pixel},
+         field_selector_t{reference_type, reference_device, reference_fifo, reference_column, reference_pixel},
+         outfilename);
 }
