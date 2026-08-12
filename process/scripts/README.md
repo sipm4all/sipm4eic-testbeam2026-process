@@ -180,6 +180,7 @@ Optional command-line options:
                            supported values: physics, testpulse
 --devices DEVICE ...       device directory names to process, default all
                            accepts names such as kc705-200, rdo-192, rdo-{192..199}
+--overwrite                overwrite existing workflow outputs instead of skipping them
 --window VALUE             trigger frame window, default 256
 --help                     print usage
 ```
@@ -203,7 +204,9 @@ Input files are read from:
 /data/2026-testbeam/actual/<run-type>/<run>/...
 ```
 
-Use the default `--run-type physics` for normal physics data and `--run-type testpulse` for calibration/test-pulse runs. Use `--devices` when a workflow should process only selected device directories, for example a same-RDO calibration closure check.
+Use the default `--run-type physics` for normal physics data and `--run-type testpulse` for calibration/test-pulse runs. Use `--devices` when a workflow should process only selected device directories, for example a same-RDO calibration closure check. Final spill merging uses only the devices processed by the current invocation, so stale split-spill files from earlier per-device runs in the same output directory are ignored.
+
+By default, `process.sh` does not overwrite existing workflow outputs. If an output from a previous stopped or failed processing attempt is found, the corresponding stage is skipped and the existing file is reused. Stages that do run successfully still perform the normal cleanup of their inputs/intermediate files. Pass `--overwrite` to force regeneration of existing outputs.
 
 Important variables still configured near the top of the script:
 

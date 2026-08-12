@@ -24,6 +24,7 @@ APS_WINDOW=50
 TRIGGER_WINDOW=256
 DEVICE_FILTER=()
 DEVICE_ALL=1
+OVERWRITE=0
 
 WRITE_LOGS=0
 CLEAN_DEVICE_SPILLS=1
@@ -45,6 +46,7 @@ options:
   --run-type TYPE                input run type under /data/2026-testbeam/actual, default: physics
                                   supported: physics, testpulse
   --devices DEVICE ...           device directory names to process, default: all
+  --overwrite                    overwrite existing workflow outputs instead of skipping them
   --window, -w VALUE             trigger frame window, default: 256
   --help, -h                     show this help message
 
@@ -176,6 +178,10 @@ while [ $# -gt 0 ]; do
             fi
             shift "${PARSE_FILTER_CONSUMED}"
             ;;
+        --overwrite)
+            OVERWRITE=1
+            shift
+            ;;
         --calibration|-c)
             [ $# -ge 2 ] || fail "$1 requires FILE"
             CALIBRATION_CONFIG=$2
@@ -240,8 +246,29 @@ fi
 orpath="${opath}/${run}"
 mkdir -p "${orpath}"
 
+merge_prefix="aps.sorted"
+if [ "${DEVICE_ALL}" -ne 1 ]; then
+    device_tag=$(IFS=_; echo "${DEVICE_FILTER[*]}")
+    merge_prefix="aps.sorted.${device_tag}"
+fi
+
+if [ "${OVERWRITE}" -ne 1 ]; then
+    final_outputs_done=1
+    for tag in "${TRIGGER_TAGS[@]}"; do
+        if [ ! -f "${orpath}/triggered.${tag}.root" ]; then
+            final_outputs_done=0
+            break
+        fi
+    done
+    if [ "${final_outputs_done}" -eq 1 ]; then
+        echo " --- final triggered outputs exist, nothing to do"
+        exit 0
+    fi
+fi
+
 ### loop over device directories
 merge_pids=()
+processed_device_dirs=()
 for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
 
     [ -d "${idpath}" ] || continue
@@ -253,6 +280,13 @@ for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
     odpath="${orpath}/${device}"
     mkdir -p "${odpath}"
     echo " --- processing device ${device}: ${idpath} "
+
+    device_spill_files=("${odpath}"/aps.sorted.spill_*.root)
+    if [ "${OVERWRITE}" -ne 1 ] && [ ${#device_spill_files[@]} -gt 0 ]; then
+        echo " --- device split-spill outputs exist, skipping device processing: ${odpath}/aps.sorted.spill_*.root"
+        processed_device_dirs+=("${odpath}")
+        continue
+    fi
 
     decoded_files=("${idpath}"/decoded/alcdaq.fifo_*.root)
     if [ ${#decoded_files[@]} -eq 0 ]; then
@@ -279,6 +313,17 @@ for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
             calibration_config=$8
             sort_window=$9
             aps_window=${10}
+            overwrite=${11}
+
+            if [ "${overwrite}" -ne 1 ] && [ -f "${output}" ]; then
+                echo " --- output exists, skipping FIFO processing: ${output}"
+                exit 0
+            fi
+
+            if [ "${overwrite}" -ne 1 ] && { [ -f "${calibrated}" ] || [ -f "${sorted}" ]; }; then
+                echo " --- intermediate output exists, skipping FIFO processing: ${calibrated} ${sorted}"
+                exit 0
+            fi
 
             "${calibrator}" --input "${input}" --output "${calibrated}" --config "${calibration_config}"
             "${sorter}" --input "${calibrated}" --output "${sorted}" --window "${sort_window}"
@@ -291,7 +336,8 @@ for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
             "${odpath}/aps.sorted.${fifo}.root" \
             "${CALIBRATION_CONFIG}" \
             "${SORT_WINDOW}" \
-            "${APS_WINDOW}" &
+            "${APS_WINDOW}" \
+            "${OVERWRITE}" &
         pids+=($!)
 
     done
@@ -303,14 +349,25 @@ for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
         continue
     fi
 
+    processed_device_dirs+=("${odpath}")
+
     ### merge device, split by spill
     run_job "${odpath}/aps.sorted.log" bash -c '
+        shopt -s nullglob
         merger=$1
         output=$2
-        shift 2
+        overwrite=$3
+        shift 3
+
+        existing=("${output%.root}".spill_*.root)
+        if [ "${overwrite}" -ne 1 ] && [ ${#existing[@]} -gt 0 ]; then
+            echo " --- device split-spill outputs exist, skipping device merge: ${output%.root}.spill_*.root"
+            exit 0
+        fi
+
         time -p "${merger}" --input "$@" --output "${output}" --split-spills
         rm -f "$@"
-    ' _ "${MERGER}" "${odpath}/aps.sorted.root" "${aps_files[@]}" &
+    ' _ "${MERGER}" "${odpath}/aps.sorted.root" "${OVERWRITE}" "${aps_files[@]}" &
     merge_pids+=($!)
 
 done
@@ -321,23 +378,21 @@ if [ ${#merge_pids[@]} -gt 0 ]; then
 fi
 
 ### merge all, one parallel merge per spill
-device_dirs=()
-for dpath in "${orpath}"/*; do
-    [ -d "${dpath}" ] || continue
-    files=("${dpath}"/aps.sorted.spill_*.root)
-    if [ ${#files[@]} -gt 0 ]; then
-        device_dirs+=("${dpath}")
-    fi
-done
+device_dirs=("${processed_device_dirs[@]}")
 
 if [ ${#device_dirs[@]} -eq 0 ]; then
-    echo " --- no device directories with split-spill files found "
+    echo " --- no device directories processed in this invocation "
     exit 1
 fi
 
-spill_files=("${orpath}"/*/aps.sorted.spill_*.root)
+spill_files=()
+for dpath in "${device_dirs[@]}"; do
+    files=("${dpath}"/aps.sorted.spill_*.root)
+    spill_files+=("${files[@]}")
+done
+
 if [ ${#spill_files[@]} -eq 0 ]; then
-    echo " --- no device-level split-spill files found "
+    echo " --- no device-level split-spill files found for devices processed in this invocation "
     exit 1
 fi
 
@@ -379,7 +434,11 @@ done
 echo " --- final spill merges started "
 final_pids=()
 for spill_id in "${spill_ids[@]}"; do
-    device_outputs=("${orpath}"/*/aps.sorted.spill_${spill_id}.root)
+    device_outputs=()
+    for dpath in "${device_dirs[@]}"; do
+        files=("${dpath}"/aps.sorted.spill_${spill_id}.root)
+        device_outputs+=("${files[@]}")
+    done
     if [ ${#device_outputs[@]} -eq 0 ]; then
         echo " --- no device-level files found for spill ${spill_id} "
         exit 1
@@ -389,19 +448,26 @@ for spill_id in "${spill_ids[@]}"; do
         exit 1
     fi
 
-    run_job "${orpath}/aps.sorted.spill_${spill_id}.log" bash -c '
+    run_job "${orpath}/${merge_prefix}.spill_${spill_id}.log" bash -c '
         merger=$1
         output=$2
         clean_device_spills=$3
-        shift 3
+        overwrite=$4
+        shift 4
+
+        if [ "${overwrite}" -ne 1 ] && [ -f "${output}" ]; then
+            echo " --- merged spill exists, skipping final spill merge: ${output}"
+            exit 0
+        fi
 
         time -p "${merger}" --input "$@" --output "${output}"
         if [ "${clean_device_spills}" -eq 1 ]; then
             rm -f "$@"
         fi
     ' _ "${MERGER}" \
-        "${orpath}/aps.sorted.spill_${spill_id}.root" \
+        "${orpath}/${merge_prefix}.spill_${spill_id}.root" \
         "${CLEAN_DEVICE_SPILLS}" \
+        "${OVERWRITE}" \
         "${device_outputs[@]}" &
     final_pids+=($!)
 done
@@ -417,7 +483,7 @@ for i in "${!TRIGGER_CONFIGS[@]}"; do
 
     trigger_pids=()
     for spill_id in "${spill_ids[@]}"; do
-        merged_spill="${orpath}/aps.sorted.spill_${spill_id}.root"
+        merged_spill="${orpath}/${merge_prefix}.spill_${spill_id}.root"
         if [ ! -f "${merged_spill}" ]; then
             echo " --- merged spill file not found: ${merged_spill} "
             exit 1
@@ -431,6 +497,12 @@ for i in "${!TRIGGER_CONFIGS[@]}"; do
             output=$3
             config=$4
             window=$5
+            overwrite=$6
+
+            if [ "${overwrite}" -ne 1 ] && [ -f "${output}" ]; then
+                echo " --- triggered spill exists, skipping trigger: ${output}"
+                exit 0
+            fi
 
             time -p "${trigger}" --input "${input}" \
                                 --output "${output}" \
@@ -440,13 +512,20 @@ for i in "${!TRIGGER_CONFIGS[@]}"; do
             "${merged_spill}" \
             "${triggered}" \
             "${config}" \
-            "${TRIGGER_WINDOW}" &
+            "${TRIGGER_WINDOW}" \
+            "${OVERWRITE}" &
         trigger_pids+=($!)
     done
 
     wait "${trigger_pids[@]}"
 
-    triggered_files=("${orpath}"/triggered.${tag}.spill_*.root)
+    triggered_files=()
+    for spill_id in "${spill_ids[@]}"; do
+        triggered="${orpath}/triggered.${tag}.spill_${spill_id}.root"
+        if [ -f "${triggered}" ]; then
+            triggered_files+=("${triggered}")
+        fi
+    done
     if [ ${#triggered_files[@]} -eq 0 ]; then
         echo " --- no triggered spill files found for tag ${tag} "
         exit 1
@@ -460,15 +539,22 @@ for i in "${!TRIGGER_CONFIGS[@]}"; do
         hadd=$1
         output=$2
         clean_triggered_spills=$3
-        shift 3
+        overwrite=$4
+        shift 4
+
+        if [ "${overwrite}" -ne 1 ] && [ -f "${output}" ]; then
+            echo " --- triggered output exists, skipping hadd: ${output}"
+            exit 0
+        fi
+
         time -p "${hadd}" -f "${output}" "$@"
         if [ "${clean_triggered_spills}" -eq 1 ]; then
             rm -f "$@"
         fi
-    ' _ "${HADD}" "${orpath}/triggered.${tag}.root" "${CLEAN_TRIGGERED_SPILLS}" "${triggered_files[@]}"
+    ' _ "${HADD}" "${orpath}/triggered.${tag}.root" "${CLEAN_TRIGGERED_SPILLS}" "${OVERWRITE}" "${triggered_files[@]}"
 done
 
 if [ "${CLEAN_MERGED_SPILLS}" -eq 1 ]; then
-    rm -f "${orpath}"/aps.sorted.spill_*.root
+    rm -f "${orpath}"/${merge_prefix}.spill_*.root
 fi
 cleanup_empty_device_dirs
