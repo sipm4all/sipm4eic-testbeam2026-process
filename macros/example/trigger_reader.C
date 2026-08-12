@@ -12,7 +12,18 @@ void trigger_reader(const char *filename = "frames.root")
   while (reader.next_spill()) {
     std::cout << "spill " << reader.spill_id()
               << " nframes=" << reader.nframes()
+              << " nsources=" << reader.nsources()
               << std::endl;
+
+    int nprinted = 0;
+    for (const auto &source : reader.sources()) {
+      std::cout << "  source"
+                << " device=" << source.device
+                << " fifo=" << source.fifo
+                << std::endl;
+      if (++nprinted >= 4)
+        break;
+    }
 
     while (reader.next_frame()) {
       std::cout << "  frame " << reader.frame_index()

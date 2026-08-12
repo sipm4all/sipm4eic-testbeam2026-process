@@ -11,6 +11,11 @@
 #include <string>
 #include <vector>
 
+struct source_t {
+  int device;
+  int fifo;
+};
+
 struct hit_t {
   int device;
   int fifo;
@@ -37,9 +42,11 @@ public:
   int spill_id() const;
   int frame_index() const;
   int nframes() const;
+  int nsources() const;
 
-  // Hit vectors describe the current frame and remain valid until open(),
-  // next_spill(), or next_frame() is called again.
+  // Source and hit vectors describe the current spill/frame and remain valid
+  // until open(), next_spill(), or next_frame() is called again.
+  const std::vector<source_t> &sources() const;
   const std::vector<hit_t> &trigger_hits() const;
   const std::vector<hit_t> &timing_hits() const;
   const std::vector<hit_t> &cherenkov_hits() const;
@@ -72,9 +79,15 @@ private:
 
   std::unique_ptr<TFile> file_;
   TTree *tree_ = nullptr;
+  TTree *meta_tree_ = nullptr;
   std::unique_ptr<TTreeReader> reader_;
+  std::unique_ptr<TTreeReader> meta_reader_;
   std::unique_ptr<TTreeReaderValue<int>> id_branch_;
   std::unique_ptr<TTreeReaderValue<int>> nframes_branch_;
+  std::unique_ptr<TTreeReaderValue<int>> meta_counter_branch_;
+  std::unique_ptr<TTreeReaderValue<int>> meta_nsources_branch_;
+  std::unique_ptr<TTreeReaderArray<int>> meta_source_device_branch_;
+  std::unique_ptr<TTreeReaderArray<int>> meta_source_fifo_branch_;
 
   category_t trigger_;
   category_t timing_;
@@ -86,6 +99,7 @@ private:
   int nframes_ = 0;
   int frame_index_ = -1;
 
+  std::vector<source_t> sources_;
   std::vector<hit_t> trigger_hits_;
   std::vector<hit_t> timing_hits_;
   std::vector<hit_t> cherenkov_hits_;
@@ -215,6 +229,7 @@ trigger_reader_t::category_t::fill(std::vector<hit_t> &out, int iframe,
 inline void
 trigger_reader_t::reset()
 {
+  sources_.clear();
   trigger_hits_.clear();
   timing_hits_.clear();
   cherenkov_hits_.clear();
@@ -225,7 +240,13 @@ trigger_reader_t::reset()
 
   id_branch_.reset();
   nframes_branch_.reset();
+  meta_counter_branch_.reset();
+  meta_nsources_branch_.reset();
+  meta_source_device_branch_.reset();
+  meta_source_fifo_branch_.reset();
+  meta_reader_.reset();
   reader_.reset();
+  meta_tree_ = nullptr;
   tree_ = nullptr;
   file_.reset();
 
@@ -271,6 +292,26 @@ trigger_reader_t::open(const std::string &filename)
     return false;
   }
 
+  meta_tree_ = (TTree *)file_->Get("spill_participation");
+  if (meta_tree_) {
+    for (auto name : {"counter", "nsources", "source_device", "source_fifo"}) {
+      if (!has_branch(meta_tree_, name)) {
+        reset();
+        return false;
+      }
+    }
+    if (meta_tree_->GetEntries() != tree_->GetEntries()) {
+      std::cerr << "ERROR: frames/spill_participation entry-count mismatch" << std::endl;
+      reset();
+      return false;
+    }
+    meta_reader_.reset(new TTreeReader(meta_tree_));
+    meta_counter_branch_.reset(new TTreeReaderValue<int>(*meta_reader_, "counter"));
+    meta_nsources_branch_.reset(new TTreeReaderValue<int>(*meta_reader_, "nsources"));
+    meta_source_device_branch_.reset(new TTreeReaderArray<int>(*meta_reader_, "source_device"));
+    meta_source_fifo_branch_.reset(new TTreeReaderArray<int>(*meta_reader_, "source_fifo"));
+  }
+
   nspills_ = tree_->GetEntries();
   spill_entry_ = -1;
   frame_index_ = -1;
@@ -280,6 +321,7 @@ trigger_reader_t::open(const std::string &filename)
 inline bool
 trigger_reader_t::next_spill()
 {
+  sources_.clear();
   trigger_hits_.clear();
   timing_hits_.clear();
   cherenkov_hits_.clear();
@@ -299,6 +341,32 @@ trigger_reader_t::next_spill()
   ++spill_entry_;
   spill_id_ = **id_branch_;
   nframes_ = **nframes_branch_;
+
+  if (meta_reader_) {
+    if (!meta_reader_->Next()) {
+      std::cerr << "ERROR: failed to read spill_participation entry " << spill_entry_ << std::endl;
+      return false;
+    }
+    if (**meta_counter_branch_ != spill_id_) {
+      std::cerr << "ERROR: spill_participation counter mismatch"
+                << " frame_id=" << spill_id_
+                << " meta_counter=" << **meta_counter_branch_ << std::endl;
+      return false;
+    }
+    int nsrc = **meta_nsources_branch_;
+    if (nsrc < 0 || meta_source_device_branch_->GetSize() < nsrc ||
+        meta_source_fifo_branch_->GetSize() < nsrc) {
+      std::cerr << "ERROR: invalid spill_participation source arrays" << std::endl;
+      return false;
+    }
+    sources_.reserve(nsrc);
+    for (int i = 0; i < nsrc; ++i) {
+      source_t source;
+      source.device = (*meta_source_device_branch_)[i];
+      source.fifo = (*meta_source_fifo_branch_)[i];
+      sources_.push_back(source);
+    }
+  }
 
   if (nframes_ < 0) {
     std::cerr << "ERROR: negative nframes in spill entry " << spill_entry_ << std::endl;
@@ -345,6 +413,18 @@ inline int
 trigger_reader_t::nframes() const
 {
   return nframes_;
+}
+
+inline int
+trigger_reader_t::nsources() const
+{
+  return (int)sources_.size();
+}
+
+inline const std::vector<source_t> &
+trigger_reader_t::sources() const
+{
+  return sources_;
 }
 
 inline const std::vector<hit_t> &

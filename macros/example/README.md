@@ -99,3 +99,6 @@ deltat(filename,
        reference_type, reference_device, reference_fifo, reference_column, reference_pixel,
        outfilename);
 ```
+
+
+`trigger_reader.C` demonstrates the high-level triggered-frame reader. It prints each spill, the number of frames, the number of participating sources from `spill_participation`, and then loops over the trigger/timing/Cherenkov hit collections for each frame.

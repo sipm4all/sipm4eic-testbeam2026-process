@@ -23,3 +23,18 @@ while (reader.next_spill()) {
 ```
 
 The returned vectors contain `hit_t` objects with the original stored fields plus `double time`, the calibrated time value persisted by `trigger.cc`. The vectors remain valid until the next call to `open()`, `next_spill()`, or `next_frame()`.
+
+
+## Spill participation
+
+Triggered ROOT files may contain a `spill_participation` tree propagated from the merger. `trigger_reader_t` reads it automatically when present. For the current spill:
+
+```cpp
+std::cout << reader.nsources() << std::endl;
+
+for (const auto &source : reader.sources()) {
+    std::cout << source.device << " " << source.fifo << std::endl;
+}
+```
+
+The returned source vector lists only the `(device,fifo)` sources that contributed to the current spill. Files without the metadata tree simply return an empty source vector.

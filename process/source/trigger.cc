@@ -22,6 +22,32 @@
 constexpr int maxframes = 65536;
 constexpr int maxhits = 1024;
 constexpr int maxspillhits = maxframes * maxhits;
+constexpr int maxsources = 4096;
+
+struct spill_participation_t {
+  int spill = 0;
+  int counter = 0;
+  int nsources = 0;
+  int source_device[maxsources];
+  int source_fifo[maxsources];
+
+  void clear(int _spill, int _counter)
+  {
+    spill = _spill;
+    counter = _counter;
+    nsources = 0;
+  }
+
+  bool add(int device, int fifo)
+  {
+    if (nsources >= maxsources)
+      return false;
+    source_device[nsources] = device;
+    source_fifo[nsources] = fifo;
+    ++nsources;
+    return true;
+  }
+};
 
 struct field_match_t {
   enum class mode_t { wildcard, exact, range, set };
@@ -863,6 +889,19 @@ trigger(const std::string filename,
   }
   auto nev = tin->GetEntries();
 
+  auto tmeta_in = (TTree *)fin->Get("spill_participation");
+  spill_participation_t meta_in;
+  Long64_t meta_entries = 0;
+  Long64_t meta_entry = 0;
+  if (tmeta_in) {
+    meta_entries = tmeta_in->GetEntries();
+    tmeta_in->SetBranchAddress("spill", &meta_in.spill);
+    tmeta_in->SetBranchAddress("counter", &meta_in.counter);
+    tmeta_in->SetBranchAddress("nsources", &meta_in.nsources);
+    tmeta_in->SetBranchAddress("source_device", meta_in.source_device);
+    tmeta_in->SetBranchAddress("source_fifo", meta_in.source_fifo);
+  }
+
   data_t data;
   data.link_to_tree(tin);
 
@@ -901,6 +940,49 @@ trigger(const std::string filename,
   branch_store("trigger", spill.trigger);
   branch_store("timing", spill.timing);
   branch_store("cherenkov", spill.cherenkov);
+
+  spill_participation_t spill_meta;
+  auto tmeta_out = new TTree("spill_participation", "spill_participation");
+  tmeta_out->Branch("spill", &spill_meta.spill, "spill/I");
+  tmeta_out->Branch("counter", &spill_meta.counter, "counter/I");
+  tmeta_out->Branch("nsources", &spill_meta.nsources, "nsources/I");
+  tmeta_out->Branch("source_device", spill_meta.source_device, "source_device[nsources]/I");
+  tmeta_out->Branch("source_fifo", spill_meta.source_fifo, "source_fifo[nsources]/I");
+
+  auto load_spill_participation = [&](const data_t &start_word, int sequential_spill) {
+    if (!tmeta_in) {
+      spill_meta.clear(sequential_spill, start_word.counter);
+      return spill_meta.add(start_word.device, start_word.fifo);
+    }
+
+    if (meta_entry >= meta_entries) {
+      std::cerr << "ERROR: missing spill_participation entry for input spill counter "
+                << start_word.counter << std::endl;
+      return false;
+    }
+
+    auto bytes = tmeta_in->GetEntry(meta_entry++);
+    if (bytes <= 0) {
+      std::cerr << "ERROR: failed to read spill_participation entry "
+                << (meta_entry - 1) << std::endl;
+      return false;
+    }
+
+    if (meta_in.counter != start_word.counter) {
+      std::cerr << "ERROR: spill_participation counter mismatch"
+                << " data_counter=" << start_word.counter
+                << " meta_counter=" << meta_in.counter << std::endl;
+      return false;
+    }
+    if (meta_in.nsources < 0 || meta_in.nsources > maxsources) {
+      std::cerr << "ERROR: invalid spill_participation nsources="
+                << meta_in.nsources << std::endl;
+      return false;
+    }
+
+    spill_meta = meta_in;
+    return true;
+  };
 
   std::vector<data_t> buffer;
   std::vector<active_frame_t> frames;
@@ -947,6 +1029,7 @@ trigger(const std::string filename,
       return;
     flush_frames();
     tout->Fill();
+    tmeta_out->Fill();
   };
 
   coincidence_cluster_t coincidence_cluster;
@@ -1007,6 +1090,11 @@ trigger(const std::string filename,
       reset();
       /** do any needed reset action **/
       spill_id = data.counter;
+      if (!load_spill_participation(data, nspills)) {
+        fout->Close();
+        fin->Close();
+        return false;
+      }
       ++nspills;
       spill.reset(spill_id);
       in_spill = true;
@@ -1080,6 +1168,21 @@ trigger(const std::string filename,
 
   fill_spill();
 
+  if (tmeta_in && meta_entry != meta_entries) {
+    std::cerr << "ERROR: not all input spill_participation entries were consumed" << std::endl;
+    fout->Close();
+    fin->Close();
+    return false;
+  }
+
+  auto nmeta_out = tmeta_out->GetEntries();
+  if (nmeta_out != tout->GetEntries()) {
+    std::cerr << "ERROR: frames/spill_participation entry-count mismatch" << std::endl;
+    fout->Close();
+    fin->Close();
+    return false;
+  }
+
   fout->Write();
   fout->Close();
   fin->Close();
@@ -1087,6 +1190,7 @@ trigger(const std::string filename,
   std::cout << " --- spills processed: " << nspills << std::endl;
   std::cout << " --- trigger candidates found: " << ntriggers << std::endl;
   std::cout << " --- frames written: " << nwritten << std::endl;
+  std::cout << " --- spill_participation entries: " << nmeta_out << std::endl;
   if (noverflow > 0)
     std::cout << " --- frames truncated: " << noverflow << std::endl;
   if (ndropped > 0)
