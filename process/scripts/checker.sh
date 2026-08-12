@@ -337,6 +337,7 @@ write_aggregate_check()
 
     local counters_ok open_ok balance_ok start_uniform end_uniform consistent
     local min_start max_start min_end max_end mode_start mode_end
+    local discard_candidate_count would_pass_without_discard_candidates
     counters_ok=$(all_yes_key spill_counter_consistent "${files[@]}")
     open_ok=$(all_no_key open_spill_at_eof "${files[@]}")
     balance_ok=$(all_yes_key spill_count_balance "${files[@]}")
@@ -350,6 +351,35 @@ write_aggregate_check()
     mode_end=$(mode_spill_count end_spill_type15 "${files[@]}")
     start_spill=${mode_start}
     end_spill=${mode_end}
+
+    discard_candidate_count=0
+    would_pass_without_discard_candidates="yes"
+    for file in "${files[@]}"; do
+        local file_consistent file_errors file_unknown file_counters file_open file_balance
+        local file_start_min file_start_max file_end_min file_end_max
+        file_consistent=$(value_from_check "${file}" consistent)
+        file_errors=$(required_numeric_value "${file}" errors)
+        file_unknown=$(required_numeric_value "${file}" unknown_words)
+        file_counters=$(value_from_check "${file}" spill_counter_consistent)
+        file_open=$(value_from_check "${file}" open_spill_at_eof)
+        file_balance=$(value_from_check "${file}" spill_count_balance)
+        file_start_min=$(value_or_fallback "${file}" min_start_spill_type7 start_spill_type7)
+        file_start_max=$(value_or_fallback "${file}" max_start_spill_type7 start_spill_type7)
+        file_end_min=$(value_or_fallback "${file}" min_end_spill_type15 end_spill_type15)
+        file_end_max=$(value_or_fallback "${file}" max_end_spill_type15 end_spill_type15)
+
+        if [ "${file_start_min}" -ne "${mode_start}" ] || [ "${file_start_max}" -ne "${mode_start}" ] || [ "${file_end_min}" -ne "${mode_end}" ] || [ "${file_end_max}" -ne "${mode_end}" ]; then
+            discard_candidate_count=$((discard_candidate_count + 1))
+            continue
+        fi
+
+        if [ "${file_consistent}" = "no" ] || [ "${file_errors}" -ne 0 ] || [ "${file_unknown}" -ne 0 ] || [ "${file_counters}" != "yes" ] || [ "${file_open}" != "no" ] || [ "${file_balance}" != "yes" ]; then
+            would_pass_without_discard_candidates="no"
+        fi
+    done
+    if [ "${discard_candidate_count}" -ge "${nfiles}" ]; then
+        would_pass_without_discard_candidates="no"
+    fi
 
     consistent="yes"
     if [ "${counters_ok}" != "yes" ] || [ "${open_ok}" != "no" ] || [ "${balance_ok}" != "yes" ] || [ "${start_uniform}" != "yes" ] || [ "${end_uniform}" != "yes" ] || [ "${unknown_words}" -ne 0 ] || [ "${errors}" -ne 0 ]; then
@@ -377,6 +407,8 @@ write_aggregate_check()
         echo "max_end_spill_type15: ${max_end}"
         echo "consistent: ${consistent}"
         echo "errors: ${errors}"
+        echo "discard_candidate_count: ${discard_candidate_count}"
+        echo "would_pass_without_discard_candidates: ${would_pass_without_discard_candidates}"
         for file in "${files[@]}"; do
             echo "input_check: ${file}"
         done
@@ -394,6 +426,9 @@ write_aggregate_check()
             [[ "${file_errors}" =~ ^[0-9]+$ ]] || file_errors=0
             if [ "${file_consistent}" = "no" ] || [ "${file_errors}" -ne 0 ] || [ "${file_start_min}" -ne "${reference_start}" ] || [ "${file_start_max}" -ne "${reference_start}" ] || [ "${file_end_min}" -ne "${reference_end}" ] || [ "${file_end_max}" -ne "${reference_end}" ]; then
                 echo "problem_check: ${file}"
+                if [ "${file_start_min}" -ne "${reference_start}" ] || [ "${file_start_max}" -ne "${reference_start}" ] || [ "${file_end_min}" -ne "${reference_end}" ] || [ "${file_end_max}" -ne "${reference_end}" ]; then
+                    echo "discard_candidate: ${file}"
+                fi
                 if [ "${file_consistent}" = "no" ]; then
                     echo "error: ${file}: input check is internally inconsistent"
                 fi
