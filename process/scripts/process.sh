@@ -25,9 +25,6 @@ TRIGGER_WINDOW=256
 DEVICE_FILTER=()
 DEVICE_ALL=1
 OVERWRITE=0
-declare -A GOOD_FIFO=()
-USE_GOOD_FIFO_LIST=0
-GOOD_FIFO_LIST=""
 
 WRITE_LOGS=0
 CLEAN_DEVICE_SPILLS=1
@@ -49,7 +46,6 @@ options:
   --run-type TYPE                accepted for compatibility with decoder.sh; process.sh reads decoded files from /data/2026-testbeam/process/RUN
                                   default: physics
   --devices DEVICE ...           device directory names to process, default: all
-  --good-fifo-list FILE          process only FIFOs listed by checker.sh
   --overwrite                    overwrite existing workflow outputs instead of skipping them
   --window, -w VALUE             trigger frame window, default: 256
   --help, -h                     show this help message
@@ -145,39 +141,6 @@ contains_value()
     return 1
 }
 
-load_good_fifo_list()
-{
-    local list=$1
-    USE_GOOD_FIFO_LIST=0
-    GOOD_FIFO=()
-
-    if [ ! -f "${list}" ]; then
-        fail "good FIFO list does not exist: ${list}"
-    fi
-
-    local device fifo decoded_root check_file
-    while read -r device fifo decoded_root check_file; do
-        [ -n "${device}" ] || continue
-        case "${device}" in
-            \#*) continue ;;
-        esac
-        [[ "${fifo}" =~ ^[0-9]+$ ]] || continue
-        GOOD_FIFO["${device}:${fifo}"]=1
-    done < "${list}"
-
-    USE_GOOD_FIFO_LIST=1
-    echo " --- using checker good-FIFO list ${list}"
-}
-
-good_fifo_allowed()
-{
-    local device=$1
-    local fifo=$2
-    if [ "${USE_GOOD_FIFO_LIST}" -ne 1 ]; then
-        return 0
-    fi
-    [ -n "${GOOD_FIFO["${device}:${fifo}"]+x}" ]
-}
 
 cleanup_empty_device_dirs()
 {
@@ -215,11 +178,6 @@ while [ $# -gt 0 ]; do
                 DEVICE_ALL=0
             fi
             shift "${PARSE_FILTER_CONSUMED}"
-            ;;
-        --good-fifo-list)
-            [ $# -ge 2 ] || fail "$1 requires FILE"
-            GOOD_FIFO_LIST=$2
-            shift 2
             ;;
         --overwrite)
             OVERWRITE=1
@@ -286,9 +244,6 @@ if [ ! -d "${irpath}" ]; then
    exit 1
 fi
 orpath="${opath}/${run}"
-if [ -n "${GOOD_FIFO_LIST}" ]; then
-    load_good_fifo_list "${GOOD_FIFO_LIST}"
-fi
 
 merge_prefix="aps.sorted"
 if [ "${DEVICE_ALL}" -ne 1 ]; then
@@ -353,10 +308,6 @@ for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do
         fifo=${fname#alcdaq.}; fifo=${fifo%.root}
         fifo_id=${fname#alcdaq.fifo_}; fifo_id=${fifo_id%.root}
         [[ "${fifo_id}" =~ ^[0-9]+$ ]] || fail "could not extract numeric FIFO id from ${fname}"
-        if ! good_fifo_allowed "${device}" "${fifo_id}"; then
-            echo " --- skipping FIFO excluded by checker selection: ${device} fifo ${fifo_id}"
-            continue
-        fi
 
         ### calibrate, sort and AP suppress
         run_job "${odpath}/aps.sorted.${fifo}.log" bash -c '
@@ -411,9 +362,6 @@ for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do
         fifo=${fname#alcdaq.}; fifo=${fifo%.root}
         fifo_id=${fname#alcdaq.fifo_}; fifo_id=${fifo_id%.root}
         [[ "${fifo_id}" =~ ^[0-9]+$ ]] || fail "could not extract numeric FIFO id from ${fname}"
-        if ! good_fifo_allowed "${device}" "${fifo_id}"; then
-            continue
-        fi
         aps_file="${odpath}/aps.sorted.calibrated.${fifo}.root"
         if [ -f "${aps_file}" ]; then
             aps_files+=("${aps_file}")

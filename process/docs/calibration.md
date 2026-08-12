@@ -196,13 +196,7 @@ The checker also writes run-level FIFO selection lists:
 /data/2026-testbeam/process/<run>/<run>.bad-fifos.list
 ```
 
-The good-FIFO list is the quality gate used by the later workflows. Pass it explicitly with:
-
-```text
---good-fifo-list /data/2026-testbeam/process/<run>/<run>.good-fifos.list
-```
-
-to `dcalib.sh` or `process.sh` when you want to process only FIFOs that make the checker pass. If this option is omitted, those scripts process all selected decoded FIFOs as before.
+The good/bad FIFO lists are diagnostics. They are useful to understand which FIFOs are compatible with the common spill structure, but the normal downstream scripts do not consume them automatically. If the checker identifies bad FIFOs, use the existing `--devices` and `--fifos` filters to select the hardware subset you want to process.
 
 Each command follows the same hierarchy as the processing workflow: per-FIFO `.check` files are produced first, then one device-level `.check` file is written for each selected device, and finally one run-level `.check` file is written for the selected data set. The most important fields in each `.check` file are:
 
@@ -216,7 +210,7 @@ spill_count_balance
 errors
 ```
 
-The calibration jobs should be launched only after the relevant `.check` files are understood. In normal production use, pass the checker good-FIFO list to `dcalib.sh` so empty or misaligned FIFOs are not used to derive calibration constants. `dcalib.sh` reads decoded inputs from:
+The calibration jobs should be launched only after the relevant `.check` files are understood. `dcalib.sh` reads decoded inputs from:
 
 ```text
 /data/2026-testbeam/process/<run>/<device>/decoded/alcdaq.fifo_*.root
@@ -253,7 +247,6 @@ sipm4eic-testbeam2026-process/process/scripts/dcalib.sh \
     --run 20260618-183625 \
     --devices kc705-200 \
     --fifos {0..7} \
-    --good-fifo-list /data/2026-testbeam/process/20260618-183625/20260618-183625.good-fifos.list \
     --period 6400
 ```
 
@@ -268,7 +261,6 @@ sipm4eic-testbeam2026-process/process/scripts/dcalib.sh \
     --run 20260618-183625 \
     --devices rdo-{192..199} \
     --fifos {0..15} \
-    --good-fifo-list /data/2026-testbeam/process/20260618-183625/20260618-183625.good-fifos.list \
     --period 6400
 ```
 
@@ -285,7 +277,6 @@ sipm4eic-testbeam2026-process/process/scripts/dcalib.sh \
     --run 20260618-185127 \
     --devices rdo-{192..199} \
     --fifos {16..31} \
-    --good-fifo-list /data/2026-testbeam/process/20260618-185127/20260618-185127.good-fifos.list \
     --period 6400
 ```
 
@@ -442,7 +433,6 @@ for dev in {192..199}; do
         --run 20260618-183625 \
         --run-type testpulse \
         --devices rdo-${dev} \
-        --good-fifo-list /data/2026-testbeam/process/20260618-183625/20260618-183625.good-fifos.list \
         --calibration /data/2026-testbeam/process/calibration.20260618.check.conf \
         --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-183625_rdo-${dev}.conf calibcheck_rdo-${dev} \
         --window 32
@@ -491,7 +481,6 @@ for dev in {192..199}; do
         --run 20260618-185127 \
         --run-type testpulse \
         --devices rdo-${dev} \
-        --good-fifo-list /data/2026-testbeam/process/20260618-185127/20260618-185127.good-fifos.list \
         --calibration /data/2026-testbeam/process/calibration.20260618.check.conf \
         --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-185127_rdo-${dev}.conf calibcheck_rdo-${dev} \
         --window 32

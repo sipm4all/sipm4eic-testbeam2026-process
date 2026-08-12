@@ -158,7 +158,7 @@ device fifo decoded_root check_file reason
 
 The selection is conservative. A FIFO is listed as good only if its device is clean as-is, or the device would pass after dropping its local discard candidates, and the resulting device spill count belongs to the run-level common spill count. The bad list records excluded FIFOs and a reason such as `discard_candidate`, `device_not_repairable`, or `run_spill_count_outlier`.
 
-`process.sh` and `dcalib.sh` can consume the good-FIFO list explicitly with `--good-fifo-list <file>`. Existing `--devices` and `--fifos` arguments still apply as additional filters. If `--good-fifo-list` is omitted, those workflows keep their previous behavior and process all selected decoded FIFO files.
+The good/bad FIFO lists are diagnostic outputs. Since the decoder now suppresses malformed or incomplete spills instead of emitting bad spill boundaries, downstream workflows normally process the selected decoded files directly and rely on checker summaries to decide whether a run/device should be trusted.
 
 Aggregation now treats missing or malformed numeric fields in input `.check` files as a workflow error. The script fails rather than silently converting such values to zero.
 
@@ -172,7 +172,7 @@ The DAQ end-of-spill word used by the current codebase is `type == 15`.
 clean -> sort -> dcalib
 ```
 
-It reads the decoded ROOT files written by `decoder.sh` using the script-level `ipath` base directory, and writes calibration products under each device's `dcalib/` subdirectory using `opath`. Pass `--good-fifo-list /data/2026-testbeam/process/<run>/<run>.good-fifos.list` to process only the good FIFOs selected by `checker.sh`.
+It reads the decoded ROOT files written by `decoder.sh` using the script-level `ipath` base directory, and writes calibration products under each device's `dcalib/` subdirectory using `opath`. Use `--devices` and `--fifos` when a calibration campaign should process only selected hardware subsets.
 
 Run:
 
@@ -202,7 +202,6 @@ Optional filters:
 --fifos 0 4 8              process only selected FIFOs
 --fifos {0..16}            process an inclusive FIFO range
 --fifos "{0..16}"          quoted inclusive ranges are also accepted
---good-fifo-list FILE      process only FIFOs in the checker good-FIFO list
 ```
 
 The shell expands unquoted brace ranges before the script receives them. Quoted brace ranges are expanded by the script itself. Device filters match the actual device directory basename, such as `kc705-200` or `rdo-192`; FIFO filters remain numeric.
@@ -338,7 +337,6 @@ Optional command-line options:
                            default: physics
 --devices DEVICE ...       device directory names to process, default all
                            accepts names such as kc705-200, rdo-192, rdo-{192..199}
---good-fifo-list FILE      process only FIFOs in the checker good-FIFO list
 --overwrite                overwrite existing workflow outputs instead of skipping them
 --window VALUE             trigger frame window, default 256
 --help                     print usage
@@ -363,7 +361,7 @@ Input files are read from decoded output produced by `decoder.sh`:
 /data/2026-testbeam/process/<run>/<device>/decoded/alcdaq.fifo_*.root
 ```
 
-Run `decoder.sh` with the appropriate `--run-type` first. `process.sh` keeps accepting `--run-type` so command lines can mirror the decoder command, but it no longer reads directly from `/data/2026-testbeam/actual`. Pass `--good-fifo-list /data/2026-testbeam/process/<run>/<run>.good-fifos.list` to process and merge only the good FIFOs selected by `checker.sh`. Use `--devices` when a workflow should process only selected device directories, for example a same-RDO calibration closure check. Final spill merging uses only the devices processed by the current invocation, so stale split-spill files from earlier per-device runs in the same output directory are ignored.
+Run `decoder.sh` with the appropriate `--run-type` first. `process.sh` keeps accepting `--run-type` so command lines can mirror the decoder command, but it no longer reads directly from `/data/2026-testbeam/actual`. Use `--devices` when a workflow should process only selected device directories, for example a same-RDO calibration closure check. Final spill merging uses only the devices processed by the current invocation, so stale split-spill files from earlier per-device runs in the same output directory are ignored.
 
 By default, `process.sh` does not overwrite existing workflow outputs. If an output from a previous stopped or failed processing attempt is found, the corresponding stage is skipped and the existing file is reused. Stages that do run successfully still perform the normal cleanup of their inputs/intermediate files. Pass `--overwrite` to force regeneration of existing outputs.
 
