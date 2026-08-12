@@ -135,7 +135,7 @@ The DAQ end-of-spill word used by the current codebase is `type == 15`.
 clean -> sort -> dcalib
 ```
 
-It reads the decoded ROOT files written by `decoder.sh` and writes calibration products under each device's `dcalib/` subdirectory.
+It reads the decoded ROOT files written by `decoder.sh` using the script-level `ipath` base directory, and writes calibration products under each device's `dcalib/` subdirectory using `opath`.
 
 Run:
 
@@ -331,7 +331,8 @@ By default, `process.sh` does not overwrite existing workflow outputs. If an out
 Important variables still configured near the top of the script:
 
 ```bash
-opath                  processing base directory; decoded input is read from opath/RUN/DEVICE/decoded
+ipath                  decoded input base directory; input is read from ipath/RUN/DEVICE/decoded
+opath                  processing output base directory
 WRITE_LOGS             0 prints to terminal, 1 writes log files
 CLEAN_DEVICE_SPILLS    remove intermediate device spill files
 CLEAN_MERGED_SPILLS    remove merged spill files after triggering

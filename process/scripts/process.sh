@@ -5,6 +5,7 @@ shopt -s nullglob
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
 run_type="physics"
+ipath="/data/2026-testbeam/process"
 opath="/data/2026-testbeam/process"
 
 CALIBRATOR="${ROOT_DIR}/process/bin/calibrator"
@@ -236,11 +237,12 @@ for i in "${!TRIGGER_CONFIGS[@]}"; do
     seen_trigger_tags[$tag]=1
 done
 
-orpath="${opath}/${run}"
-if [ ! -d "${orpath}" ]; then
-   echo " ${orpath} does not exist; run decoder.sh first "
+irpath="${ipath}/${run}"
+if [ ! -d "${irpath}" ]; then
+   echo " ${irpath} does not exist; run decoder.sh first "
    exit 1
 fi
+orpath="${opath}/${run}"
 
 merge_prefix="aps.sorted"
 if [ "${DEVICE_ALL}" -ne 1 ]; then
@@ -265,7 +267,7 @@ fi
 ### loop over device directories
 merge_pids=()
 processed_device_dirs=()
-for device_path in "${orpath}"/kc705* "${orpath}"/rdo*; do
+for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do
 
     [ -d "${device_path}" ] || continue
 

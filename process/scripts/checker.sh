@@ -5,6 +5,7 @@ shopt -s nullglob
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
 run_type="physics"
+ipath="/data/2026-testbeam/process"
 opath="/data/2026-testbeam/process"
 
 CHECKER="${ROOT_DIR}/process/bin/checker"
@@ -301,13 +302,14 @@ if [ ! -x "${CHECKER}" ]; then
     fail "${CHECKER} does not exist or is not executable"
 fi
 
-orpath="${opath}/${run}"
-if [ ! -d "${orpath}" ]; then
-   fail "${orpath} does not exist; run decoder.sh first"
+irpath="${ipath}/${run}"
+if [ ! -d "${irpath}" ]; then
+   fail "${irpath} does not exist; run decoder.sh first"
 fi
+orpath="${opath}/${run}"
 
 device_checks=()
-for device_path in "${orpath}"/kc705* "${orpath}"/rdo*; do
+for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do
     [ -d "${device_path}" ] || continue
 
     device=$(basename "${device_path}")
