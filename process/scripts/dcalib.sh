@@ -245,7 +245,7 @@ for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
         fi
 
         cleaned_output="${odpath}/cleaned.${fifo}.root"
-        sorted_output="${odpath}/sorted.${fifo}.root"
+        sorted_output="${odpath}/sorted.cleaned.${fifo}.root"
         root_output="${odpath}/dcalib.${fifo}.root"
         txt_output="${odpath}/dcalib.${fifo}.conf"
 
@@ -267,6 +267,7 @@ for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
                 "${cleaner}" --input "${input}" --output "${cleaned}"
                 "${sorter}" --input "${cleaned}" --output "${sorted}" --window "${sort_window}"
                 "${dcalib}" --input "${sorted}" --output "${root_output}" --calibration-output "${txt_output}" --period "${period}" --min-pairs "${min_pairs}"
+                rm -f "${cleaned}" "${sorted}"
             ' bash \
                 "${CLEANER}" \
                 "${SORTER}" \

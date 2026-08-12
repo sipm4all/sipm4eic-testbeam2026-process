@@ -72,14 +72,14 @@ the script writes outputs in the corresponding device directory:
 
 The final `.root` file contains compact TDC diagnostic histograms. The `.conf` file is the per-FIFO TDC calibration snippet; it contains only a `[TDC]` section in the format consumed by `calibrator`. These calibration outputs are not deleted by the script.
 
-The script also writes intermediate files in the same device output directory:
+During each job, the script also creates intermediate files in the same device output directory:
 
 ```text
 /data/2026-testbeam/process/<run>/<device>/cleaned.fifo_0.root
-/data/2026-testbeam/process/<run>/<device>/sorted.fifo_0.root
+/data/2026-testbeam/process/<run>/<device>/sorted.cleaned.fifo_0.root
 ```
 
-`cleaned.*.root` is produced by `cleaner`; `sorted.*.root` is produced by `sorter` and is the input to `dcalib`.
+`cleaned.*.root` is produced by `cleaner`; `sorted.cleaned.*.root` is produced by `sorter` and is the input to `dcalib`. These intermediate files are removed after `dcalib` succeeds.
 
 `dcalib.sh` currently hardcodes:
 
@@ -147,11 +147,19 @@ The fallback values are global medians computed from measured rows with the same
 ```text
 calibrate each decoded FIFO file
 sort each calibrated FIFO file
-after-pulse suppress each sorted FIFO file
+after-pulse suppress each sorted calibrated FIFO file
 merge lanes per device with --split-spills
 merge matching spills across devices
 run trigger configurations per spill
 hadd triggered spill files per trigger tag
+```
+
+Per-FIFO intermediate data files use stage-preserving prefixes:
+
+```text
+calibrated.fifo_0.root
+sorted.calibrated.fifo_0.root
+aps.sorted.calibrated.fifo_0.root
 ```
 
 Run:

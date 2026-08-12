@@ -332,8 +332,8 @@ for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
         ' _ "${CALIBRATOR}" "${SORTER}" "${APS}" \
             "${fpath}" \
             "${odpath}/calibrated.${fifo}.root" \
-            "${odpath}/sorted.${fifo}.root" \
-            "${odpath}/aps.sorted.${fifo}.root" \
+            "${odpath}/sorted.calibrated.${fifo}.root" \
+            "${odpath}/aps.sorted.calibrated.${fifo}.root" \
             "${CALIBRATION_CONFIG}" \
             "${SORT_WINDOW}" \
             "${APS_WINDOW}" \
@@ -343,7 +343,7 @@ for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
     done
     wait "${pids[@]}"
 
-    aps_files=("${odpath}"/aps.sorted.fifo_*.root)
+    aps_files=("${odpath}"/aps.sorted.calibrated.fifo_*.root)
     if [ ${#aps_files[@]} -eq 0 ]; then
         echo " --- no after-pulse-suppressed files found for ${device} "
         continue
