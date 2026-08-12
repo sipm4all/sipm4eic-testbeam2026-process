@@ -446,6 +446,128 @@ write_aggregate_check()
     } > "${output}"
 }
 
+
+fifo_id_from_check()
+{
+    local check_file=$1
+    local name
+    name=$(basename "${check_file}")
+    name=${name%.check}
+    name=${name#alcdaq.fifo_}
+    [[ "${name}" =~ ^[0-9]+$ ]] || fail "could not extract FIFO id from check file ${check_file}"
+    echo "${name}"
+}
+
+decoded_root_from_check()
+{
+    local check_file=$1
+    local input
+    input=$(value_from_check "${check_file}" input)
+    if [ -n "${input}" ]; then
+        echo "${input}"
+    else
+        echo "${check_file%.check}.root"
+    fi
+}
+
+write_fifo_selection_lists()
+{
+    local run_name=$1
+    local good_output=$2
+    local bad_output=$3
+    shift 3
+    local device_checks=("$@")
+    local tmp_good tmp_bad tmp_initial_good
+    tmp_good="${good_output}.tmp"
+    tmp_bad="${bad_output}.tmp"
+    tmp_initial_good="${good_output}.initial.tmp"
+
+    {
+        echo "# run: ${run_name}"
+        echo "# columns: device fifo decoded_root check_file"
+    } > "${tmp_good}"
+    {
+        echo "# run: ${run_name}"
+        echo "# columns: device fifo decoded_root check_file reason"
+    } > "${tmp_bad}"
+    : > "${tmp_initial_good}"
+
+    declare -A selected_count_by_device=()
+    local device_check device device_consistent device_repairable device_count
+    local check_file fifo_id decoded_root
+    for device_check in "${device_checks[@]}"; do
+        device=$(value_from_check "${device_check}" name)
+        [ -n "${device}" ] || device=$(basename "${device_check}" .check)
+        device_consistent=$(value_from_check "${device_check}" consistent)
+        device_repairable=$(value_from_check "${device_check}" would_pass_without_discard_candidates)
+        device_count=$(required_numeric_value "${device_check}" start_spill_type7)
+
+        declare -A discard_checks=()
+        while read -r check_file; do
+            [ -n "${check_file}" ] || continue
+            discard_checks["${check_file}"]=1
+        done < <(awk '$1 == "discard_candidate:" { print $2 }' "${device_check}")
+
+        if [ "${device_consistent}" = "yes" ] || [ "${device_repairable}" = "yes" ]; then
+            selected_count_by_device["${device}"]=${device_count}
+            while read -r check_file; do
+                [ -n "${check_file}" ] || continue
+                fifo_id=$(fifo_id_from_check "${check_file}")
+                decoded_root=$(decoded_root_from_check "${check_file}")
+                if [ -n "${discard_checks["${check_file}"]+x}" ]; then
+                    echo "${device} ${fifo_id} ${decoded_root} ${check_file} discard_candidate" >> "${tmp_bad}"
+                else
+                    echo "${device} ${fifo_id} ${device_count} ${decoded_root} ${check_file}" >> "${tmp_initial_good}"
+                fi
+            done < <(awk '$1 == "input_check:" { print $2 }' "${device_check}")
+        else
+            while read -r check_file; do
+                [ -n "${check_file}" ] || continue
+                fifo_id=$(fifo_id_from_check "${check_file}")
+                decoded_root=$(decoded_root_from_check "${check_file}")
+                echo "${device} ${fifo_id} ${decoded_root} ${check_file} device_not_repairable" >> "${tmp_bad}"
+            done < <(awk '$1 == "input_check:" { print $2 }' "${device_check}")
+        fi
+        unset discard_checks
+    done
+
+    declare -A count_frequency=()
+    local count run_count best_frequency candidate
+    for device in "${!selected_count_by_device[@]}"; do
+        count=${selected_count_by_device["${device}"]}
+        count_frequency["${count}"]=$(( ${count_frequency["${count}"]:-0} + 1 ))
+    done
+
+    run_count=""
+    best_frequency=-1
+    for candidate in "${!count_frequency[@]}"; do
+        if [ "${count_frequency["${candidate}"]}" -gt "${best_frequency}" ] || { [ "${count_frequency["${candidate}"]}" -eq "${best_frequency}" ] && { [ -z "${run_count}" ] || [ "${candidate}" -gt "${run_count}" ]; }; }; then
+            run_count=${candidate}
+            best_frequency=${count_frequency["${candidate}"]}
+        fi
+    done
+
+    if [ -n "${run_count}" ]; then
+        while read -r device fifo_id count decoded_root check_file; do
+            [ -n "${device}" ] || continue
+            if [ "${count}" -eq "${run_count}" ]; then
+                echo "${device} ${fifo_id} ${decoded_root} ${check_file}" >> "${tmp_good}"
+            else
+                echo "${device} ${fifo_id} ${decoded_root} ${check_file} run_spill_count_outlier" >> "${tmp_bad}"
+            fi
+        done < "${tmp_initial_good}"
+    else
+        while read -r device fifo_id count decoded_root check_file; do
+            [ -n "${device}" ] || continue
+            echo "${device} ${fifo_id} ${decoded_root} ${check_file} no_repairable_run_selection" >> "${tmp_bad}"
+        done < "${tmp_initial_good}"
+    fi
+
+    rm -f "${tmp_initial_good}"
+    mv "${tmp_good}" "${good_output}"
+    mv "${tmp_bad}" "${bad_output}"
+}
+
 contains_value()
 {
     local value=$1
@@ -588,4 +710,10 @@ fi
 run_check="${orpath}/${run}.check"
 write_aggregate_check run "${run}" "${run_check}" "${device_checks[@]}"
 echo " --- wrote run check ${run_check}"
+
+good_fifo_list="${orpath}/${run}.good-fifos.list"
+bad_fifo_list="${orpath}/${run}.bad-fifos.list"
+write_fifo_selection_lists "${run}" "${good_fifo_list}" "${bad_fifo_list}" "${device_checks[@]}"
+echo " --- wrote good FIFO list ${good_fifo_list}"
+echo " --- wrote bad FIFO list ${bad_fifo_list}"
 echo " --- checker jobs completed "

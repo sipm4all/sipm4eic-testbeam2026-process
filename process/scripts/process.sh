@@ -25,6 +25,8 @@ TRIGGER_WINDOW=256
 DEVICE_FILTER=()
 DEVICE_ALL=1
 OVERWRITE=0
+declare -A GOOD_FIFO=()
+USE_GOOD_FIFO_LIST=0
 
 WRITE_LOGS=0
 CLEAN_DEVICE_SPILLS=1
@@ -141,6 +143,40 @@ contains_value()
     return 1
 }
 
+load_good_fifo_list()
+{
+    local list=$1
+    USE_GOOD_FIFO_LIST=0
+    GOOD_FIFO=()
+
+    if [ ! -f "${list}" ]; then
+        return
+    fi
+
+    local device fifo decoded_root check_file
+    while read -r device fifo decoded_root check_file; do
+        [ -n "${device}" ] || continue
+        case "${device}" in
+            \#*) continue ;;
+        esac
+        [[ "${fifo}" =~ ^[0-9]+$ ]] || continue
+        GOOD_FIFO["${device}:${fifo}"]=1
+    done < "${list}"
+
+    USE_GOOD_FIFO_LIST=1
+    echo " --- using checker good-FIFO list ${list}"
+}
+
+good_fifo_allowed()
+{
+    local device=$1
+    local fifo=$2
+    if [ "${USE_GOOD_FIFO_LIST}" -ne 1 ]; then
+        return 0
+    fi
+    [ -n "${GOOD_FIFO["${device}:${fifo}"]+x}" ]
+}
+
 cleanup_empty_device_dirs()
 {
     if [ "${WRITE_LOGS}" -ne 0 ]; then
@@ -243,6 +279,8 @@ if [ ! -d "${irpath}" ]; then
    exit 1
 fi
 orpath="${opath}/${run}"
+good_fifo_list="${orpath}/${run}.good-fifos.list"
+load_good_fifo_list "${good_fifo_list}"
 
 merge_prefix="aps.sorted"
 if [ "${DEVICE_ALL}" -ne 1 ]; then
@@ -305,6 +343,12 @@ for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do
 
         fname=$(basename "${fpath}")
         fifo=${fname#alcdaq.}; fifo=${fifo%.root}
+        fifo_id=${fname#alcdaq.fifo_}; fifo_id=${fifo_id%.root}
+        [[ "${fifo_id}" =~ ^[0-9]+$ ]] || fail "could not extract numeric FIFO id from ${fname}"
+        if ! good_fifo_allowed "${device}" "${fifo_id}"; then
+            echo " --- skipping FIFO excluded by checker selection: ${device} fifo ${fifo_id}"
+            continue
+        fi
 
         ### calibrate, sort and AP suppress
         run_job "${odpath}/aps.sorted.${fifo}.log" bash -c '
@@ -346,11 +390,29 @@ for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do
         pids+=($!)
 
     done
+
+    if [ ${#pids[@]} -eq 0 ]; then
+        echo " --- no FIFO processing jobs started for ${device} "
+        continue
+    fi
     wait "${pids[@]}"
 
-    aps_files=("${odpath}"/aps.sorted.calibrated.fifo_*.root)
+    aps_files=()
+    for fpath in "${decoded_files[@]}"; do
+        fname=$(basename "${fpath}")
+        fifo=${fname#alcdaq.}; fifo=${fifo%.root}
+        fifo_id=${fname#alcdaq.fifo_}; fifo_id=${fifo_id%.root}
+        [[ "${fifo_id}" =~ ^[0-9]+$ ]] || fail "could not extract numeric FIFO id from ${fname}"
+        if ! good_fifo_allowed "${device}" "${fifo_id}"; then
+            continue
+        fi
+        aps_file="${odpath}/aps.sorted.calibrated.${fifo}.root"
+        if [ -f "${aps_file}" ]; then
+            aps_files+=("${aps_file}")
+        fi
+    done
     if [ ${#aps_files[@]} -eq 0 ]; then
-        echo " --- no after-pulse-suppressed files found for ${device} "
+        echo " --- no selected after-pulse-suppressed files found for ${device} "
         continue
     fi
 

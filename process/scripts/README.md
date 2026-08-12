@@ -137,6 +137,29 @@ Use `problem_check` to find the detailed per-FIFO or per-device report when an a
 
 `discard_candidate` entries are the subset of problematic inputs whose START/END spill counts differ from the common count. `would_pass_without_discard_candidates: yes` means that removing those candidates would leave a clean, spill-uniform aggregate. It does not delete or skip anything by itself; it only records the candidate list for a later workflow decision.
 
+At run level, `checker.sh` also writes two machine-readable FIFO selection files:
+
+```text
+/data/2026-testbeam/process/<run>/<run>.good-fifos.list
+/data/2026-testbeam/process/<run>/<run>.bad-fifos.list
+```
+
+The good list has columns:
+
+```text
+device fifo decoded_root check_file
+```
+
+The bad list has columns:
+
+```text
+device fifo decoded_root check_file reason
+```
+
+The selection is conservative. A FIFO is listed as good only if its device is clean as-is, or the device would pass after dropping its local discard candidates, and the resulting device spill count belongs to the run-level common spill count. The bad list records excluded FIFOs and a reason such as `discard_candidate`, `device_not_repairable`, or `run_spill_count_outlier`.
+
+`process.sh` and `dcalib.sh` automatically use `<run>.good-fifos.list` when it exists. Existing `--devices` and `--fifos` arguments still apply as additional filters. If the good-FIFO list is absent, those workflows keep their previous behavior and process all selected decoded FIFO files.
+
 Aggregation now treats missing or malformed numeric fields in input `.check` files as a workflow error. The script fails rather than silently converting such values to zero.
 
 The DAQ end-of-spill word used by the current codebase is `type == 15`.
@@ -149,7 +172,7 @@ The DAQ end-of-spill word used by the current codebase is `type == 15`.
 clean -> sort -> dcalib
 ```
 
-It reads the decoded ROOT files written by `decoder.sh` using the script-level `ipath` base directory, and writes calibration products under each device's `dcalib/` subdirectory using `opath`.
+It reads the decoded ROOT files written by `decoder.sh` using the script-level `ipath` base directory, and writes calibration products under each device's `dcalib/` subdirectory using `opath`. If `<run>.good-fifos.list` exists from `checker.sh`, `dcalib.sh` processes only those good FIFOs.
 
 Run:
 
@@ -338,7 +361,7 @@ Input files are read from decoded output produced by `decoder.sh`:
 /data/2026-testbeam/process/<run>/<device>/decoded/alcdaq.fifo_*.root
 ```
 
-Run `decoder.sh` with the appropriate `--run-type` first. `process.sh` keeps accepting `--run-type` so command lines can mirror the decoder command, but it no longer reads directly from `/data/2026-testbeam/actual`. Use `--devices` when a workflow should process only selected device directories, for example a same-RDO calibration closure check. Final spill merging uses only the devices processed by the current invocation, so stale split-spill files from earlier per-device runs in the same output directory are ignored.
+Run `decoder.sh` with the appropriate `--run-type` first. `process.sh` keeps accepting `--run-type` so command lines can mirror the decoder command, but it no longer reads directly from `/data/2026-testbeam/actual`. If `<run>.good-fifos.list` exists from `checker.sh`, `process.sh` processes and merges only those good FIFOs. Use `--devices` when a workflow should process only selected device directories, for example a same-RDO calibration closure check. Final spill merging uses only the devices processed by the current invocation, so stale split-spill files from earlier per-device runs in the same output directory are ignored.
 
 By default, `process.sh` does not overwrite existing workflow outputs. If an output from a previous stopped or failed processing attempt is found, the corresponding stage is skipped and the existing file is reused. Stages that do run successfully still perform the normal cleanup of their inputs/intermediate files. Pass `--overwrite` to force regeneration of existing outputs.
 
