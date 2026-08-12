@@ -114,6 +114,12 @@ unknown_words
 spill_counter_consistent
 open_spill_at_eof
 spill_count_balance
+spill_count_uniform_start
+spill_count_uniform_end
+min_start_spill_type7
+max_start_spill_type7
+min_end_spill_type15
+max_end_spill_type15
 errors
 ```
 
@@ -123,7 +129,7 @@ Aggregate device/run `.check` files also include diagnostic pointers for failed 
 problem_check: <path-to-fifo-or-device-check>
 ```
 
-Use `problem_check` to find the detailed per-FIFO report when an aggregate has `consistent: no` or nonzero `errors`.
+Use `problem_check` to find the detailed per-FIFO or per-device report when an aggregate has `consistent: no`, nonzero `errors`, or a non-uniform spill count. The uniform spill-count checks verify that all inputs to a device aggregate, and all device aggregates in the run aggregate, have the same START_SPILL and END_SPILL counts.
 
 The DAQ end-of-spill word used by the current codebase is `type == 15`.
 

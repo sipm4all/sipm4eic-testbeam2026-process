@@ -176,6 +176,57 @@ all_no_key()
     echo "no"
 }
 
+uniform_key()
+{
+    local key=$1
+    shift
+    local reference=""
+    local file value
+    for file in "$@"; do
+        value=$(value_from_check "${file}" "${key}")
+        [[ "${value}" =~ ^[0-9]+$ ]] || value=0
+        if [ -z "${reference}" ]; then
+            reference=${value}
+        elif [ "${value}" -ne "${reference}" ]; then
+            echo "no"
+            return
+        fi
+    done
+    echo "yes"
+}
+
+min_key()
+{
+    local key=$1
+    shift
+    local min=""
+    local file value
+    for file in "$@"; do
+        value=$(value_from_check "${file}" "${key}")
+        [[ "${value}" =~ ^[0-9]+$ ]] || value=0
+        if [ -z "${min}" ] || [ "${value}" -lt "${min}" ]; then
+            min=${value}
+        fi
+    done
+    echo "${min:-0}"
+}
+
+max_key()
+{
+    local key=$1
+    shift
+    local max=""
+    local file value
+    for file in "$@"; do
+        value=$(value_from_check "${file}" "${key}")
+        [[ "${value}" =~ ^[0-9]+$ ]] || value=0
+        if [ -z "${max}" ] || [ "${value}" -gt "${max}" ]; then
+            max=${value}
+        fi
+    done
+    echo "${max:-0}"
+}
+
 write_aggregate_check()
 {
     local level=$1
@@ -194,13 +245,20 @@ write_aggregate_check()
     unknown_words=$(sum_key unknown_words "${files[@]}")
     errors=$(sum_key errors "${files[@]}")
 
-    local counters_ok open_ok balance_ok consistent
+    local counters_ok open_ok balance_ok start_uniform end_uniform consistent
+    local min_start max_start min_end max_end
     counters_ok=$(all_yes_key spill_counter_consistent "${files[@]}")
     open_ok=$(all_no_key open_spill_at_eof "${files[@]}")
     balance_ok=$(all_yes_key spill_count_balance "${files[@]}")
+    start_uniform=$(uniform_key start_spill_type7 "${files[@]}")
+    end_uniform=$(uniform_key end_spill_type15 "${files[@]}")
+    min_start=$(min_key start_spill_type7 "${files[@]}")
+    max_start=$(max_key start_spill_type7 "${files[@]}")
+    min_end=$(min_key end_spill_type15 "${files[@]}")
+    max_end=$(max_key end_spill_type15 "${files[@]}")
 
     consistent="yes"
-    if [ "${counters_ok}" != "yes" ] || [ "${open_ok}" != "no" ] || [ "${balance_ok}" != "yes" ] || [ "${unknown_words}" -ne 0 ] || [ "${errors}" -ne 0 ]; then
+    if [ "${counters_ok}" != "yes" ] || [ "${open_ok}" != "no" ] || [ "${balance_ok}" != "yes" ] || [ "${start_uniform}" != "yes" ] || [ "${end_uniform}" != "yes" ] || [ "${unknown_words}" -ne 0 ] || [ "${errors}" -ne 0 ]; then
         consistent="no"
     fi
 
@@ -217,17 +275,40 @@ write_aggregate_check()
         echo "spill_counter_consistent: ${counters_ok}"
         echo "open_spill_at_eof: ${open_ok}"
         echo "spill_count_balance: ${balance_ok}"
+        echo "spill_count_uniform_start: ${start_uniform}"
+        echo "spill_count_uniform_end: ${end_uniform}"
+        echo "min_start_spill_type7: ${min_start}"
+        echo "max_start_spill_type7: ${max_start}"
+        echo "min_end_spill_type15: ${min_end}"
+        echo "max_end_spill_type15: ${max_end}"
         echo "consistent: ${consistent}"
         echo "errors: ${errors}"
         for file in "${files[@]}"; do
             echo "input_check: ${file}"
         done
+        local reference_start reference_end file_start file_end
+        reference_start=""
+        reference_end=""
+        for file in "${files[@]}"; do
+            if [ -z "${reference_start}" ]; then
+                reference_start=$(value_from_check "${file}" start_spill_type7)
+                [[ "${reference_start}" =~ ^[0-9]+$ ]] || reference_start=0
+            fi
+            if [ -z "${reference_end}" ]; then
+                reference_end=$(value_from_check "${file}" end_spill_type15)
+                [[ "${reference_end}" =~ ^[0-9]+$ ]] || reference_end=0
+            fi
+        done
         for file in "${files[@]}"; do
             local file_consistent file_errors
             file_consistent=$(value_from_check "${file}" consistent)
             file_errors=$(value_from_check "${file}" errors)
+            file_start=$(value_from_check "${file}" start_spill_type7)
+            file_end=$(value_from_check "${file}" end_spill_type15)
             [[ "${file_errors}" =~ ^[0-9]+$ ]] || file_errors=0
-            if [ "${file_consistent}" = "no" ] || [ "${file_errors}" -ne 0 ]; then
+            [[ "${file_start}" =~ ^[0-9]+$ ]] || file_start=0
+            [[ "${file_end}" =~ ^[0-9]+$ ]] || file_end=0
+            if [ "${file_consistent}" = "no" ] || [ "${file_errors}" -ne 0 ] || [ "${file_start}" -ne "${reference_start}" ] || [ "${file_end}" -ne "${reference_end}" ]; then
                 echo "problem_check: ${file}"
             fi
         done
