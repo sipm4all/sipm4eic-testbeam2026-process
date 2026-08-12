@@ -22,6 +22,7 @@ DEVICE_ALL=1
 FIFO_ALL=1
 declare -A GOOD_FIFO=()
 USE_GOOD_FIFO_LIST=0
+GOOD_FIFO_LIST=""
 
 usage()
 {
@@ -36,6 +37,7 @@ required:
 options:
   --devices DEVICE ...   device directory names to process, default: all
   --fifos FIFO ...       FIFO numbers to process, default: all
+  --good-fifo-list FILE  process only FIFOs listed by checker.sh
   --help, -h             show this help message
 
 examples:
@@ -164,7 +166,7 @@ load_good_fifo_list()
     GOOD_FIFO=()
 
     if [ ! -f "${list}" ]; then
-        return
+        fail "good FIFO list does not exist: ${list}"
     fi
 
     local device fifo decoded_root check_file
@@ -223,6 +225,11 @@ while [ $# -gt 0 ]; do
             fi
             shift "${PARSE_FILTER_CONSUMED}"
             ;;
+        --good-fifo-list)
+            [ $# -ge 2 ] || fail "$1 requires FILE"
+            GOOD_FIFO_LIST=$2
+            shift 2
+            ;;
         --help|-h)
             usage
             exit 0
@@ -249,8 +256,9 @@ if [ ! -d "${irpath}" ]; then
    fail "${irpath} does not exist; run decoder.sh first"
 fi
 orpath="${opath}/${run}"
-good_fifo_list="${orpath}/${run}.good-fifos.list"
-load_good_fifo_list "${good_fifo_list}"
+if [ -n "${GOOD_FIFO_LIST}" ]; then
+    load_good_fifo_list "${GOOD_FIFO_LIST}"
+fi
 
 pids=()
 for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do

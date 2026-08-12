@@ -66,6 +66,6 @@ Downstream workflows read the decoded ROOT files from the `decoded/` directory. 
 - `trigger`: creates triggered frame trees using declarative trigger configurations.
 - `macros/lib/trigger_reader.h`: header-only helper for reading triggered frame output.
 
-Run `process/scripts/checker.sh` first when you want a non-destructive sanity pass over decoded per-FIFO files before launching the full processing workflow.
+Run `process/scripts/checker.sh` first when you want a non-destructive sanity pass over decoded per-FIFO files before launching calibration or full processing. The checker writes run-level `*.good-fifos.list` and `*.bad-fifos.list` files; pass the good list explicitly to `dcalib.sh` or `process.sh` with `--good-fifo-list` to skip FIFOs that would break spill consistency.
 
 Generated ROOT files, logs, build products, and local binaries are ignored by git.

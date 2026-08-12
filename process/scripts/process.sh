@@ -27,6 +27,7 @@ DEVICE_ALL=1
 OVERWRITE=0
 declare -A GOOD_FIFO=()
 USE_GOOD_FIFO_LIST=0
+GOOD_FIFO_LIST=""
 
 WRITE_LOGS=0
 CLEAN_DEVICE_SPILLS=1
@@ -48,6 +49,7 @@ options:
   --run-type TYPE                accepted for compatibility with decoder.sh; process.sh reads decoded files from /data/2026-testbeam/process/RUN
                                   default: physics
   --devices DEVICE ...           device directory names to process, default: all
+  --good-fifo-list FILE          process only FIFOs listed by checker.sh
   --overwrite                    overwrite existing workflow outputs instead of skipping them
   --window, -w VALUE             trigger frame window, default: 256
   --help, -h                     show this help message
@@ -150,7 +152,7 @@ load_good_fifo_list()
     GOOD_FIFO=()
 
     if [ ! -f "${list}" ]; then
-        return
+        fail "good FIFO list does not exist: ${list}"
     fi
 
     local device fifo decoded_root check_file
@@ -213,6 +215,11 @@ while [ $# -gt 0 ]; do
                 DEVICE_ALL=0
             fi
             shift "${PARSE_FILTER_CONSUMED}"
+            ;;
+        --good-fifo-list)
+            [ $# -ge 2 ] || fail "$1 requires FILE"
+            GOOD_FIFO_LIST=$2
+            shift 2
             ;;
         --overwrite)
             OVERWRITE=1
@@ -279,8 +286,9 @@ if [ ! -d "${irpath}" ]; then
    exit 1
 fi
 orpath="${opath}/${run}"
-good_fifo_list="${orpath}/${run}.good-fifos.list"
-load_good_fifo_list "${good_fifo_list}"
+if [ -n "${GOOD_FIFO_LIST}" ]; then
+    load_good_fifo_list "${GOOD_FIFO_LIST}"
+fi
 
 merge_prefix="aps.sorted"
 if [ "${DEVICE_ALL}" -ne 1 ]; then
