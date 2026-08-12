@@ -25,6 +25,7 @@ execute_process(
 separate_arguments(ROOT_CFLAGS_LIST UNIX_COMMAND "${ROOT_CFLAGS}")
 separate_arguments(ROOT_LIBS_LIST UNIX_COMMAND "${ROOT_LIBS}")
 
+add_executable(decoder decoder.cc)
 add_executable(dcalib dcalib.cc)
 add_executable(calibrator calibrator.cc)
 add_executable(cleaner cleaner.cc)
@@ -34,12 +35,13 @@ add_executable(after-pulse-suppressor after-pulse-suppressor.cc)
 add_executable(merger merger.cc)
 add_executable(trigger trigger.cc)
 
-foreach(target dcalib calibrator cleaner checker sorter after-pulse-suppressor merger trigger)
+foreach(target decoder dcalib calibrator cleaner checker sorter after-pulse-suppressor merger trigger)
   target_compile_options(${target} PRIVATE ${ROOT_CFLAGS_LIST})
   target_link_libraries(${target} PRIVATE ${ROOT_LIBS_LIST} Boost::program_options)
 endforeach()
 
 install(TARGETS
+  decoder
   dcalib
   calibrator
   cleaner

@@ -14,6 +14,47 @@ Executables are built in `process/build/` and installed to `process/bin/`.
 
 ## Programs
 
+
+### decoder
+
+Decodes one raw per-FIFO `.dat` file into a ROOT file containing an `alcor` tree:
+
+```bash
+process/bin/decoder \
+  --input alcdaq.fifo_13.dat \
+  --output alcdaq.fifo_13.root \
+  --allowed-spill-errors 0
+```
+
+The output tree branches are compatible with the downstream processing chain:
+
+```text
+device fifo type counter column pixel tdc rollover coarse fine
+```
+
+For control words such as START_SPILL, END_SPILL, and trigger tags, fields that do not belong to the control word payload are written with placeholder value `0` rather than `-1`. ALCOR hits likewise use `counter = 0` because the hit counter field is not meaningful for them. This keeps the decoded format compatible with a possible future move to unsigned field types. The word identity must be taken from `type`, not from placeholder hit fields. START_SPILL and END_SPILL use `fine = 0` for normal spills. If the decoder suppresses a spill payload because the spill exceeded `--allowed-spill-errors`, both the START_SPILL and END_SPILL words are written with `fine = 1`.
+
+The decoder is stateful and conservative. For each ALCOR FIFO it searches for START_SPILL (`type == 7`), then accepts data only until the matching END_SPILL (`type == 15`) with the same counter is found. END_SPILL-looking words with the wrong counter are treated as decoding errors and skipped rather than accepted as real spill boundaries.
+
+ALCOR hit words are accepted only when their decoded column is valid for the FIFO:
+
+```text
+column = 2 * (fifo % 4)
+column = 2 * (fifo % 4) + 1
+```
+
+This rejects garbage words that decode into impossible FIFO/column combinations. Rollover markers `0x5c5c5c5c` are counted internally and are not written as hits.
+
+`--allowed-spill-errors` controls spill-level payload quarantine. The default is strict:
+
+```text
+--allowed-spill-errors 0
+```
+
+If a completed spill has more errors than this threshold, the decoded output still writes the START_SPILL and END_SPILL markers for that spill, but omits all payload hits/tags from that spill. Both spill markers get `fine = 1` to tag the spill as suppressed. This preserves spill boundaries for downstream synchronization while preventing corrupted payload from entering the processing chain.
+
+The decoder prints summary counters including spills found/written/emptied, wrong END_SPILL candidates, invalid-column hits, malformed words, and skipped words outside spills. The same summary is also written to a sidecar text file derived from the output name: `output.root` produces `output.summary`.
+
 ### dcalib
 
 Runs TDC fine-time calibration for every unique ALCOR channel found in an input file and writes both ROOT diagnostics and a calibrator-compatible `[TDC]` text snippet:

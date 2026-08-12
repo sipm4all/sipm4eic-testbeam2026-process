@@ -1,6 +1,6 @@
 # Workflow Scripts
 
-This directory contains shell scripts for running larger processing workflows. The scripts assume they are run from the repository checkout and that executables have been built in the `process/bin/` directory.
+This directory contains shell scripts for running larger processing workflows. Raw decoding is handled by `decoder.sh` and `process/bin/decoder`. The scripts assume they are run from the repository checkout and that executables have been built in the `process/bin/` directory.
 
 Build first:
 
@@ -10,6 +10,54 @@ cmake --build process/build -j
 cmake --install process/build
 ```
 
+
+
+## decoder.sh
+
+`decoder.sh` decodes raw per-FIFO `.dat` files into ROOT `alcor` files. It follows the same hierarchy as the main processing workflow:
+
+```text
+FIFO decode jobs in one device
+  -> wait for that device
+  -> move to the next device
+  -> finish the run
+```
+
+Run:
+
+```bash
+process/scripts/decoder.sh --run RUN_NAME
+process/scripts/decoder.sh --run RUN_NAME --run-type testpulse --devices kc705-200 rdo-{192..195} --fifos {0..16}
+process/scripts/decoder.sh --run RUN_NAME --allowed-spill-errors 1
+```
+
+Options:
+
+```text
+--run RUN                    run name/directory
+--run-type TYPE              input run type, default physics; supported: physics, testpulse
+--devices all                process all devices, default
+--devices DEV ...            process selected device directories
+--fifos all                  process all FIFOs, default
+--fifos FIFO ...             process selected FIFO numbers or inclusive ranges
+--allowed-spill-errors N     maximum errors before a spill payload is emptied, default 0
+--overwrite                  overwrite existing decoded ROOT files
+```
+
+For an input file:
+
+```text
+/data/2026-testbeam/actual/<run-type>/<run>/<device>/raw/alcdaq.fifo_13.dat
+```
+
+it writes:
+
+```text
+/data/2026-testbeam/process/<run>/<device>/decoded/alcdaq.fifo_13.root
+/data/2026-testbeam/process/<run>/<device>/decoded/alcdaq.fifo_13.summary
+```
+
+The `.summary` file is produced by `decoder` and records spills found/written/emptied and raw decoding error counters.
 
 ## checker.sh
 
