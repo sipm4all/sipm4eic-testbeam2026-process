@@ -139,21 +139,51 @@ chips 4..7    -> fifos 16..31
 
 ## Running TDC Calibration
 
-The `dcalib.sh` workflow processes decoded test-pulse files from:
+The full calibration preparation starts from raw test-pulse files under:
 
 ```text
-/data/2026-testbeam/actual/testpulse/<run>/<device>/decoded/
+/data/2026-testbeam/actual/testpulse/<run>/<device>/raw/
 ```
 
-and writes outputs under:
+The first step is raw decoding with the strict decoder workflow. `decoder.sh` runs per-FIFO decode jobs in parallel for one device, waits for that device to finish, and then moves to the next device. Decoded ROOT files and decoder summaries are written under:
 
 ```text
-/data/2026-testbeam/process/<run>/<device>/
+/data/2026-testbeam/process/<run>/<device>/decoded/
 ```
 
-Before running the calibration jobs, run the independent checker workflow on the same decoded files. This is a read-only preflight step; it does not modify the data and it is not part of `dcalib.sh`. It writes one ASCII `.check` report per decoded FIFO file and verifies basic stream consistency, including spill-marker counts and START/END spill-counter pairing.
+For the three calibration data sets used below, run:
 
-For the three calibration data sets used below, the corresponding checks are:
+```bash
+sipm4eic-testbeam2026-process/process/scripts/decoder.sh \
+    --run 20260618-183625 \
+    --run-type testpulse \
+    --devices kc705-200 \
+    --fifos {0..7}
+
+sipm4eic-testbeam2026-process/process/scripts/decoder.sh \
+    --run 20260618-183625 \
+    --run-type testpulse \
+    --devices rdo-{192..199} \
+    --fifos {0..15}
+
+sipm4eic-testbeam2026-process/process/scripts/decoder.sh \
+    --run 20260618-185127 \
+    --run-type testpulse \
+    --devices rdo-{192..199} \
+    --fifos {16..31}
+```
+
+The default decoder policy is strict:
+
+```text
+--allowed-spill-errors 0
+```
+
+If a completed spill exceeds this threshold, the decoder still writes the START_SPILL and END_SPILL markers but suppresses the payload. Suppressed spill markers are tagged with `fine = 1`; normal spill markers have `fine = 0`. Each decoded file also has a sidecar `.summary` file with counts of spills written/emptied and decoding errors.
+
+After decoding, run the independent checker workflow on the decoded files. This is a read-only preflight step; it does not modify the data and it is not part of `dcalib.sh`. It writes one ASCII `.check` report per decoded FIFO file and verifies basic stream consistency, including spill-marker counts and START/END spill-counter pairing.
+
+For the same three calibration data sets, the corresponding checks are:
 
 ```bash
 sipm4eic-testbeam2026-process/process/scripts/checker.sh \
