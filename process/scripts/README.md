@@ -123,13 +123,14 @@ max_end_spill_type15
 errors
 ```
 
-Aggregate device/run `.check` files also include diagnostic pointers for failed inputs:
+Aggregate device/run `.check` files also include diagnostic pointers and explanations for failed inputs:
 
 ```text
 problem_check: <path-to-fifo-or-device-check>
+error: <path-to-fifo-or-device-check>: START_SPILL count range 0..0 differs from common count 100
 ```
 
-Use `problem_check` to find the detailed per-FIFO or per-device report when an aggregate has `consistent: no`, nonzero `errors`, or a non-uniform spill count. The uniform spill-count checks compare the spill count per input stream. For per-FIFO reports this is the FIFO START/END count. For device aggregates this is the per-FIFO min/max stored in the device report, so a run-level check does not confuse an 8-FIFO device with a 32-FIFO device. `problem_check` entries are inputs that are internally inconsistent or deviate from the most common spill count.
+Use `problem_check` to find the detailed per-FIFO or per-device report when an aggregate has `consistent: no`, nonzero `errors`, or a non-uniform spill count. The uniform spill-count checks compare the spill count per input stream. For per-FIFO reports this is the FIFO START/END count. For device aggregates this is the per-FIFO min/max stored in the device report, so a run-level check does not confuse an 8-FIFO device with a 32-FIFO device. `problem_check` entries are inputs that are internally inconsistent or deviate from the most common spill count; the following `error:` lines explain the aggregate-level reason.
 
 Aggregation now treats missing or malformed numeric fields in input `.check` files as a workflow error. The script fails rather than silently converting such values to zero.
 

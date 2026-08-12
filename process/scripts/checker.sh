@@ -394,6 +394,18 @@ write_aggregate_check()
             [[ "${file_errors}" =~ ^[0-9]+$ ]] || file_errors=0
             if [ "${file_consistent}" = "no" ] || [ "${file_errors}" -ne 0 ] || [ "${file_start_min}" -ne "${reference_start}" ] || [ "${file_start_max}" -ne "${reference_start}" ] || [ "${file_end_min}" -ne "${reference_end}" ] || [ "${file_end_max}" -ne "${reference_end}" ]; then
                 echo "problem_check: ${file}"
+                if [ "${file_consistent}" = "no" ]; then
+                    echo "error: ${file}: input check is internally inconsistent"
+                fi
+                if [ "${file_errors}" -ne 0 ]; then
+                    echo "error: ${file}: input check reports ${file_errors} errors"
+                fi
+                if [ "${file_start_min}" -ne "${reference_start}" ] || [ "${file_start_max}" -ne "${reference_start}" ]; then
+                    echo "error: ${file}: START_SPILL count range ${file_start_min}..${file_start_max} differs from common count ${reference_start}"
+                fi
+                if [ "${file_end_min}" -ne "${reference_end}" ] || [ "${file_end_max}" -ne "${reference_end}" ]; then
+                    echo "error: ${file}: END_SPILL count range ${file_end_min}..${file_end_max} differs from common count ${reference_end}"
+                fi
             fi
         done
     } > "${output}"
