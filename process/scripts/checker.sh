@@ -129,7 +129,21 @@ value_from_check()
 {
     local file=$1
     local key=$2
-    awk -v key="${key}" '$1 == key":" { print $2; found=1; exit } END { if (!found) print "" }' "${file}"
+    [ -f "${file}" ] || fail "missing check file while aggregating: ${file}"
+    awk -v key="${key}" '$1 == key":" { value=$2; gsub(/\r/, "", value); print value; found=1; exit } END { if (!found) print "" }' "${file}"
+}
+
+required_numeric_value()
+{
+    local file=$1
+    local key=$2
+    local value
+    value=$(value_from_check "${file}" "${key}")
+    if [[ "${value}" =~ ^[0-9]+$ ]]; then
+        echo "${value}"
+        return
+    fi
+    fail "check file ${file} does not contain numeric key '${key}'"
 }
 
 sum_key()
@@ -139,8 +153,7 @@ sum_key()
     local total=0
     local file value
     for file in "$@"; do
-        value=$(value_from_check "${file}" "${key}")
-        [[ "${value}" =~ ^[0-9]+$ ]] || value=0
+        value=$(required_numeric_value "${file}" "${key}")
         total=$((total + value))
     done
     echo "${total}"
@@ -158,8 +171,11 @@ value_or_fallback()
         return
     fi
     value=$(value_from_check "${file}" "${fallback_key}")
-    [[ "${value}" =~ ^[0-9]+$ ]] || value=0
-    echo "${value}"
+    if [[ "${value}" =~ ^[0-9]+$ ]]; then
+        echo "${value}"
+        return
+    fi
+    fail "check file ${file} does not contain numeric key '${key}' or fallback key '${fallback_key}'"
 }
 
 min_spill_count_key()
