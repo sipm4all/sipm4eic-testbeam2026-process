@@ -4,7 +4,6 @@ shopt -s nullglob
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
-ipath="/data/2026-testbeam/actual/testpulse"
 opath="/data/2026-testbeam/process"
 
 CLEANER="${ROOT_DIR}/process/bin/cleaner"
@@ -208,28 +207,33 @@ for executable in "${CLEANER}" "${SORTER}" "${DCALIB}"; do
     fi
 done
 
-irpath="${ipath}/${run}"
-if [ ! -d "${irpath}" ]; then
-   fail "${irpath} does not exist"
-fi
 orpath="${opath}/${run}"
-mkdir -p "${orpath}"
+if [ ! -d "${orpath}" ]; then
+   fail "${orpath} does not exist; run decoder.sh first"
+fi
 
 pids=()
-for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
+for device_path in "${orpath}"/kc705* "${orpath}"/rdo*; do
 
-    [ -d "${idpath}" ] || continue
+    [ -d "${device_path}" ] || continue
 
-    device=$(basename "${idpath}")
+    device=$(basename "${device_path}")
     if [ "${DEVICE_ALL}" -ne 1 ] && ! contains_value "${device}" "${DEVICE_FILTER[@]}"; then
         continue
     fi
 
-    odpath="${orpath}/${device}"
-    mkdir -p "${odpath}"
+    idpath="${device_path}/decoded"
     echo " --- TDC calibration for device ${device}: ${idpath} "
 
-    decoded_files=("${idpath}"/decoded/alcdaq.fifo_*.root)
+    if [ ! -d "${idpath}" ]; then
+        echo " --- decoded directory not found for ${device}: ${idpath} "
+        continue
+    fi
+
+    odpath="${device_path}/dcalib"
+    mkdir -p "${odpath}"
+
+    decoded_files=("${idpath}"/alcdaq.fifo_*.root)
     if [ ${#decoded_files[@]} -eq 0 ]; then
         echo " --- no decoded files found for ${device} "
         continue

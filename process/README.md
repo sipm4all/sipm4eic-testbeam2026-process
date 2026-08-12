@@ -20,6 +20,17 @@ raw per-FIFO DAT file
 
 Most compiled programs operate on ROOT files; `decoder` is the raw `.dat` to ROOT entry point. The common raw input tree name is `alcor`. Triggered output files contain a `frames` tree with one entry per spill and flattened frame contents split into trigger, timing, and Cherenkov collections. The spill entry `id` is copied from the DAQ START_SPILL word `counter`, so it preserves the original spill number even when spills are processed as separate files.
 
+
+Workflow scripts use `/data/2026-testbeam/process/<run>/` as the common run workspace. Device-local products are separated by stage:
+
+```text
+<device>/decoded/   decoded ROOT files and decoder/checker reports
+<device>/dcalib/    TDC-calibration products from dcalib.sh
+<device>/process/   calibrated, sorted, AP-suppressed, and device-merged processing products
+```
+
+`decoder.sh` is the only workflow that reads raw files from `/data/2026-testbeam/actual/<run-type>/<run>/...`. `checker.sh`, `dcalib.sh`, and `process.sh` read decoded ROOT files from `<device>/decoded/`.
+
 Directory contents:
 
 ```text

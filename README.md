@@ -40,6 +40,19 @@ merger
 trigger
 ```
 
+
+## Processing Layout
+
+The workflow scripts use one run directory under `/data/2026-testbeam/process` and keep device-local products separated by stage:
+
+```text
+/data/2026-testbeam/process/<run>/<device>/decoded/   decoded ROOT files from decoder.sh
+/data/2026-testbeam/process/<run>/<device>/dcalib/    TDC-calibration products from dcalib.sh
+/data/2026-testbeam/process/<run>/<device>/process/   calibrated/sorted/AP-suppressed processing products
+```
+
+Downstream workflows read the decoded ROOT files from the `decoded/` directory. They no longer read decoded files directly from `/data/2026-testbeam/actual`.
+
 ## Main Components
 
 - `decoder`: converts raw per-FIFO `.dat` files into decoded ROOT `alcor` trees with strict spill validation.

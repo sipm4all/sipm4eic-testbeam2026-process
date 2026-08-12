@@ -4,7 +4,6 @@ shopt -s nullglob
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 
-actual_base="/data/2026-testbeam/actual"
 run_type="physics"
 opath="/data/2026-testbeam/process"
 
@@ -43,8 +42,8 @@ required:
   --trigger, -t FILE TAG         trigger configuration and output tag; may be repeated
 
 options:
-  --run-type TYPE                input run type under /data/2026-testbeam/actual, default: physics
-                                  supported: physics, testpulse
+  --run-type TYPE                accepted for compatibility with decoder.sh; process.sh reads decoded files from /data/2026-testbeam/process/RUN
+                                  default: physics
   --devices DEVICE ...           device directory names to process, default: all
   --overwrite                    overwrite existing workflow outputs instead of skipping them
   --window, -w VALUE             trigger frame window, default: 256
@@ -216,7 +215,6 @@ case "${run_type}" in
         fail "unsupported --run-type: ${run_type}"
         ;;
 esac
-ipath="${actual_base}/${run_type}"
 [ -n "${CALIBRATION_CONFIG}" ] || fail "missing --calibration"
 [ ${#TRIGGER_CONFIGS[@]} -gt 0 ] || fail "at least one --trigger FILE TAG is required"
 [[ "${TRIGGER_WINDOW}" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "--window must be a positive number"
@@ -238,13 +236,11 @@ for i in "${!TRIGGER_CONFIGS[@]}"; do
     seen_trigger_tags[$tag]=1
 done
 
-irpath="${ipath}/${run}"
-if [ ! -d "${irpath}" ]; then
-   echo " ${irpath} does not exist "
+orpath="${opath}/${run}"
+if [ ! -d "${orpath}" ]; then
+   echo " ${orpath} does not exist; run decoder.sh first "
    exit 1
 fi
-orpath="${opath}/${run}"
-mkdir -p "${orpath}"
 
 merge_prefix="aps.sorted"
 if [ "${DEVICE_ALL}" -ne 1 ]; then
@@ -269,17 +265,24 @@ fi
 ### loop over device directories
 merge_pids=()
 processed_device_dirs=()
-for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
+for device_path in "${orpath}"/kc705* "${orpath}"/rdo*; do
 
-    [ -d "${idpath}" ] || continue
+    [ -d "${device_path}" ] || continue
 
-    device=$(basename "${idpath}")
+    device=$(basename "${device_path}")
     if [ "${DEVICE_ALL}" -ne 1 ] && ! contains_value "${device}" "${DEVICE_FILTER[@]}"; then
         continue
     fi
-    odpath="${orpath}/${device}"
-    mkdir -p "${odpath}"
+    idpath="${device_path}/decoded"
     echo " --- processing device ${device}: ${idpath} "
+
+    if [ ! -d "${idpath}" ]; then
+        echo " --- decoded directory not found for ${device}: ${idpath} "
+        continue
+    fi
+
+    odpath="${device_path}/process"
+    mkdir -p "${odpath}"
 
     device_spill_files=("${odpath}"/aps.sorted.spill_*.root)
     if [ "${OVERWRITE}" -ne 1 ] && [ ${#device_spill_files[@]} -gt 0 ]; then
@@ -288,7 +291,7 @@ for idpath in "${irpath}"/kc705* "${irpath}"/rdo*; do
         continue
     fi
 
-    decoded_files=("${idpath}"/decoded/alcdaq.fifo_*.root)
+    decoded_files=("${idpath}"/alcdaq.fifo_*.root)
     if [ ${#decoded_files[@]} -eq 0 ]; then
         echo " --- no decoded files found for ${device} "
         continue

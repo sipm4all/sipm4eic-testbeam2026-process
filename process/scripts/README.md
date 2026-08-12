@@ -61,7 +61,7 @@ The `.summary` file is produced by `decoder` and records spills found/written/em
 
 ## checker.sh
 
-`checker.sh` runs the lightweight data sanity checker over decoded per-FIFO ROOT files. It does not modify data. For each input file it writes one ASCII `.check` report in the matching process output device directory.
+`checker.sh` runs the lightweight data sanity checker over decoded per-FIFO ROOT files produced by `decoder.sh`. It does not modify data. For each input file it writes one ASCII `.check` report next to the decoded ROOT file.
 
 Run:
 
@@ -74,7 +74,7 @@ The accepted filters mirror the `dcalib.sh` style:
 
 ```text
 --run RUN            run name/directory
---run-type TYPE      input run type, default physics; supported: physics, testpulse
+--run-type TYPE      accepted for compatibility with decoder.sh; decoded input is read from /data/2026-testbeam/process/<run>
 --devices all        process all devices, default
 --devices DEV ...    process selected device directories
 --fifos all          process all FIFOs, default
@@ -84,19 +84,19 @@ The accepted filters mirror the `dcalib.sh` style:
 For an input file:
 
 ```text
-/data/2026-testbeam/actual/<run-type>/<run>/<device>/decoded/alcdaq.fifo_0.root
+/data/2026-testbeam/process/<run>/<device>/decoded/alcdaq.fifo_0.root
 ```
 
 it writes per-FIFO reports such as:
 
 ```text
-/data/2026-testbeam/process/<run>/<device>/alcdaq.fifo_0.check
+/data/2026-testbeam/process/<run>/<device>/decoded/alcdaq.fifo_0.check
 ```
 
 The workflow is hierarchical: per-FIFO checks are produced first, then one device-level check is written for that device, and finally one run-level check is written after all selected devices are complete. Aggregate reports are:
 
 ```text
-/data/2026-testbeam/process/<run>/<device>/<device>.check
+/data/2026-testbeam/process/<run>/<device>/decoded/<device>.check
 /data/2026-testbeam/process/<run>/<run>.check
 ```
 
@@ -135,12 +135,7 @@ The DAQ end-of-spill word used by the current codebase is `type == 15`.
 clean -> sort -> dcalib
 ```
 
-It uses the same input and output base directories as `process.sh`:
-
-```bash
-ipath="/data/2026-testbeam/actual/testpulse"
-opath="/data/2026-testbeam/process"
-```
+It reads the decoded ROOT files written by `decoder.sh` and writes calibration products under each device's `dcalib/` subdirectory.
 
 Run:
 
@@ -177,23 +172,23 @@ The shell expands unquoted brace ranges before the script receives them. Quoted 
 For each input file like:
 
 ```text
-/data/2026-testbeam/actual/testpulse/<run>/<device>/decoded/alcdaq.fifo_0.root
+/data/2026-testbeam/process/<run>/<device>/decoded/alcdaq.fifo_0.root
 ```
 
-the script writes outputs in the corresponding device directory:
+the script writes outputs in the corresponding device calibration directory:
 
 ```text
-/data/2026-testbeam/process/<run>/<device>/dcalib.fifo_0.root
-/data/2026-testbeam/process/<run>/<device>/dcalib.fifo_0.conf
+/data/2026-testbeam/process/<run>/<device>/dcalib/dcalib.fifo_0.root
+/data/2026-testbeam/process/<run>/<device>/dcalib/dcalib.fifo_0.conf
 ```
 
 The final `.root` file contains compact TDC diagnostic histograms. The `.conf` file is the per-FIFO TDC calibration snippet; it contains only a `[TDC]` section in the format consumed by `calibrator`. These calibration outputs are not deleted by the script.
 
-During each job, the script also creates intermediate files in the same device output directory:
+During each job, the script also creates intermediate files in the same `dcalib/` directory:
 
 ```text
-/data/2026-testbeam/process/<run>/<device>/cleaned.fifo_0.root
-/data/2026-testbeam/process/<run>/<device>/sorted.cleaned.fifo_0.root
+/data/2026-testbeam/process/<run>/<device>/dcalib/cleaned.fifo_0.root
+/data/2026-testbeam/process/<run>/<device>/dcalib/sorted.cleaned.fifo_0.root
 ```
 
 `cleaned.*.root` is produced by `cleaner`; `sorted.cleaned.*.root` is produced by `sorter` and is the input to `dcalib`. These intermediate files are removed after `dcalib` succeeds.
@@ -218,7 +213,7 @@ process/scripts/merge_calibration_file.sh \
   --output calibration.merged.conf
 ```
 
-`--input` may be repeated, and each `--input` may be followed by more than one file. This supports shell-expanded patterns such as `--input rdo-{192..199}/dcalib.fifo_{0..15}.conf`. The script understands the standard calibration sections:
+`--input` may be repeated, and each `--input` may be followed by more than one file. This supports shell-expanded patterns such as `--input rdo-{192..199}/dcalib/dcalib.fifo_{0..15}.conf`. The script understands the standard calibration sections:
 
 ```text
 [TDC]
@@ -274,9 +269,9 @@ hadd triggered spill files per trigger tag
 Per-FIFO intermediate data files use stage-preserving prefixes:
 
 ```text
-calibrated.fifo_0.root
-sorted.calibrated.fifo_0.root
-aps.sorted.calibrated.fifo_0.root
+/data/2026-testbeam/process/<run>/<device>/process/calibrated.fifo_0.root
+/data/2026-testbeam/process/<run>/<device>/process/sorted.calibrated.fifo_0.root
+/data/2026-testbeam/process/<run>/<device>/process/aps.sorted.calibrated.fifo_0.root
 ```
 
 Run:
@@ -301,8 +296,8 @@ Required command-line options:
 Optional command-line options:
 
 ```text
---run-type TYPE            input run type under /data/2026-testbeam/actual, default physics
-                           supported values: physics, testpulse
+--run-type TYPE            accepted for compatibility with decoder.sh; decoded input is read from /data/2026-testbeam/process/<run>
+                           default: physics
 --devices DEVICE ...       device directory names to process, default all
                            accepts names such as kc705-200, rdo-192, rdo-{192..199}
 --overwrite                overwrite existing workflow outputs instead of skipping them
@@ -323,21 +318,20 @@ triggered.<tag>.spill_0000.root
 triggered.<tag>.root
 ```
 
-Input files are read from:
+Input files are read from decoded output produced by `decoder.sh`:
 
 ```text
-/data/2026-testbeam/actual/<run-type>/<run>/...
+/data/2026-testbeam/process/<run>/<device>/decoded/alcdaq.fifo_*.root
 ```
 
-Use the default `--run-type physics` for normal physics data and `--run-type testpulse` for calibration/test-pulse runs. Use `--devices` when a workflow should process only selected device directories, for example a same-RDO calibration closure check. Final spill merging uses only the devices processed by the current invocation, so stale split-spill files from earlier per-device runs in the same output directory are ignored.
+Run `decoder.sh` with the appropriate `--run-type` first. `process.sh` keeps accepting `--run-type` so command lines can mirror the decoder command, but it no longer reads directly from `/data/2026-testbeam/actual`. Use `--devices` when a workflow should process only selected device directories, for example a same-RDO calibration closure check. Final spill merging uses only the devices processed by the current invocation, so stale split-spill files from earlier per-device runs in the same output directory are ignored.
 
 By default, `process.sh` does not overwrite existing workflow outputs. If an output from a previous stopped or failed processing attempt is found, the corresponding stage is skipped and the existing file is reused. Stages that do run successfully still perform the normal cleanup of their inputs/intermediate files. Pass `--overwrite` to force regeneration of existing outputs.
 
 Important variables still configured near the top of the script:
 
 ```bash
-actual_base            input decoded-data base directory before run type
-opath                  output processing base directory
+opath                  processing base directory; decoded input is read from opath/RUN/DEVICE/decoded
 WRITE_LOGS             0 prints to terminal, 1 writes log files
 CLEAN_DEVICE_SPILLS    remove intermediate device spill files
 CLEAN_MERGED_SPILLS    remove merged spill files after triggering

@@ -151,27 +151,19 @@ The first step is raw decoding with the strict decoder workflow. `decoder.sh` ru
 /data/2026-testbeam/process/<run>/<device>/decoded/
 ```
 
-For the three calibration data sets used below, run:
+Decode the full test-pulse runs once:
 
 ```bash
 sipm4eic-testbeam2026-process/process/scripts/decoder.sh \
     --run 20260618-183625 \
-    --run-type testpulse \
-    --devices kc705-200 \
-    --fifos {0..7}
-
-sipm4eic-testbeam2026-process/process/scripts/decoder.sh \
-    --run 20260618-183625 \
-    --run-type testpulse \
-    --devices rdo-{192..199} \
-    --fifos {0..15}
+    --run-type testpulse
 
 sipm4eic-testbeam2026-process/process/scripts/decoder.sh \
     --run 20260618-185127 \
-    --run-type testpulse \
-    --devices rdo-{192..199} \
-    --fifos {16..31}
+    --run-type testpulse
 ```
+
+The later `checker.sh` and `dcalib.sh` commands select the device/FIFO subsets relevant to each calibration campaign. Keeping decoding run-wide avoids having a partially decoded run directory that can confuse downstream workflows.
 
 The default decoder policy is strict:
 
@@ -181,29 +173,21 @@ The default decoder policy is strict:
 
 If a completed spill exceeds this threshold, the decoder still writes the START_SPILL and END_SPILL markers but suppresses the payload. Suppressed spill markers are tagged with `fine = 1`; normal spill markers have `fine = 0`. Each decoded file also has a sidecar `.summary` file with counts of spills written/emptied and decoding errors.
 
-After decoding, run the independent checker workflow on the decoded files. This is a read-only preflight step; it does not modify the data and it is not part of `dcalib.sh`. It writes one ASCII `.check` report per decoded FIFO file and verifies basic stream consistency, including spill-marker counts and START/END spill-counter pairing.
+After decoding, run the independent checker workflow on the decoded files. This is a read-only preflight step; it does not modify the data and it is not part of `dcalib.sh`. It writes one ASCII `.check` report next to each decoded FIFO file and verifies basic stream consistency, including spill-marker counts and START/END spill-counter pairing.
 
-For the same three calibration data sets, the corresponding checks are:
+Run the checker over the full decoded runs:
 
 ```bash
 sipm4eic-testbeam2026-process/process/scripts/checker.sh \
     --run 20260618-183625 \
-    --run-type testpulse \
-    --devices kc705-200 \
-    --fifos {0..7}
-
-sipm4eic-testbeam2026-process/process/scripts/checker.sh \
-    --run 20260618-183625 \
-    --run-type testpulse \
-    --devices rdo-{192..199} \
-    --fifos {0..15}
+    --run-type testpulse
 
 sipm4eic-testbeam2026-process/process/scripts/checker.sh \
     --run 20260618-185127 \
-    --run-type testpulse \
-    --devices rdo-{192..199} \
-    --fifos {16..31}
+    --run-type testpulse
 ```
+
+The calibration-specific device/FIFO selections are applied later by `dcalib.sh`. Running the checker over the complete decoded run gives one run-level consistency report for everything decoded, including devices and FIFOs that are not used for a particular TDC-calibration subset.
 
 Each command follows the same hierarchy as the processing workflow: per-FIFO `.check` files are produced first, then one device-level `.check` file is written for each selected device, and finally one run-level `.check` file is written for the selected data set. The most important fields in each `.check` file are:
 
@@ -217,7 +201,19 @@ spill_count_balance
 errors
 ```
 
-The calibration jobs should be launched only after the relevant `.check` files are understood. For each FIFO input file, the `dcalib.sh` workflow itself remains:
+The calibration jobs should be launched only after the relevant `.check` files are understood. `dcalib.sh` reads decoded inputs from:
+
+```text
+/data/2026-testbeam/process/<run>/<device>/decoded/alcdaq.fifo_*.root
+```
+
+and writes all per-FIFO calibration products and temporary files to:
+
+```text
+/data/2026-testbeam/process/<run>/<device>/dcalib/
+```
+
+For each FIFO input file, the `dcalib.sh` workflow itself remains:
 
 ```text
 clean -> sort -> dcalib
@@ -226,7 +222,7 @@ clean -> sort -> dcalib
 The final calibration snippet is named, for example:
 
 ```text
-dcalib.fifo_0.conf
+/data/2026-testbeam/process/<run>/<device>/dcalib/dcalib.fifo_0.conf
 ```
 
 Each snippet contains only a `[TDC]` section and can be used as an input fragment when assembling a full calibration file, provided duplicate concrete TDC rows are avoided.
@@ -282,7 +278,7 @@ Run `20260618-185857` can also be used for the same chip group and should give c
 After the three `dcalib.sh` runs above, the output directory contains many per-FIFO files named like:
 
 ```text
-/data/2026-testbeam/process/<run>/<device>/dcalib.fifo_0.conf
+/data/2026-testbeam/process/<run>/<device>/dcalib/dcalib.fifo_0.conf
 ```
 
 Each file contains a `[TDC]` fragment. These fragments can be merged with:
@@ -299,7 +295,7 @@ This merges the `kc705-200` TIMING calibration from run `20260618-183625`:
 
 ```bash
 sipm4eic-testbeam2026-process/process/scripts/merge_calibration_file.sh \
-    --input /data/2026-testbeam/process/20260618-183625/kc705-200/dcalib.fifo_{0..7}.conf \
+    --input /data/2026-testbeam/process/20260618-183625/kc705-200/dcalib/dcalib.fifo_{0..7}.conf \
     --output /data/2026-testbeam/process/tdc.timing.conf
 ```
 
@@ -309,7 +305,7 @@ This merges the RDO Cherenkov calibration for chips `0..3`, using run `20260618-
 
 ```bash
 sipm4eic-testbeam2026-process/process/scripts/merge_calibration_file.sh \
-    --input /data/2026-testbeam/process/20260618-183625/rdo-{192..199}/dcalib.fifo_{0..15}.conf \
+    --input /data/2026-testbeam/process/20260618-183625/rdo-{192..199}/dcalib/dcalib.fifo_{0..15}.conf \
     --output /data/2026-testbeam/process/tdc.cherenkov.chips_0_3.conf
 ```
 
@@ -319,7 +315,7 @@ This merges the RDO Cherenkov calibration for chips `4..7`, using run `20260618-
 
 ```bash
 sipm4eic-testbeam2026-process/process/scripts/merge_calibration_file.sh \
-    --input /data/2026-testbeam/process/20260618-185127/rdo-{192..199}/dcalib.fifo_{16..31}.conf \
+    --input /data/2026-testbeam/process/20260618-185127/rdo-{192..199}/dcalib/dcalib.fifo_{16..31}.conf \
     --output /data/2026-testbeam/process/tdc.cherenkov.chips_4_7.conf
 ```
 
@@ -358,7 +354,9 @@ The final `process/config/calibration/tdc.20260618.conf` still contains only the
 
 ## Checking The Calibration With The Laser/Test-Pulse Runs
 
-A useful closure check is to run the normal processing chain on the same two runs used to derive the TDC calibration. These runs need one important qualification: they do not provide reliable timing synchronisation across different devices.
+A useful closure check is to run the normal processing chain on the same two runs used to derive the TDC calibration. Before running these commands, the relevant raw files must already have been decoded with `decoder.sh`; `process.sh` reads from `/data/2026-testbeam/process/<run>/<device>/decoded/` and writes device-local products to `/data/2026-testbeam/process/<run>/<device>/process/`.
+
+These runs need one important qualification: they do not provide reliable timing synchronisation across different devices.
 
 During these test-pulse runs, the hardware SPILL input of each device was used to send test pulses to ALCOR channels configured in `opMode = 2`. The data-taking spill was therefore generated in software. As a result, `kc705-200` and the individual RDO devices are not guaranteed to share a common synchronous time reference in these runs.
 
