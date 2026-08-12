@@ -100,7 +100,7 @@ The workflow is hierarchical: per-FIFO checks are produced first, then one devic
 /data/2026-testbeam/process/<run>/<run>.check
 ```
 
-The device-level report sums the selected FIFO reports for that device. The run-level report sums the selected device reports from the current invocation.
+The device-level report sums entries and data-word counters from the selected FIFO reports. The logical spill counters remain per-stream quantities: `start_spill_type7` and `end_spill_type15` report the aggregate spill count, not the sum of identical spill markers across FIFOs. The run-level report follows the same convention when combining device reports.
 
 Each `.check` file contains:
 
@@ -129,7 +129,7 @@ Aggregate device/run `.check` files also include diagnostic pointers for failed 
 problem_check: <path-to-fifo-or-device-check>
 ```
 
-Use `problem_check` to find the detailed per-FIFO or per-device report when an aggregate has `consistent: no`, nonzero `errors`, or a non-uniform spill count. The uniform spill-count checks verify that all inputs to a device aggregate, and all device aggregates in the run aggregate, have the same START_SPILL and END_SPILL counts.
+Use `problem_check` to find the detailed per-FIFO or per-device report when an aggregate has `consistent: no`, nonzero `errors`, or a non-uniform spill count. The uniform spill-count checks compare the spill count per input stream. For per-FIFO reports this is the FIFO START/END count. For device aggregates this is the per-FIFO min/max stored in the device report, so a run-level check does not confuse an 8-FIFO device with a 32-FIFO device.
 
 The DAQ end-of-spill word used by the current codebase is `type == 15`.
 
