@@ -369,15 +369,16 @@ These runs need one important qualification: they do not provide reliable timing
 
 During these test-pulse runs, the hardware SPILL input of each device was used to send test pulses to ALCOR channels configured in `opMode = 2`. The data-taking spill was therefore generated in software. As a result, `kc705-200` and the individual RDO devices are not guaranteed to share a common synchronous time reference in these runs.
 
-The calibration check must therefore be done per RDO device:
+The calibration check is therefore a special per-RDO diagnostic workflow, not the normal run-level trigger workflow:
 
 ```text
-trigger on one test-pulse channel in rdo-N
+process one rdo-N subset
+trigger on one test-pulse channel in that same rdo-N
 inspect only channels from the same rdo-N
 ignore relative timing to other devices for this check
 ```
 
-This is still a useful closure check. Within one RDO, the channels are read by the same electronics stream and are synchronous to the selected test-pulse trigger.
+This is still a useful closure check. Within one RDO, the channels are read by the same electronics stream and are synchronous to the selected test-pulse trigger. Normal physics or run-level production should instead run `process.sh` without `--devices` and then run `trigger.sh` without `--devices`, producing run-level `triggered.<tag>.root` files.
 
 The completed TDC file described above contains only `[TDC]` rows. For this check, build a complete calibrator configuration by adding explicit zero defaults for channel and trigger offsets:
 
@@ -425,7 +426,7 @@ process/config/trigger/calib_check_20260618-183625_rdo-192.conf
 process/config/trigger/calib_check_20260618-183625_rdo-199.conf
 ```
 
-Run the calibrated processing and merge chain once per RDO device:
+For this special same-RDO closure check, run the calibrated processing/merge step and then the trigger step once per RDO device:
 
 ```bash
 for dev in {192..199}; do
@@ -478,7 +479,7 @@ process/config/trigger/calib_check_20260618-185127_rdo-192.conf
 process/config/trigger/calib_check_20260618-185127_rdo-199.conf
 ```
 
-Run the calibrated processing and merge chain once per RDO device:
+For this special same-RDO closure check, run the calibrated processing/merge step and then the trigger step once per RDO device:
 
 ```bash
 for dev in {192..199}; do

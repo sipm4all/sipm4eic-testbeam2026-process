@@ -351,7 +351,7 @@ Input files are read from decoded output produced by `decoder.sh`:
 
 Run `decoder.sh` with the appropriate `--run-type` first. `process.sh` keeps accepting `--run-type` so command lines can mirror the decoder command, but it no longer reads directly from `/data/2026-testbeam/actual`. Use `--devices` when a workflow should process only selected device directories, for example a same-RDO calibration closure check. Final spill merging uses only the devices processed by the current invocation, so stale split-spill files from earlier per-device runs in the same output directory are ignored.
 
-The final merged output from `process.sh` is:
+The normal final merged output from `process.sh` is run-level data:
 
 ```text
 /data/2026-testbeam/process/<run>/aps.sorted.spill_0000.root
@@ -359,11 +359,13 @@ The final merged output from `process.sh` is:
 ...
 ```
 
-When `--devices` is used, the device selection is encoded in the prefix, for example:
+This is the input normally consumed by `trigger.sh`. When `--devices` is used, `process.sh` writes a diagnostic or calibration-check subset with the device selection encoded in the prefix, for example:
 
 ```text
 /data/2026-testbeam/process/<run>/aps.sorted.rdo-192.spill_0000.root
 ```
+
+That subset mode is not the normal production input for run-level triggering.
 
 By default, `process.sh` does not overwrite existing workflow outputs. If an output from a previous stopped or failed processing attempt is found, the corresponding stage is skipped and the existing file is reused. Stages that do run successfully still perform the normal cleanup of their inputs/intermediate files. Pass `--overwrite` to force regeneration of existing outputs.
 
@@ -449,13 +451,19 @@ CLEAN_TRIGGERED_SPILLS=0
 
 so the per-spill triggered files are kept after the final `hadd`. This is intentional: they are useful for debugging individual spills and checking `spill_participation` propagation. Pass `--clean-triggered-spills` only when those intermediate triggered files should be removed.
 
-The input prefix must match the output prefix from `process.sh`. With no `--devices`, both workflows use:
+The input prefix must match the output prefix from `process.sh`. For normal run-level triggering, do not pass `--devices`; both workflows use:
 
 ```text
 aps.sorted
 ```
 
-With a device subset, pass the same `--devices` list to `trigger.sh`:
+and the final run-level triggered file is:
+
+```text
+/data/2026-testbeam/process/<run>/triggered.<tag>.root
+```
+
+Use `trigger.sh --devices ...` only for special diagnostic workflows where `process.sh` was also intentionally run with the same `--devices` subset, for example same-RDO calibration closure checks. In that case, pass the same `--devices` list to `trigger.sh`:
 
 ```bash
 process/scripts/process.sh \
