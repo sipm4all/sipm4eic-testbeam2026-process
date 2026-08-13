@@ -426,32 +426,36 @@ process/config/trigger/calib_check_20260618-183625_rdo-192.conf
 process/config/trigger/calib_check_20260618-183625_rdo-199.conf
 ```
 
-For a normal run-level production workflow, do not use `--devices`: run `process.sh` once for the run, then run `trigger.sh` once for the run-level merged spills. The `--devices` mode below is only a targeted same-RDO diagnostic when one wants to inspect one RDO in isolation.
+For a normal run-level production workflow, do not use `--devices`: run `process.sh` once for the run, then run `trigger.sh` once for the run-level merged spills. The `--devices` mode below is only for the same-RDO calibration closure check, where the test-pulse trigger and the channels being inspected must belong to the same RDO.
 
-Example for `rdo-192` only:
+Before `trigger.sh` was split out, `process.sh --devices rdo-X --trigger ...` did the full chain for one RDO: processing, same-RDO spill merge, trigger extraction, and final `hadd`. With the current split workflow, keep the same per-RDO diagnostic logic but run it in two stages: first process all RDOs, then trigger all RDOs.
 
 ```bash
-sipm4eic-testbeam2026-process/process/scripts/process.sh \
-    --run 20260618-183625 \
-    --run-type testpulse \
-    --devices rdo-192 \
-    --calibration /data/2026-testbeam/process/calibration.20260618.check.conf
+for dev in {192..199}; do
+    sipm4eic-testbeam2026-process/process/scripts/process.sh \
+        --run 20260618-183625 \
+        --run-type testpulse \
+        --devices rdo-${dev} \
+        --calibration /data/2026-testbeam/process/calibration.20260618.check.conf
+done
 
-sipm4eic-testbeam2026-process/process/scripts/trigger.sh \
-    --run 20260618-183625 \
-    --run-type testpulse \
-    --devices rdo-192 \
-    --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-183625_rdo-192.conf calibcheck_rdo-192 \
-    --window 32
+for dev in {192..199}; do
+    sipm4eic-testbeam2026-process/process/scripts/trigger.sh \
+        --run 20260618-183625 \
+        --run-type testpulse \
+        --devices rdo-${dev} \
+        --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-183625_rdo-${dev}.conf calibcheck_rdo-${dev} \
+        --window 32
+done
 ```
 
-This produces the diagnostic file:
+This produces one diagnostic file per RDO:
 
 ```text
 /data/2026-testbeam/process/20260618-183625/triggered.calibcheck_rdo-192.root
+...
+/data/2026-testbeam/process/20260618-183625/triggered.calibcheck_rdo-199.root
 ```
-
-Repeat manually for another RDO only if that specific same-RDO closure check is needed.
 
 ### Run `20260618-185127`
 
@@ -479,30 +483,34 @@ process/config/trigger/calib_check_20260618-185127_rdo-192.conf
 process/config/trigger/calib_check_20260618-185127_rdo-199.conf
 ```
 
-For a targeted same-RDO diagnostic, choose one RDO and process/trigger only that RDO. Example for `rdo-192` only:
+Use the same two-stage per-RDO diagnostic workflow:
 
 ```bash
-sipm4eic-testbeam2026-process/process/scripts/process.sh \
-    --run 20260618-185127 \
-    --run-type testpulse \
-    --devices rdo-192 \
-    --calibration /data/2026-testbeam/process/calibration.20260618.check.conf
+for dev in {192..199}; do
+    sipm4eic-testbeam2026-process/process/scripts/process.sh \
+        --run 20260618-185127 \
+        --run-type testpulse \
+        --devices rdo-${dev} \
+        --calibration /data/2026-testbeam/process/calibration.20260618.check.conf
+done
 
-sipm4eic-testbeam2026-process/process/scripts/trigger.sh \
-    --run 20260618-185127 \
-    --run-type testpulse \
-    --devices rdo-192 \
-    --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-185127_rdo-192.conf calibcheck_rdo-192 \
-    --window 32
+for dev in {192..199}; do
+    sipm4eic-testbeam2026-process/process/scripts/trigger.sh \
+        --run 20260618-185127 \
+        --run-type testpulse \
+        --devices rdo-${dev} \
+        --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-185127_rdo-${dev}.conf calibcheck_rdo-${dev} \
+        --window 32
+done
 ```
 
-This produces the diagnostic file:
+This produces one diagnostic file per RDO:
 
 ```text
 /data/2026-testbeam/process/20260618-185127/triggered.calibcheck_rdo-192.root
+...
+/data/2026-testbeam/process/20260618-185127/triggered.calibcheck_rdo-199.root
 ```
-
-Repeat manually for another RDO only if that specific same-RDO closure check is needed.
 
 ### Analysis With `deltat.C`
 
@@ -520,16 +528,20 @@ delta_t = hit.time - trigger.time
 
 Here `time` is the calibrated time stored by the processing chain in the triggered-frame output. The histogram x axis is the global channel index, and the y axis is `delta_t`. The histogram is normalised by the number of trigger hits found.
 
-For run `20260618-183625`, use the same test-pulse trigger channel as the diagnostic trigger. For the `rdo-192` example above:
+For run `20260618-183625`, use the same test-pulse trigger channel as the diagnostic trigger. Example loop:
 
 ```bash
-root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/20260618-183625/triggered.calibcheck_rdo-192.root\", 1, 192, 0, 0, 0, \"/data/2026-testbeam/process/20260618-183625/deltat.calibcheck_rdo-192.root\")"
+for dev in {192..199}; do
+    root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/20260618-183625/triggered.calibcheck_rdo-${dev}.root\", 1, ${dev}, 0, 0, 0, \"/data/2026-testbeam/process/20260618-183625/deltat.calibcheck_rdo-${dev}.root\")"
+done
 ```
 
-For run `20260618-185127`, use the FIFO-16 test-pulse trigger channel. For the `rdo-192` example above:
+For run `20260618-185127`, use the FIFO-16 test-pulse trigger channel:
 
 ```bash
-root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/20260618-185127/triggered.calibcheck_rdo-192.root\", 1, 192, 16, 0, 0, \"/data/2026-testbeam/process/20260618-185127/deltat.calibcheck_rdo-192.root\")"
+for dev in {192..199}; do
+    root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/20260618-185127/triggered.calibcheck_rdo-${dev}.root\", 1, ${dev}, 16, 0, 0, \"/data/2026-testbeam/process/20260618-185127/deltat.calibcheck_rdo-${dev}.root\")"
+done
 ```
 
 The useful closure check is whether channels in the same RDO produce narrow, stable `delta_t` structures relative to that RDO's direct test-pulse trigger. For `20260618-183625`, the LASER-side channels are expected on FIFOs `16..31`; for `20260618-185127`, they are expected on FIFOs `0..15`. Do not use these runs to judge timing offsets between different devices.
