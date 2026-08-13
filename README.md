@@ -47,8 +47,12 @@ The workflow scripts use one run directory under `/data/2026-testbeam/process` a
 
 ```text
 /data/2026-testbeam/process/<run>/<device>/decoded/   decoded ROOT files from decoder.sh
+/data/2026-testbeam/process/<run>/<device>/check/     checker reports for decoded FIFO files
 /data/2026-testbeam/process/<run>/<device>/dcalib/    TDC-calibration products from dcalib.sh
 /data/2026-testbeam/process/<run>/<device>/process/   calibrated/sorted/AP-suppressed processing products
+/data/2026-testbeam/process/<run>/check/              run-level checker reports
+/data/2026-testbeam/process/<run>/process/            run-level merged split-spill ROOT files
+/data/2026-testbeam/process/<run>/trigger/            triggered-frame ROOT files
 ```
 
 Downstream workflows read the decoded ROOT files from the `decoded/` directory. They no longer read decoded files directly from `/data/2026-testbeam/actual`.

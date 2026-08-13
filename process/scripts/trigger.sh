@@ -205,11 +205,11 @@ for i in "${!TRIGGER_CONFIGS[@]}"; do
     seen_trigger_tags[$tag]=1
 done
 
-irpath="${ipath}/${run}"
+irpath="${ipath}/${run}/process"
 if [ ! -d "${irpath}" ]; then
    fail "${irpath} does not exist; run process.sh first"
 fi
-orpath="${opath}/${run}"
+orpath="${opath}/${run}/trigger"
 mkdir -p "${orpath}"
 
 merge_prefix="${INPUT_PREFIX}"

@@ -640,7 +640,8 @@ irpath="${ipath}/${run}"
 if [ ! -d "${irpath}" ]; then
    fail "${irpath} does not exist; run decoder.sh first"
 fi
-orpath="${opath}/${run}"
+orpath="${opath}/${run}/check"
+mkdir -p "${orpath}"
 
 device_checks=()
 for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do
@@ -652,7 +653,8 @@ for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do
     fi
 
     idpath="${device_path}/decoded"
-    odpath="${device_path}/decoded"
+    odpath="${device_path}/check"
+    mkdir -p "${odpath}"
     echo " --- checking device ${device}: ${idpath} "
 
     if [ ! -d "${idpath}" ]; then

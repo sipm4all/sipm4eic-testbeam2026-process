@@ -192,8 +192,8 @@ The calibration-specific device/FIFO selections are applied later by `dcalib.sh`
 The checker also writes run-level FIFO selection lists:
 
 ```text
-/data/2026-testbeam/process/<run>/<run>.good-fifos.list
-/data/2026-testbeam/process/<run>/<run>.bad-fifos.list
+/data/2026-testbeam/process/<run>/check/<run>.good-fifos.list
+/data/2026-testbeam/process/<run>/check/<run>.bad-fifos.list
 ```
 
 The good/bad FIFO lists are diagnostics. They are useful to understand which FIFOs are compatible with the common spill structure, but the normal downstream scripts do not consume them automatically. If the checker identifies bad FIFOs, use the existing `--devices` and `--fifos` filters to select the hardware subset you want to process.
@@ -452,9 +452,9 @@ done
 This produces one diagnostic file per RDO:
 
 ```text
-/data/2026-testbeam/process/20260618-183625/triggered.calibcheck_rdo-192.root
+/data/2026-testbeam/process/20260618-183625/trigger/triggered.calibcheck_rdo-192.root
 ...
-/data/2026-testbeam/process/20260618-183625/triggered.calibcheck_rdo-199.root
+/data/2026-testbeam/process/20260618-183625/trigger/triggered.calibcheck_rdo-199.root
 ```
 
 ### Run `20260618-185127`
@@ -507,9 +507,9 @@ done
 This produces one diagnostic file per RDO:
 
 ```text
-/data/2026-testbeam/process/20260618-185127/triggered.calibcheck_rdo-192.root
+/data/2026-testbeam/process/20260618-185127/trigger/triggered.calibcheck_rdo-192.root
 ...
-/data/2026-testbeam/process/20260618-185127/triggered.calibcheck_rdo-199.root
+/data/2026-testbeam/process/20260618-185127/trigger/triggered.calibcheck_rdo-199.root
 ```
 
 ### Analysis With `deltat.C`
@@ -532,7 +532,7 @@ For run `20260618-183625`, use the same test-pulse trigger channel as the diagno
 
 ```bash
 for dev in {192..199}; do
-    root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/20260618-183625/triggered.calibcheck_rdo-${dev}.root\", 1, ${dev}, 0, 0, 0, \"/data/2026-testbeam/process/20260618-183625/deltat.calibcheck_rdo-${dev}.root\")"
+    root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/20260618-183625/trigger/triggered.calibcheck_rdo-${dev}.root\", 1, ${dev}, 0, 0, 0, \"/data/2026-testbeam/process/20260618-183625/trigger/deltat.calibcheck_rdo-${dev}.root\")"
 done
 ```
 
@@ -540,7 +540,7 @@ For run `20260618-185127`, use the FIFO-16 test-pulse trigger channel:
 
 ```bash
 for dev in {192..199}; do
-    root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/20260618-185127/triggered.calibcheck_rdo-${dev}.root\", 1, ${dev}, 16, 0, 0, \"/data/2026-testbeam/process/20260618-185127/deltat.calibcheck_rdo-${dev}.root\")"
+    root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/20260618-185127/trigger/triggered.calibcheck_rdo-${dev}.root\", 1, ${dev}, 16, 0, 0, \"/data/2026-testbeam/process/20260618-185127/trigger/deltat.calibcheck_rdo-${dev}.root\")"
 done
 ```
 

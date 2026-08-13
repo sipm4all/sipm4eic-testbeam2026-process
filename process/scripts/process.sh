@@ -208,7 +208,8 @@ if [ ! -d "${irpath}" ]; then
    echo " ${irpath} does not exist; run decoder.sh first "
    exit 1
 fi
-orpath="${opath}/${run}"
+orpath="${opath}/${run}/process"
+mkdir -p "${orpath}"
 
 merge_prefix="aps.sorted"
 if [ "${DEVICE_ALL}" -ne 1 ]; then

@@ -87,25 +87,25 @@ sipm4eic-testbeam2026-process/process/scripts/checker.sh \
 This writes per-FIFO checks:
 
 ```text
-/data/2026-testbeam/process/<run>/<device>/decoded/alcdaq.fifo_<N>.check
+/data/2026-testbeam/process/<run>/<device>/check/alcdaq.fifo_<N>.check
 ```
 
 device-level checks:
 
 ```text
-/data/2026-testbeam/process/<run>/<device>/decoded/<device>.check
+/data/2026-testbeam/process/<run>/<device>/check/<device>.check
 ```
 
 and the run-level check:
 
 ```text
-/data/2026-testbeam/process/<run>/<run>.check
+/data/2026-testbeam/process/<run>/check/<run>.check
 ```
 
 Inspect the run-level file before continuing:
 
 ```bash
-cat /data/2026-testbeam/process/<run>/<run>.check
+cat /data/2026-testbeam/process/<run>/check/<run>.check
 ```
 
 Important fields are:
@@ -158,8 +158,8 @@ It then merges each device with `merger --split-spills`, producing device-level 
 Finally, it performs the run-level merge one spill at a time, producing:
 
 ```text
-/data/2026-testbeam/process/<run>/aps.sorted.spill_0000.root
-/data/2026-testbeam/process/<run>/aps.sorted.spill_0001.root
+/data/2026-testbeam/process/<run>/process/aps.sorted.spill_0000.root
+/data/2026-testbeam/process/<run>/process/aps.sorted.spill_0001.root
 ...
 ```
 
@@ -197,23 +197,23 @@ sipm4eic-testbeam2026-process/process/scripts/trigger.sh \
 For each tag, `trigger.sh` runs `trigger` over every merged spill file:
 
 ```text
-/data/2026-testbeam/process/<run>/aps.sorted.spill_0000.root
-/data/2026-testbeam/process/<run>/aps.sorted.spill_0001.root
+/data/2026-testbeam/process/<run>/process/aps.sorted.spill_0000.root
+/data/2026-testbeam/process/<run>/process/aps.sorted.spill_0001.root
 ...
 ```
 
 and writes temporary per-spill triggered files:
 
 ```text
-/data/2026-testbeam/process/<run>/triggered.<tag>.spill_0000.root
-/data/2026-testbeam/process/<run>/triggered.<tag>.spill_0001.root
+/data/2026-testbeam/process/<run>/trigger/triggered.<tag>.spill_0000.root
+/data/2026-testbeam/process/<run>/trigger/triggered.<tag>.spill_0001.root
 ...
 ```
 
 It then combines them with `hadd` into:
 
 ```text
-/data/2026-testbeam/process/<run>/triggered.<tag>.root
+/data/2026-testbeam/process/<run>/trigger/triggered.<tag>.root
 ```
 
 By default, triggered spill files are kept:
@@ -244,7 +244,7 @@ sipm4eic-testbeam2026-process/process/scripts/decoder.sh \
 sipm4eic-testbeam2026-process/process/scripts/checker.sh \
     --run "${run}"
 
-cat "/data/2026-testbeam/process/${run}/${run}.check"
+cat "/data/2026-testbeam/process/${run}/check/${run}.check"
 
 sipm4eic-testbeam2026-process/process/scripts/process.sh \
     --run "${run}" \
@@ -259,7 +259,7 @@ sipm4eic-testbeam2026-process/process/scripts/trigger.sh \
 The final output is:
 
 ```text
-/data/2026-testbeam/process/<run>/triggered.timing.root
+/data/2026-testbeam/process/<run>/trigger/triggered.timing.root
 ```
 
 ## Device Subsets
@@ -284,7 +284,7 @@ sipm4eic-testbeam2026-process/process/scripts/trigger.sh \
 In this mode, `process.sh` writes a subset-specific prefix:
 
 ```text
-/data/2026-testbeam/process/<run>/aps.sorted.rdo-192.spill_0000.root
+/data/2026-testbeam/process/<run>/process/aps.sorted.rdo-192.spill_0000.root
 ```
 
 and `trigger.sh --devices rdo-192` consumes that same prefix.

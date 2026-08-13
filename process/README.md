@@ -24,9 +24,13 @@ Most compiled programs operate on ROOT files; `decoder` is the raw `.dat` to ROO
 Workflow scripts use `/data/2026-testbeam/process/<run>/` as the common run workspace. Device-local products are separated by stage:
 
 ```text
-<device>/decoded/   decoded ROOT files and decoder/checker reports
+<device>/decoded/   decoded ROOT files and decoder summaries
+<device>/check/     checker reports for decoded FIFO files
 <device>/dcalib/    TDC-calibration products from dcalib.sh
 <device>/process/   calibrated, sorted, AP-suppressed, and device-merged processing products
+check/              run-level checker reports and FIFO diagnostic lists
+process/            run-level merged split-spill ROOT files from process.sh
+trigger/            triggered-frame ROOT files from trigger.sh
 ```
 
 `decoder.sh` is the only workflow that reads raw files from `/data/2026-testbeam/actual/<run-type>/<run>/...`. `checker.sh`, `dcalib.sh`, and `process.sh` read decoded ROOT files from `<device>/decoded/`.

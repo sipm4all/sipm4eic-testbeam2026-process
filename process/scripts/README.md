@@ -90,14 +90,14 @@ For an input file:
 it writes per-FIFO reports such as:
 
 ```text
-/data/2026-testbeam/process/<run>/<device>/decoded/alcdaq.fifo_0.check
+/data/2026-testbeam/process/<run>/<device>/check/alcdaq.fifo_0.check
 ```
 
 The workflow is hierarchical: per-FIFO checks are produced first, then one device-level check is written for that device, and finally one run-level check is written after all selected devices are complete. Aggregate reports are:
 
 ```text
-/data/2026-testbeam/process/<run>/<device>/decoded/<device>.check
-/data/2026-testbeam/process/<run>/<run>.check
+/data/2026-testbeam/process/<run>/<device>/check/<device>.check
+/data/2026-testbeam/process/<run>/check/<run>.check
 ```
 
 The device-level report sums entries and data-word counters from the selected FIFO reports. The logical spill counters remain per-stream quantities: `start_spill_type7` and `end_spill_type15` report the aggregate spill count, not the sum of identical spill markers across FIFOs. The run-level report follows the same convention when combining device reports. If inputs disagree, the aggregate spill-count fields report the most common input count while the min/max fields show the spread and `consistent: no` marks the aggregate as invalid.
@@ -140,8 +140,8 @@ Use `problem_check` to find the detailed per-FIFO or per-device report when an a
 At run level, `checker.sh` also writes two machine-readable FIFO selection files:
 
 ```text
-/data/2026-testbeam/process/<run>/<run>.good-fifos.list
-/data/2026-testbeam/process/<run>/<run>.bad-fifos.list
+/data/2026-testbeam/process/<run>/check/<run>.good-fifos.list
+/data/2026-testbeam/process/<run>/check/<run>.bad-fifos.list
 ```
 
 The good list has columns:
@@ -354,15 +354,15 @@ Run `decoder.sh` with the appropriate `--run-type` first. `process.sh` keeps acc
 The normal final merged output from `process.sh` is run-level data:
 
 ```text
-/data/2026-testbeam/process/<run>/aps.sorted.spill_0000.root
-/data/2026-testbeam/process/<run>/aps.sorted.spill_0001.root
+/data/2026-testbeam/process/<run>/process/aps.sorted.spill_0000.root
+/data/2026-testbeam/process/<run>/process/aps.sorted.spill_0001.root
 ...
 ```
 
 This is the input normally consumed by `trigger.sh`. When `--devices` is used, `process.sh` writes a diagnostic or calibration-check subset with the device selection encoded in the prefix, for example:
 
 ```text
-/data/2026-testbeam/process/<run>/aps.sorted.rdo-192.spill_0000.root
+/data/2026-testbeam/process/<run>/process/aps.sorted.rdo-192.spill_0000.root
 ```
 
 That subset mode is not the normal production input for run-level triggering.
@@ -460,7 +460,7 @@ aps.sorted
 and the final run-level triggered file is:
 
 ```text
-/data/2026-testbeam/process/<run>/triggered.<tag>.root
+/data/2026-testbeam/process/<run>/trigger/triggered.<tag>.root
 ```
 
 Use `trigger.sh --devices ...` only for special diagnostic workflows where `process.sh` was also intentionally run with the same `--devices` subset, for example same-RDO calibration closure checks. In that case, pass the same `--devices` list to `trigger.sh`:
@@ -481,12 +481,12 @@ process/scripts/trigger.sh \
 This reads:
 
 ```text
-/data/2026-testbeam/process/<run>/aps.sorted.rdo-192.spill_*.root
+/data/2026-testbeam/process/<run>/process/aps.sorted.rdo-192.spill_*.root
 ```
 
 and writes:
 
 ```text
-/data/2026-testbeam/process/<run>/triggered.calibcheck_rdo-192.spill_0000.root
-/data/2026-testbeam/process/<run>/triggered.calibcheck_rdo-192.root
+/data/2026-testbeam/process/<run>/trigger/triggered.calibcheck_rdo-192.spill_0000.root
+/data/2026-testbeam/process/<run>/trigger/triggered.calibcheck_rdo-192.root
 ```
