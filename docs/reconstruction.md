@@ -51,6 +51,12 @@ sipm4eic-testbeam2026-process/process/scripts/decoder.sh \
     --run <run>
 ```
 
+If decoded ROOT files already exist, `decoder.sh` skips them by default. To regenerate existing decoded files, pass:
+
+```bash
+--overwrite
+```
+
 For physics data this reads:
 
 ```text
@@ -238,7 +244,7 @@ A full reconstruction of that run looks like:
 
 ```bash
 run=20260623-185238
-calib=/data/2026-testbeam/process/calibration.20260618.conf
+calib=sipm4eic-testbeam2026-process/process/config/calibration/baseline.conf
 
 sipm4eic-testbeam2026-process/process/scripts/decoder.sh \
     --run "${run}"
