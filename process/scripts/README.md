@@ -367,7 +367,7 @@ This is the input normally consumed by `trigger.sh`. When `--devices` is used, `
 
 That subset mode is not the normal production input for run-level triggering.
 
-By default, `process.sh` does not overwrite existing workflow outputs. If an output from a previous stopped or failed processing attempt is found, the corresponding stage is skipped and the existing file is reused. Stages that do run successfully still perform the normal cleanup of their inputs/intermediate files. Pass `--overwrite` to force regeneration of existing outputs.
+By default, `process.sh` does not overwrite existing workflow outputs. If run-level merged spill files already exist for the selected device prefix, the whole process workflow is skipped because those files are the products consumed by `trigger.sh`. If an output from a previous stopped or failed processing attempt is found inside a lower-level stage, the corresponding stage is skipped and the existing file is reused. Stages that do run successfully still perform the normal cleanup of their inputs/intermediate files. Pass `--overwrite` to force regeneration of existing outputs.
 
 Important variables still configured near the top of the script:
 

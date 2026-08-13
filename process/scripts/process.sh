@@ -217,6 +217,13 @@ if [ "${DEVICE_ALL}" -ne 1 ]; then
     merge_prefix="aps.sorted.${device_tag}"
 fi
 
+merged_spill_files=("${orpath}/${merge_prefix}".spill_*.root)
+if [ "${OVERWRITE}" -ne 1 ] && [ ${#merged_spill_files[@]} -gt 0 ]; then
+    echo " --- run-level merged spill outputs exist, skipping process workflow: ${orpath}/${merge_prefix}.spill_*.root"
+    echo " --- pass --overwrite to regenerate them"
+    exit 0
+fi
+
 ### loop over device directories
 merge_pids=()
 processed_device_dirs=()
@@ -263,6 +270,8 @@ for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do
 
         ### calibrate, sort and AP suppress
         run_job "${odpath}/aps.sorted.${fifo}.log" bash -c '
+            set -euo pipefail
+
             calibrator=$1
             sorter=$2
             aps=$3
@@ -328,7 +337,9 @@ for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do
 
     ### merge device, split by spill
     run_job "${odpath}/aps.sorted.log" bash -c '
+        set -euo pipefail
         shopt -s nullglob
+
         merger=$1
         output=$2
         overwrite=$3
@@ -396,6 +407,8 @@ for spill_id in "${spill_ids[@]}"; do
         exit 1
     fi
     run_job "${orpath}/${merge_prefix}.spill_${spill_id}.log" bash -c '
+        set -euo pipefail
+
         merger=$1
         output=$2
         clean_device_spills=$3
