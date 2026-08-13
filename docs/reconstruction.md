@@ -236,6 +236,45 @@ Pass:
 
 to remove `triggered.<tag>.spill_*.root` after a successful `hadd`.
 
+## 5. Check Delta-T Distributions
+
+After triggered frames have been built, run the example `deltat.C` macro as a first reconstruction check.
+
+For the finger-trigger workflow, use the trigger tag from device `200` as the reference:
+
+```text
+reference = {9, 200}
+```
+
+In the compact selector syntax used by `deltat.C`, this means:
+
+```text
+type   = 9
+device = 200
+fifo   = 32
+column = *
+pixel  = *
+```
+
+To compare all ALCOR hits against that trigger reference:
+
+```bash
+root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/<run>/trigger/triggered.fingers.root\", {1, -1}, {9, 200}, \"/data/2026-testbeam/process/<run>/trigger/deltat.fingers.root\")"
+```
+
+This fills:
+
+```text
+hDeltaT        delta_t = time_ALCOR - time_TRIGGER versus global channel index
+hDeltaT_spill  delta_t versus spill id
+hDeltaT_tdc0   delta_t versus fine for target TDC 0
+hDeltaT_tdc1   delta_t versus fine for target TDC 1
+hDeltaT_tdc2   delta_t versus fine for target TDC 2
+hDeltaT_tdc3   delta_t versus fine for target TDC 3
+```
+
+The target selector `{1, -1}` means all type-1 ALCOR hits, with `-1` used as the wildcard channel index.
+
 ## Normal Physics Example
 
 Run `20260623-185238` is a useful physics example for this workflow. It was taken with an 11 GeV/c negative beam.
@@ -262,12 +301,20 @@ sipm4eic-testbeam2026-process/process/scripts/trigger.sh \
     --run "${run}" \
     --trigger sipm4eic-testbeam2026-process/process/config/trigger/fingers.conf fingers \
     --window 256
+
+root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/${run}/trigger/triggered.fingers.root\", {1, -1}, {9, 200}, \"/data/2026-testbeam/process/${run}/trigger/deltat.fingers.root\")"
 ```
 
-The final output is:
+The final triggered output is:
 
 ```text
 /data/2026-testbeam/process/20260623-185238/trigger/triggered.fingers.root
+```
+
+The delta-t check output is:
+
+```text
+/data/2026-testbeam/process/20260623-185238/trigger/deltat.fingers.root
 ```
 
 ## Device Subsets
