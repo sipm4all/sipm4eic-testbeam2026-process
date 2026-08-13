@@ -232,10 +232,12 @@ to remove `triggered.<tag>.spill_*.root` after a successful `hadd`.
 
 ## Normal Physics Example
 
-A typical full physics reconstruction looks like:
+Run `20260623-185238` is a useful physics example for this workflow. It was taken with an 11 GeV/c negative beam.
+
+A full reconstruction of that run looks like:
 
 ```bash
-run=<run>
+run=20260623-185238
 calib=/data/2026-testbeam/process/calibration.20260618.conf
 
 sipm4eic-testbeam2026-process/process/scripts/decoder.sh \
@@ -259,7 +261,7 @@ sipm4eic-testbeam2026-process/process/scripts/trigger.sh \
 The final output is:
 
 ```text
-/data/2026-testbeam/process/<run>/trigger/triggered.timing.root
+/data/2026-testbeam/process/20260623-185238/trigger/triggered.timing.root
 ```
 
 ## Device Subsets
