@@ -68,4 +68,10 @@ Downstream workflows read the decoded ROOT files from the `decoded/` directory. 
 
 Run `process/scripts/checker.sh` first when you want a non-destructive sanity pass over decoded per-FIFO files before launching calibration or full processing. The checker writes run-level `*.good-fifos.list` and `*.bad-fifos.list` diagnostic files that show which FIFOs are consistent with the run-level spill structure. Merged ROOT files contain the usual `alcor` tree plus a `spill_participation` tree with one entry per merged spill and the `(device,fifo)` sources that contributed to that spill.
 
+## User Guides
+
+- `docs/reconstruction.md`: standard physics reconstruction workflow, from raw decoding through triggered-frame output.
+- `process/docs/calibration.md`: TDC calibration notes and calibration-check workflows.
+- `docs/todo.md`: design notes and deferred technical improvements.
+
 Generated ROOT files, logs, build products, and local binaries are ignored by git.
