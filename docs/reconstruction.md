@@ -260,14 +260,14 @@ sipm4eic-testbeam2026-process/process/scripts/process.sh \
 
 sipm4eic-testbeam2026-process/process/scripts/trigger.sh \
     --run "${run}" \
-    --trigger sipm4eic-testbeam2026-process/process/config/trigger/trigger_range.conf timing \
+    --trigger sipm4eic-testbeam2026-process/process/config/trigger/fingers.conf fingers \
     --window 256
 ```
 
 The final output is:
 
 ```text
-/data/2026-testbeam/process/20260623-185238/trigger/triggered.timing.root
+/data/2026-testbeam/process/20260623-185238/trigger/triggered.fingers.root
 ```
 
 ## Device Subsets
