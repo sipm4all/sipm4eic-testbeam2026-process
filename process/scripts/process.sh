@@ -12,48 +12,40 @@ CALIBRATOR="${ROOT_DIR}/process/bin/calibrator"
 SORTER="${ROOT_DIR}/process/bin/sorter"
 APS="${ROOT_DIR}/process/bin/after-pulse-suppressor"
 MERGER="${ROOT_DIR}/process/bin/merger"
-TRIGGER="${ROOT_DIR}/process/bin/trigger"
-HADD="hadd"
-
 run=""
 CALIBRATION_CONFIG=""
-TRIGGER_CONFIGS=()
-TRIGGER_TAGS=()
 SORT_WINDOW=32768
 APS_WINDOW=50
-TRIGGER_WINDOW=256
 DEVICE_FILTER=()
 DEVICE_ALL=1
 OVERWRITE=0
 
 WRITE_LOGS=0
 CLEAN_DEVICE_SPILLS=1
-CLEAN_MERGED_SPILLS=1
-CLEAN_TRIGGERED_SPILLS=1
+CLEAN_MERGED_SPILLS=0
 
 usage()
 {
     cat <<EOF
 usage:
-  $0 --run RUN --calibration CALIBRATION.conf --trigger TRIGGER.conf TAG [options]
+  $0 --run RUN --calibration CALIBRATION.conf [options]
 
 required:
   --run, -r RUN                  run name/directory
   --calibration, -c FILE         timing calibration configuration
-  --trigger, -t FILE TAG         trigger configuration and output tag; may be repeated
 
 options:
   --run-type TYPE                accepted for compatibility with decoder.sh; process.sh reads decoded files from /data/2026-testbeam/process/RUN
                                   default: physics
   --devices DEVICE ...           device directory names to process, default: all
   --overwrite                    overwrite existing workflow outputs instead of skipping them
-  --window, -w VALUE             trigger frame window, default: 256
   --help, -h                     show this help message
 
 example:
-  $0 --run 12345
-  $0 --run 12345 --calibration process/config/calibration/calibration_example.conf --trigger process/config/trigger/trigger_range.conf range --trigger process/config/trigger/trigger_set.conf set --window 256
-  $0 --run 20260618-183625 --run-type testpulse --devices rdo-192 --calibration calibration.conf --trigger trigger.conf calibcheck_rdo-192 --window 32
+  $0 --run 12345 --calibration process/config/calibration/calibration_example.conf
+  $0 --run 20260618-183625 --run-type testpulse --devices rdo-192 --calibration calibration.conf
+
+After this workflow completes, run process/scripts/trigger.sh on the merged spill files.
 EOF
 }
 
@@ -188,17 +180,6 @@ while [ $# -gt 0 ]; do
             CALIBRATION_CONFIG=$2
             shift 2
             ;;
-        --trigger|-t)
-            [ $# -ge 3 ] || fail "$1 requires FILE TAG"
-            TRIGGER_CONFIGS+=("$2")
-            TRIGGER_TAGS+=("$3")
-            shift 3
-            ;;
-        --window|-w)
-            [ $# -ge 2 ] || fail "$1 requires VALUE"
-            TRIGGER_WINDOW=$2
-            shift 2
-            ;;
         --help|-h)
             usage
             exit 0
@@ -218,25 +199,9 @@ case "${run_type}" in
         ;;
 esac
 [ -n "${CALIBRATION_CONFIG}" ] || fail "missing --calibration"
-[ ${#TRIGGER_CONFIGS[@]} -gt 0 ] || fail "at least one --trigger FILE TAG is required"
-[[ "${TRIGGER_WINDOW}" =~ ^[0-9]+([.][0-9]+)?$ ]] || fail "--window must be a positive number"
-awk "BEGIN { exit !(${TRIGGER_WINDOW} > 0) }" || fail "--window must be greater than zero"
-
 if [ ! -f "${CALIBRATION_CONFIG}" ]; then
     fail "calibration config does not exist: ${CALIBRATION_CONFIG}"
 fi
-
-declare -A seen_trigger_tags=()
-for i in "${!TRIGGER_CONFIGS[@]}"; do
-    config=${TRIGGER_CONFIGS[$i]}
-    tag=${TRIGGER_TAGS[$i]}
-    [ -f "${config}" ] || fail "trigger config does not exist: ${config}"
-    [ -n "${tag}" ] || fail "empty trigger tag for config ${config}"
-    if [[ -n "${seen_trigger_tags[$tag]:-}" ]]; then
-        fail "duplicate trigger tag: ${tag}"
-    fi
-    seen_trigger_tags[$tag]=1
-done
 
 irpath="${ipath}/${run}"
 if [ ! -d "${irpath}" ]; then
@@ -249,20 +214,6 @@ merge_prefix="aps.sorted"
 if [ "${DEVICE_ALL}" -ne 1 ]; then
     device_tag=$(IFS=_; echo "${DEVICE_FILTER[*]}")
     merge_prefix="aps.sorted.${device_tag}"
-fi
-
-if [ "${OVERWRITE}" -ne 1 ]; then
-    final_outputs_done=1
-    for tag in "${TRIGGER_TAGS[@]}"; do
-        if [ ! -f "${orpath}/triggered.${tag}.root" ]; then
-            final_outputs_done=0
-            break
-        fi
-    done
-    if [ "${final_outputs_done}" -eq 1 ]; then
-        echo " --- final triggered outputs exist, nothing to do"
-        exit 0
-    fi
 fi
 
 ### loop over device directories
@@ -431,29 +382,6 @@ done < <(
     done | sort -u
 )
 
-if [ ! -x "${TRIGGER}" ]; then
-    echo " ${TRIGGER} does not exist or is not executable "
-    exit 1
-fi
-if ! command -v "${HADD}" >/dev/null 2>&1; then
-    echo " ${HADD} was not found "
-    exit 1
-fi
-if [ ${#TRIGGER_CONFIGS[@]} -eq 0 ]; then
-    echo " --- no trigger configurations defined "
-    exit 1
-fi
-if [ ${#TRIGGER_CONFIGS[@]} -ne ${#TRIGGER_TAGS[@]} ]; then
-    echo " --- TRIGGER_CONFIGS and TRIGGER_TAGS must have the same length "
-    exit 1
-fi
-for config in "${TRIGGER_CONFIGS[@]}"; do
-    if [ ! -f "${config}" ]; then
-        echo " ${config} does not exist "
-        exit 1
-    fi
-done
-
 echo " --- final spill merges started "
 final_pids=()
 for spill_id in "${spill_ids[@]}"; do
@@ -466,11 +394,6 @@ for spill_id in "${spill_ids[@]}"; do
         echo " --- no device-level files found for spill ${spill_id} "
         exit 1
     fi
-    if [ ${#device_outputs[@]} -ne ${#device_dirs[@]} ]; then
-        echo " --- spill ${spill_id} has ${#device_outputs[@]} files, expected ${#device_dirs[@]} "
-        exit 1
-    fi
-
     run_job "${orpath}/${merge_prefix}.spill_${spill_id}.log" bash -c '
         merger=$1
         output=$2
@@ -498,86 +421,11 @@ done
 wait "${final_pids[@]}"
 cleanup_empty_device_dirs
 
-echo " --- trigger jobs started "
-for i in "${!TRIGGER_CONFIGS[@]}"; do
-    tag=${TRIGGER_TAGS[$i]}
-    config=${TRIGGER_CONFIGS[$i]}
-    echo " --- trigger config ${tag}: ${config} "
-
-    trigger_pids=()
-    for spill_id in "${spill_ids[@]}"; do
-        merged_spill="${orpath}/${merge_prefix}.spill_${spill_id}.root"
-        if [ ! -f "${merged_spill}" ]; then
-            echo " --- merged spill file not found: ${merged_spill} "
-            exit 1
-        fi
-
-        triggered="${orpath}/triggered.${tag}.spill_${spill_id}.root"
-
-        run_job "${orpath}/triggered.${tag}.spill_${spill_id}.log" bash -c '
-            trigger=$1
-            input=$2
-            output=$3
-            config=$4
-            window=$5
-            overwrite=$6
-
-            if [ "${overwrite}" -ne 1 ] && [ -f "${output}" ]; then
-                echo " --- triggered spill exists, skipping trigger: ${output}"
-                exit 0
-            fi
-
-            time -p "${trigger}" --input "${input}" \
-                                --output "${output}" \
-                                --config "${config}" \
-                                --window "${window}"
-        ' _ "${TRIGGER}" \
-            "${merged_spill}" \
-            "${triggered}" \
-            "${config}" \
-            "${TRIGGER_WINDOW}" \
-            "${OVERWRITE}" &
-        trigger_pids+=($!)
-    done
-
-    wait "${trigger_pids[@]}"
-
-    triggered_files=()
-    for spill_id in "${spill_ids[@]}"; do
-        triggered="${orpath}/triggered.${tag}.spill_${spill_id}.root"
-        if [ -f "${triggered}" ]; then
-            triggered_files+=("${triggered}")
-        fi
-    done
-    if [ ${#triggered_files[@]} -eq 0 ]; then
-        echo " --- no triggered spill files found for tag ${tag} "
-        exit 1
-    fi
-    if [ ${#triggered_files[@]} -ne ${#spill_ids[@]} ]; then
-        echo " --- trigger tag ${tag} has ${#triggered_files[@]} files, expected ${#spill_ids[@]} "
-        exit 1
-    fi
-
-    run_job "${orpath}/triggered.${tag}.log" bash -c '
-        hadd=$1
-        output=$2
-        clean_triggered_spills=$3
-        overwrite=$4
-        shift 4
-
-        if [ "${overwrite}" -ne 1 ] && [ -f "${output}" ]; then
-            echo " --- triggered output exists, skipping hadd: ${output}"
-            exit 0
-        fi
-
-        time -p "${hadd}" -f "${output}" "$@"
-        if [ "${clean_triggered_spills}" -eq 1 ]; then
-            rm -f "$@"
-        fi
-    ' _ "${HADD}" "${orpath}/triggered.${tag}.root" "${CLEAN_TRIGGERED_SPILLS}" "${OVERWRITE}" "${triggered_files[@]}"
-done
-
 if [ "${CLEAN_MERGED_SPILLS}" -eq 1 ]; then
     rm -f "${orpath}"/${merge_prefix}.spill_*.root
 fi
 cleanup_empty_device_dirs
+
+echo " --- processing completed"
+echo " --- merged spill files: ${orpath}/${merge_prefix}.spill_*.root"
+echo " --- run process/scripts/trigger.sh to produce triggered frame files"

@@ -363,7 +363,7 @@ The final `process/config/calibration/tdc.20260618.conf` still contains only the
 
 ## Checking The Calibration With The Laser/Test-Pulse Runs
 
-A useful closure check is to run the normal processing chain on the same two runs used to derive the TDC calibration. Before running these commands, the relevant raw files must already have been decoded with `decoder.sh`; `process.sh` reads from `/data/2026-testbeam/process/<run>/<device>/decoded/` and writes device-local products to `/data/2026-testbeam/process/<run>/<device>/process/`.
+A useful closure check is to run the normal processing chain on the same two runs used to derive the TDC calibration. Before running these commands, the relevant raw files must already have been decoded with `decoder.sh`; `process.sh` reads from `/data/2026-testbeam/process/<run>/<device>/decoded/` and writes device-local products to `/data/2026-testbeam/process/<run>/<device>/process/`. It now stops after producing merged per-spill ROOT files. Run `trigger.sh` afterwards to produce triggered frames from those merged spill files.
 
 These runs need one important qualification: they do not provide reliable timing synchronisation across different devices.
 
@@ -425,7 +425,7 @@ process/config/trigger/calib_check_20260618-183625_rdo-192.conf
 process/config/trigger/calib_check_20260618-183625_rdo-199.conf
 ```
 
-Run the normal processing chain once per RDO device:
+Run the calibrated processing and merge chain once per RDO device:
 
 ```bash
 for dev in {192..199}; do
@@ -433,7 +433,12 @@ for dev in {192..199}; do
         --run 20260618-183625 \
         --run-type testpulse \
         --devices rdo-${dev} \
-        --calibration /data/2026-testbeam/process/calibration.20260618.check.conf \
+        --calibration /data/2026-testbeam/process/calibration.20260618.check.conf
+
+    sipm4eic-testbeam2026-process/process/scripts/trigger.sh \
+        --run 20260618-183625 \
+        --run-type testpulse \
+        --devices rdo-${dev} \
         --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-183625_rdo-${dev}.conf calibcheck_rdo-${dev} \
         --window 32
 done
@@ -473,7 +478,7 @@ process/config/trigger/calib_check_20260618-185127_rdo-192.conf
 process/config/trigger/calib_check_20260618-185127_rdo-199.conf
 ```
 
-Run the normal processing chain once per RDO device:
+Run the calibrated processing and merge chain once per RDO device:
 
 ```bash
 for dev in {192..199}; do
@@ -481,7 +486,12 @@ for dev in {192..199}; do
         --run 20260618-185127 \
         --run-type testpulse \
         --devices rdo-${dev} \
-        --calibration /data/2026-testbeam/process/calibration.20260618.check.conf \
+        --calibration /data/2026-testbeam/process/calibration.20260618.check.conf
+
+    sipm4eic-testbeam2026-process/process/scripts/trigger.sh \
+        --run 20260618-185127 \
+        --run-type testpulse \
+        --devices rdo-${dev} \
         --trigger sipm4eic-testbeam2026-process/process/config/trigger/calib_check_20260618-185127_rdo-${dev}.conf calibcheck_rdo-${dev} \
         --window 32
 done

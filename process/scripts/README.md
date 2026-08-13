@@ -291,7 +291,7 @@ The fallback values are global medians computed from measured rows with the same
 
 ## process.sh
 
-`process.sh` is the full processing workflow. It currently performs:
+`process.sh` is the calibrated processing and merge workflow. It performs:
 
 ```text
 calibrate each decoded FIFO file
@@ -299,9 +299,9 @@ sort each calibrated FIFO file
 after-pulse suppress each sorted calibrated FIFO file
 merge lanes per device with --split-spills
 merge matching spills across devices
-run trigger configurations per spill
-hadd triggered spill files per trigger tag
 ```
+
+It intentionally stops after producing merged per-spill ROOT files. Trigger/frame production is handled by `trigger.sh`, so trigger configurations can be rerun without recalibrating, sorting, AP suppressing, or merging again.
 
 Per-FIFO intermediate data files use stage-preserving prefixes:
 
@@ -316,10 +316,7 @@ Run:
 ```bash
 process/scripts/process.sh \
   --run RUN_NAME \
-  --calibration process/config/calibration/calibration_example.conf \
-  --trigger process/config/trigger/trigger_range.conf range \
-  --trigger process/config/trigger/trigger_set.conf set \
-  --window 256
+  --calibration process/config/calibration/calibration_example.conf
 ```
 
 Required command-line options:
@@ -327,7 +324,6 @@ Required command-line options:
 ```text
 --run RUN                  run name/directory
 --calibration FILE         timing calibration configuration
---trigger FILE TAG         trigger configuration and output tag; may be repeated
 ```
 
 Optional command-line options:
@@ -338,21 +334,13 @@ Optional command-line options:
 --devices DEVICE ...       device directory names to process, default all
                            accepts names such as kc705-200, rdo-192, rdo-{192..199}
 --overwrite                overwrite existing workflow outputs instead of skipping them
---window VALUE             trigger frame window, default 256
 --help                     print usage
 ```
 
-Short aliases are also accepted for the older single-argument options:
+Short aliases are also accepted for the remaining single-argument options:
 
 ```text
--r, -c, -t, -w, -h
-```
-
-`--trigger` may be given multiple times. Tags must be unique because they are used in output filenames such as:
-
-```text
-triggered.<tag>.spill_0000.root
-triggered.<tag>.root
+-r, -c, -h
 ```
 
 Input files are read from decoded output produced by `decoder.sh`:
@@ -363,6 +351,33 @@ Input files are read from decoded output produced by `decoder.sh`:
 
 Run `decoder.sh` with the appropriate `--run-type` first. `process.sh` keeps accepting `--run-type` so command lines can mirror the decoder command, but it no longer reads directly from `/data/2026-testbeam/actual`. Use `--devices` when a workflow should process only selected device directories, for example a same-RDO calibration closure check. Final spill merging uses only the devices processed by the current invocation, so stale split-spill files from earlier per-device runs in the same output directory are ignored.
 
+The final merged output from `process.sh` is:
+
+```text
+/data/2026-testbeam/process/<run>/aps.sorted.spill_0000.root
+/data/2026-testbeam/process/<run>/aps.sorted.spill_0001.root
+...
+```
+
+When `--devices` is used, the device selection is encoded in the prefix, for example:
+
+```text
+/data/2026-testbeam/process/<run>/aps.sorted.rdo-192.spill_0000.root
+```
+
+By default, `process.sh` does not overwrite existing workflow outputs. If an output from a previous stopped or failed processing attempt is found, the corresponding stage is skipped and the existing file is reused. Stages that do run successfully still perform the normal cleanup of their inputs/intermediate files. Pass `--overwrite` to force regeneration of existing outputs.
+
+Important variables still configured near the top of the script:
+
+```bash
+ipath               decoded input base directory; input is read from ipath/RUN/DEVICE/decoded
+opath               processing output base directory
+WRITE_LOGS          0 prints to terminal, 1 writes log files
+CLEAN_DEVICE_SPILLS remove intermediate device spill files
+CLEAN_MERGED_SPILLS remove final merged spill files; default 0 because trigger.sh consumes them
+```
+
+When `WRITE_LOGS=0` and `CLEAN_DEVICE_SPILLS=1`, empty per-device output directories are removed after the device-level split-spill files have been consumed by the final merge. If logs are enabled, directories are kept so their log files remain available.
 
 ### Merger Spill Alignment
 
@@ -393,27 +408,77 @@ source_fifo[nsources]/I
 
 Only contributing sources are recorded. If an input file already contains `spill_participation`, the merger propagates those original sources into the new metadata tree. This lets the final cross-device merge preserve the FIFO-level participation recorded by the earlier per-device split merge.
 
-By default, `process.sh` does not overwrite existing workflow outputs. If an output from a previous stopped or failed processing attempt is found, the corresponding stage is skipped and the existing file is reused. Stages that do run successfully still perform the normal cleanup of their inputs/intermediate files. Pass `--overwrite` to force regeneration of existing outputs.
-
-Important variables still configured near the top of the script:
-
-```bash
-ipath                  decoded input base directory; input is read from ipath/RUN/DEVICE/decoded
-opath                  processing output base directory
-WRITE_LOGS             0 prints to terminal, 1 writes log files
-CLEAN_DEVICE_SPILLS    remove intermediate device spill files
-CLEAN_MERGED_SPILLS    remove merged spill files after triggering
-CLEAN_TRIGGERED_SPILLS remove per-spill trigger output after hadd
-```
-
-When `WRITE_LOGS=0` and `CLEAN_DEVICE_SPILLS=1`, empty per-device output directories are removed after the device-level split-spill files have been consumed by the final merge. If logs are enabled, directories are kept so their log files remain available.
-
 ## trigger.sh
 
-`trigger.sh` is a smaller helper that runs one trigger configuration over already merged split-spill files:
+`trigger.sh` is the triggered-frame workflow. It consumes the merged split-spill ROOT files produced by `process.sh`, runs one or more trigger configurations over each spill in parallel, and then combines each trigger tag with `hadd`.
+
+Run:
 
 ```bash
-process/scripts/trigger.sh RUN_NAME
+process/scripts/trigger.sh \
+  --run RUN_NAME \
+  --trigger process/config/trigger/trigger_range.conf range \
+  --trigger process/config/trigger/trigger_set.conf set \
+  --window 256
 ```
 
-It uses `CONFIG` and `WINDOW` variables near the top of the script. For multi-configuration production processing, prefer `process.sh`.
+Required command-line options:
+
+```text
+--run RUN                  run name/directory
+--trigger FILE TAG         trigger configuration and output tag; may be repeated
+```
+
+Optional command-line options:
+
+```text
+--run-type TYPE            accepted for symmetry with process.sh, default physics
+--devices DEVICE ...       same device subset used with process.sh, default all
+--input-prefix PREFIX      explicit merged-spill prefix, default derived from --devices
+--overwrite                overwrite existing trigger outputs instead of skipping them
+--window VALUE             trigger frame window, default 256
+--clean-triggered-spills   remove triggered.<tag>.spill_*.root after hadd
+--help                     print usage
+```
+
+By default:
+
+```bash
+CLEAN_TRIGGERED_SPILLS=0
+```
+
+so the per-spill triggered files are kept after the final `hadd`. This is intentional: they are useful for debugging individual spills and checking `spill_participation` propagation. Pass `--clean-triggered-spills` only when those intermediate triggered files should be removed.
+
+The input prefix must match the output prefix from `process.sh`. With no `--devices`, both workflows use:
+
+```text
+aps.sorted
+```
+
+With a device subset, pass the same `--devices` list to `trigger.sh`:
+
+```bash
+process/scripts/process.sh \
+  --run RUN_NAME \
+  --devices rdo-192 \
+  --calibration calibration.conf
+
+process/scripts/trigger.sh \
+  --run RUN_NAME \
+  --devices rdo-192 \
+  --trigger trigger.conf calibcheck_rdo-192 \
+  --window 32
+```
+
+This reads:
+
+```text
+/data/2026-testbeam/process/<run>/aps.sorted.rdo-192.spill_*.root
+```
+
+and writes:
+
+```text
+/data/2026-testbeam/process/<run>/triggered.calibcheck_rdo-192.spill_0000.root
+/data/2026-testbeam/process/<run>/triggered.calibcheck_rdo-192.root
+```
