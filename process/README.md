@@ -42,12 +42,35 @@ The local timing channel is:
 channel = pixel + 4 * column
 ```
 
-The program first performs iterative residual-to-scintillator-mean pre-calibration, keeping `fifo=0 column=0 pixel=0` fixed at zero after every iteration. It then runs a full 63-parameter `TMinuit` minimization. The objective includes both `timing0_mean - timing1_mean` and intra-scintillator channel residual terms, so channel residual maps are constrained during the global fit.
+The default calibration method first performs iterative residual-to-scintillator-mean pre-calibration, keeping `fifo=0 column=0 pixel=0` fixed at zero after every iteration. It can then run a full 63-parameter `TMinuit` minimization if `--minimizer-calls` is greater than zero. The objective includes both `timing0_mean - timing1_mean` and intra-scintillator channel residual terms, so channel residual maps are constrained during the global fit.
 
 Example:
 
 ```bash
 process/bin/timing_calib   --input triggered.timing.root   --output timing_calib.root   --calibration-output timing_channel_offsets.conf   --pre-iterations 3   --minimizer-calls 5000
+```
+
+The alternative `--calibration-method neighbor` is intended for the observed timing-scintillator behaviour where neighbouring channels have narrow relative-time distributions, while distant channels may be broader or double-peaked because they sample different particle positions. It uses the detector-channel geometry from `eo2do`, builds pair constraints only for nearby channels, and solves:
+
+```text
+offset_i - offset_j = mean(time_i - time_j)
+```
+
+for each scintillator independently. Channel zero remains fixed at zero, and TIMING1 is then shifted so the average `timing0_mean - timing1_mean` is zero.
+
+Example neighbour-graph calibration:
+
+```bash
+process/bin/timing_calib \
+  --input triggered.timing.root \
+  --output timing_calib.neighbor.root \
+  --calibration-output timing_channel_offsets.neighbor.conf \
+  --calibration-method neighbor \
+  --neighbor-distance 1 \
+  --neighbor-min-pairs 100 \
+  --neighbor-max-rms 2.0 \
+  --neighbor-delta-cut 20.0 \
+  --minimizer-calls 0
 ```
 
 For quick validation runs, `--max-frames N` limits how many frames are read. Use `--max-frames 0` or omit the option for the full file.
@@ -68,6 +91,17 @@ hTiming0SpreadBefore / hTiming0SpreadAfter
 hTiming1SpreadBefore / hTiming1SpreadAfter
 hExpectedDeltaFromSpreadBefore / hExpectedDeltaFromSpreadAfter
 ```
+
+For neighbour-graph runs, the diagnostic ROOT output also contains:
+
+```text
+hNeighborMean0 / hNeighborMean1
+hNeighborRms0 / hNeighborRms1
+hNeighborCount0 / hNeighborCount1
+hNeighborUsed0 / hNeighborUsed1
+```
+
+These matrices show, for TIMING0 and TIMING1 separately, the measured pair mean, RMS, number of accepted pairs, and which neighbour constraints were actually used in the offset solve.
 
 For each accepted frame, the timing spread is the RMS of selected channel times inside one scintillator. The expected contribution to `RMS(timing0_mean - timing1_mean)` from independent channel jitter is estimated as:
 

@@ -8,10 +8,12 @@
 #include <boost/program_options.hpp>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <string>
 #include <vector>
 
 namespace {
@@ -29,6 +31,15 @@ struct frame_info_t {
 struct fit_event_t {
   std::vector<int> channel[2];
   std::vector<double> time[2];
+};
+
+struct neighbor_constraint_t {
+  int a = 0;
+  int b = 0;
+  int count = 0;
+  double mean = 0.;
+  double rms = 0.;
+  bool used = false;
 };
 
 struct shape_event_t {
@@ -71,6 +82,22 @@ int timing_channel(const hit_t &hit)
 int global_channel(int det, int channel)
 {
   return channel + nchannels * det;
+}
+
+int detector_x(int channel)
+{
+  return eo2do[channel] % 4;
+}
+
+int detector_y(int channel)
+{
+  return eo2do[channel] / 4;
+}
+
+int detector_manhattan(int a, int b)
+{
+  return std::abs(detector_x(a) - detector_x(b)) +
+         std::abs(detector_y(a) - detector_y(b));
 }
 
 double median(std::vector<double> values)
@@ -345,6 +372,168 @@ bool run_full_minimization(const std::vector<fit_event_t> &events,
   return ierflg == 0;
 }
 
+bool solve_dense(std::vector<std::vector<double>> a,
+                 std::vector<double> b,
+                 std::vector<double> &x)
+{
+  int n = b.size();
+  x.assign(n, 0.);
+
+  for (int col = 0; col < n; ++col) {
+    int pivot = col;
+    double pivot_abs = std::fabs(a[col][col]);
+    for (int row = col + 1; row < n; ++row) {
+      double value = std::fabs(a[row][col]);
+      if (value > pivot_abs) {
+        pivot = row;
+        pivot_abs = value;
+      }
+    }
+    if (pivot_abs < 1.e-12)
+      return false;
+
+    if (pivot != col) {
+      std::swap(a[pivot], a[col]);
+      std::swap(b[pivot], b[col]);
+    }
+
+    double diag = a[col][col];
+    for (int j = col; j < n; ++j)
+      a[col][j] /= diag;
+    b[col] /= diag;
+
+    for (int row = 0; row < n; ++row) {
+      if (row == col)
+        continue;
+      double factor = a[row][col];
+      if (factor == 0.)
+        continue;
+      for (int j = col; j < n; ++j)
+        a[row][j] -= factor * a[col][j];
+      b[row] -= factor * b[col];
+    }
+  }
+
+  x = b;
+  return true;
+}
+
+int solve_neighbor_offsets(const std::vector<frame_info_t> &frames,
+                           double *offset,
+                           int neighbor_distance,
+                           int min_pairs,
+                           double max_rms,
+                           double delta_cut,
+                           std::array<std::array<neighbor_constraint_t, nchannels>, nchannels> constraint[2])
+{
+  for (int det = 0; det < 2; ++det) {
+    for (int a = 0; a < nchannels; ++a) {
+      for (int b = 0; b < nchannels; ++b)
+        constraint[det][a][b] = {};
+    }
+  }
+
+  double sum[2][nchannels][nchannels] = {};
+  double sum2[2][nchannels][nchannels] = {};
+  int count[2][nchannels][nchannels] = {};
+
+  for (const auto &frame : frames) {
+    for (int det = 0; det < 2; ++det) {
+      for (int a = 0; a < nchannels; ++a) {
+        if (!frame.have[det][a])
+          continue;
+        for (int b = a + 1; b < nchannels; ++b) {
+          if (!frame.have[det][b])
+            continue;
+          if (detector_manhattan(a, b) > neighbor_distance)
+            continue;
+
+          double delta = frame.time[det][a] - frame.time[det][b];
+          if (std::fabs(delta) > delta_cut)
+            continue;
+
+          sum[det][a][b] += delta;
+          sum2[det][a][b] += delta * delta;
+          ++count[det][a][b];
+        }
+      }
+    }
+  }
+
+  int used_edges = 0;
+  for (int det = 0; det < 2; ++det) {
+    std::vector<std::vector<double>> normal(nchannels - 1, std::vector<double>(nchannels - 1, 0.));
+    std::vector<double> rhs(nchannels - 1, 0.);
+    int det_edges = 0;
+
+    auto add_coeff = [&](int ch, double coeff, double w, double y) {
+      if (ch == reference_channel)
+        return;
+      int i = ch - 1;
+      rhs[i] += w * coeff * y;
+    };
+
+    auto add_normal = [&](int ch1, double c1, int ch2, double c2, double w) {
+      if (ch1 == reference_channel || ch2 == reference_channel)
+        return;
+      normal[ch1 - 1][ch2 - 1] += w * c1 * c2;
+    };
+
+    for (int a = 0; a < nchannels; ++a) {
+      for (int b = a + 1; b < nchannels; ++b) {
+        int n = count[det][a][b];
+        if (n == 0)
+          continue;
+        double mean = sum[det][a][b] / n;
+        double variance = std::max(0., sum2[det][a][b] / n - mean * mean);
+        double rms = std::sqrt(variance);
+
+        auto &edge = constraint[det][a][b];
+        edge.a = a;
+        edge.b = b;
+        edge.count = n;
+        edge.mean = mean;
+        edge.rms = rms;
+
+        if (n < min_pairs || rms > max_rms)
+          continue;
+
+        double w = n / std::max(rms * rms, 0.01);
+        double ca = 1.;
+        double cb = -1.;
+        double y = mean;
+
+        add_normal(a, ca, a, ca, w);
+        add_normal(a, ca, b, cb, w);
+        add_normal(b, cb, a, ca, w);
+        add_normal(b, cb, b, cb, w);
+        add_coeff(a, ca, w, y);
+        add_coeff(b, cb, w, y);
+
+        edge.used = true;
+        ++det_edges;
+        ++used_edges;
+      }
+    }
+
+    std::vector<double> solution;
+    if (det_edges == 0 || !solve_dense(normal, rhs, solution)) {
+      std::cerr << "WARNING: neighbour calibration failed for TIMING" << det
+                << "; offsets unchanged for this scintillator" << std::endl;
+      continue;
+    }
+
+    for (int channel = 0; channel < nchannels; ++channel) {
+      int gch = global_channel(det, channel);
+      offset[gch] = channel == reference_channel ? 0. : solution[channel - 1];
+    }
+  }
+
+  normalize_reference(offset);
+  shift_timing1_to_zero_delta(frames, offset);
+  return used_edges;
+}
+
 
 
 int first_selected_channel(const frame_info_t &frame,
@@ -568,6 +757,7 @@ void write_channel_calibration(const char *filename, const double *offset)
 bool timing_calib(const std::string &filename,
                   const std::string &outfilename,
                   const std::string &calibfilename,
+                  const std::string &calibration_method,
                   int min_channels,
                   double outlier_window,
                   double delta_range,
@@ -578,6 +768,10 @@ bool timing_calib(const std::string &filename,
                   int minimizer_calls,
                   double delta_weight,
                   double residual_weight,
+                  int neighbor_distance,
+                  int neighbor_min_pairs,
+                  double neighbor_max_rms,
+                  double neighbor_delta_cut,
                   int max_frames)
 {
   trigger_reader_t reader;
@@ -642,23 +836,41 @@ bool timing_calib(const std::string &filename,
   double offset[ntiming] = {};
   std::vector<frame_info_t> fit_frames;
   fit_frames.reserve(frames.size());
+  std::array<std::array<neighbor_constraint_t, nchannels>, nchannels> neighbor_constraint[2] = {};
+  int neighbor_edges = 0;
 
   int nfit = 0;
-  for (int iter = 0; iter < pre_iterations; ++iter) {
-    nfit = accumulate_residual_offsets(frames, offset, iteration_damping,
-                                       iter == pre_iterations - 1 ? &fit_frames : nullptr);
-    if (nfit == 0) {
-      std::cerr << "ERROR: no frames survived timing calibration selection" << std::endl;
+  if (calibration_method == "neighbor") {
+    neighbor_edges = solve_neighbor_offsets(frames,
+                                            offset,
+                                            neighbor_distance,
+                                            neighbor_min_pairs,
+                                            neighbor_max_rms,
+                                            neighbor_delta_cut,
+                                            neighbor_constraint);
+    fit_frames = frames;
+    nfit = fit_frames.size();
+    if (neighbor_edges == 0) {
+      std::cerr << "ERROR: no neighbour constraints survived timing calibration selection" << std::endl;
       return false;
     }
-    shift_timing1_to_zero_delta(fit_frames.empty() ? frames : fit_frames, offset);
-  }
+  } else {
+    for (int iter = 0; iter < pre_iterations; ++iter) {
+      nfit = accumulate_residual_offsets(frames, offset, iteration_damping,
+                                         iter == pre_iterations - 1 ? &fit_frames : nullptr);
+      if (nfit == 0) {
+        std::cerr << "ERROR: no frames survived timing calibration selection" << std::endl;
+        return false;
+      }
+      shift_timing1_to_zero_delta(fit_frames.empty() ? frames : fit_frames, offset);
+    }
 
-  if (fit_frames.empty()) {
-    nfit = accumulate_residual_offsets(frames, offset, iteration_damping, &fit_frames);
-    if (nfit == 0) {
-      std::cerr << "ERROR: no frames survived timing calibration selection" << std::endl;
-      return false;
+    if (fit_frames.empty()) {
+      nfit = accumulate_residual_offsets(frames, offset, iteration_damping, &fit_frames);
+      if (nfit == 0) {
+        std::cerr << "ERROR: no frames survived timing calibration selection" << std::endl;
+        return false;
+      }
     }
   }
 
@@ -730,6 +942,38 @@ bool timing_calib(const std::string &filename,
                                      400, -delta_range, delta_range);
   auto hDeltaTiming1After = new TH2D("hDeltaTiming1After", "", nchannels, 0., nchannels,
                                      400, -delta_range, delta_range);
+  auto hNeighborMean0 = new TH2D("hNeighborMean0", "", nchannels, 0., nchannels, nchannels, 0., nchannels);
+  auto hNeighborMean1 = new TH2D("hNeighborMean1", "", nchannels, 0., nchannels, nchannels, 0., nchannels);
+  auto hNeighborRms0 = new TH2D("hNeighborRms0", "", nchannels, 0., nchannels, nchannels, 0., nchannels);
+  auto hNeighborRms1 = new TH2D("hNeighborRms1", "", nchannels, 0., nchannels, nchannels, 0., nchannels);
+  auto hNeighborCount0 = new TH2D("hNeighborCount0", "", nchannels, 0., nchannels, nchannels, 0., nchannels);
+  auto hNeighborCount1 = new TH2D("hNeighborCount1", "", nchannels, 0., nchannels, nchannels, 0., nchannels);
+  auto hNeighborUsed0 = new TH2D("hNeighborUsed0", "", nchannels, 0., nchannels, nchannels, 0., nchannels);
+  auto hNeighborUsed1 = new TH2D("hNeighborUsed1", "", nchannels, 0., nchannels, nchannels, 0., nchannels);
+
+  TH2D *hNeighborMean[2] = {hNeighborMean0, hNeighborMean1};
+  TH2D *hNeighborRms[2] = {hNeighborRms0, hNeighborRms1};
+  TH2D *hNeighborCount[2] = {hNeighborCount0, hNeighborCount1};
+  TH2D *hNeighborUsed[2] = {hNeighborUsed0, hNeighborUsed1};
+  for (int det = 0; det < 2; ++det) {
+    for (int a = 0; a < nchannels; ++a) {
+      for (int b = a + 1; b < nchannels; ++b) {
+        const auto &edge = neighbor_constraint[det][a][b];
+        if (edge.count == 0)
+          continue;
+        hNeighborMean[det]->SetBinContent(a + 1, b + 1, edge.mean);
+        hNeighborMean[det]->SetBinContent(b + 1, a + 1, -edge.mean);
+        hNeighborRms[det]->SetBinContent(a + 1, b + 1, edge.rms);
+        hNeighborRms[det]->SetBinContent(b + 1, a + 1, edge.rms);
+        hNeighborCount[det]->SetBinContent(a + 1, b + 1, edge.count);
+        hNeighborCount[det]->SetBinContent(b + 1, a + 1, edge.count);
+        if (edge.used) {
+          hNeighborUsed[det]->SetBinContent(a + 1, b + 1, 1.);
+          hNeighborUsed[det]->SetBinContent(b + 1, a + 1, 1.);
+        }
+      }
+    }
+  }
 
   for (int gch = 0; gch < ntiming; ++gch) {
     hOffset->SetBinContent(gch + 1, offset[gch]);
@@ -941,6 +1185,14 @@ bool timing_calib(const std::string &filename,
   hDeltaTiming1Before->Write();
   hDeltaTiming0After->Write();
   hDeltaTiming1After->Write();
+  hNeighborMean0->Write();
+  hNeighborMean1->Write();
+  hNeighborRms0->Write();
+  hNeighborRms1->Write();
+  hNeighborCount0->Write();
+  hNeighborCount1->Write();
+  hNeighborUsed0->Write();
+  hNeighborUsed1->Write();
   fout->Close();
 
   write_channel_calibration(calibfilename.c_str(), offset);
@@ -953,6 +1205,12 @@ bool timing_calib(const std::string &filename,
   std::cout << "frames retained:                 " << frames.size() << std::endl;
   std::cout << "frames used for calibration:     " << nfit << std::endl;
   std::cout << "events used by Minuit:           " << fit_events.size() << std::endl;
+  std::cout << "calibration method:              " << calibration_method << std::endl;
+  std::cout << "neighbour constraints used:      " << neighbor_edges << std::endl;
+  std::cout << "neighbour distance/min pairs:    " << neighbor_distance
+            << " / " << neighbor_min_pairs << std::endl;
+  std::cout << "neighbour max RMS/delta cut:     " << neighbor_max_rms
+            << " / " << neighbor_delta_cut << std::endl;
   std::cout << "pre-calibration iterations:      " << pre_iterations << std::endl;
   std::cout << "iteration damping:               " << iteration_damping << std::endl;
   std::cout << "Minuit max calls:                " << minimizer_calls << std::endl;
@@ -987,6 +1245,7 @@ int main(int argc, char **argv)
   std::string input;
   std::string output = "timing_calib.root";
   std::string calibration_output = "timing_channel_offsets.conf";
+  std::string calibration_method = "mean";
   int min_channels = 16;
   double outlier_window = 2.0;
   double delta_range = 20.0;
@@ -997,6 +1256,10 @@ int main(int argc, char **argv)
   int minimizer_calls = 0;
   double delta_weight = 1.0;
   double residual_weight = 1.0;
+  int neighbor_distance = 1;
+  int neighbor_min_pairs = 100;
+  double neighbor_max_rms = 2.0;
+  double neighbor_delta_cut = 20.0;
   int max_frames = 0;
 
   po::options_description options("options");
@@ -1005,6 +1268,7 @@ int main(int argc, char **argv)
     ("input,i", po::value<std::string>(&input)->required(), "input triggered-frame ROOT file")
     ("output,o", po::value<std::string>(&output)->default_value(output), "output diagnostic ROOT file")
     ("calibration-output,c", po::value<std::string>(&calibration_output)->default_value(calibration_output), "output [CHANNEL] calibration snippet")
+    ("calibration-method", po::value<std::string>(&calibration_method)->default_value(calibration_method), "offset method: mean or neighbor")
     ("min-channels", po::value<int>(&min_channels)->default_value(min_channels), "minimum selected channels per timing scintillator")
     ("outlier-window", po::value<double>(&outlier_window)->default_value(outlier_window), "robust mean outlier window")
     ("delta-range", po::value<double>(&delta_range)->default_value(delta_range), "delta/residual histogram half range")
@@ -1015,6 +1279,10 @@ int main(int argc, char **argv)
     ("minimizer-calls", po::value<int>(&minimizer_calls)->default_value(minimizer_calls), "maximum TMinuit MIGRAD calls, 0 skips Minuit")
     ("delta-weight", po::value<double>(&delta_weight)->default_value(delta_weight), "weight for TIMING0_mean - TIMING1_mean term")
     ("residual-weight", po::value<double>(&residual_weight)->default_value(residual_weight), "weight for intra-scintillator channel residual terms")
+    ("neighbor-distance", po::value<int>(&neighbor_distance)->default_value(neighbor_distance), "maximum detector-grid Manhattan distance for neighbor constraints")
+    ("neighbor-min-pairs", po::value<int>(&neighbor_min_pairs)->default_value(neighbor_min_pairs), "minimum entries required for a neighbor-pair constraint")
+    ("neighbor-max-rms", po::value<double>(&neighbor_max_rms)->default_value(neighbor_max_rms), "maximum RMS accepted for a neighbor-pair constraint")
+    ("neighbor-delta-cut", po::value<double>(&neighbor_delta_cut)->default_value(neighbor_delta_cut), "absolute raw delta cut while accumulating neighbor pairs")
     ("max-frames", po::value<int>(&max_frames)->default_value(max_frames), "maximum frames to read, 0 means all frames")
     ;
 
@@ -1034,6 +1302,10 @@ int main(int argc, char **argv)
 
   if (min_channels <= 0 || min_channels > nchannels) {
     std::cerr << "ERROR: --min-channels must be in [1," << nchannels << "]" << std::endl;
+    return 1;
+  }
+  if (calibration_method != "mean" && calibration_method != "neighbor") {
+    std::cerr << "ERROR: --calibration-method must be 'mean' or 'neighbor'" << std::endl;
     return 1;
   }
   if (pre_iterations < 0) {
@@ -1056,6 +1328,22 @@ int main(int argc, char **argv)
     std::cerr << "ERROR: --delta-weight and --residual-weight must be non-negative, and at least one must be positive" << std::endl;
     return 1;
   }
+  if (neighbor_distance <= 0) {
+    std::cerr << "ERROR: --neighbor-distance must be positive" << std::endl;
+    return 1;
+  }
+  if (neighbor_min_pairs <= 0) {
+    std::cerr << "ERROR: --neighbor-min-pairs must be positive" << std::endl;
+    return 1;
+  }
+  if (neighbor_max_rms <= 0.) {
+    std::cerr << "ERROR: --neighbor-max-rms must be positive" << std::endl;
+    return 1;
+  }
+  if (neighbor_delta_cut <= 0.) {
+    std::cerr << "ERROR: --neighbor-delta-cut must be positive" << std::endl;
+    return 1;
+  }
   if (max_frames < 0) {
     std::cerr << "ERROR: --max-frames must be non-negative" << std::endl;
     return 1;
@@ -1064,6 +1352,7 @@ int main(int argc, char **argv)
   return timing_calib(input,
                       output,
                       calibration_output,
+                      calibration_method,
                       min_channels,
                       outlier_window,
                       delta_range,
@@ -1074,5 +1363,9 @@ int main(int argc, char **argv)
                       minimizer_calls,
                       delta_weight,
                       residual_weight,
+                      neighbor_distance,
+                      neighbor_min_pairs,
+                      neighbor_max_rms,
+                      neighbor_delta_cut,
                       max_frames) ? 0 : 1;
 }
