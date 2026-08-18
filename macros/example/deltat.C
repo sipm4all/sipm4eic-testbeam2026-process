@@ -7,6 +7,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -36,6 +37,15 @@ struct channel_selector_t {
 
   channel_selector_t(int type_, int channel_)
     : type(type_), channel(channel_)
+  {
+  }
+};
+
+struct timing_reference_t {
+  std::string branch;
+
+  timing_reference_t(const std::string &branch_ = "T")
+    : branch(branch_)
   {
   }
 };
@@ -113,6 +123,25 @@ struct category_reader_t {
     return match_field(channel(i), requested_channel);
   }
 };
+
+double
+timing_reference_value(const std::string &branch,
+                       int iframe,
+                       const TTreeReaderArray<double> &T0,
+                       const TTreeReaderArray<double> &T1,
+                       const TTreeReaderArray<double> &T)
+{
+  if (branch == "T0")
+    return T0[iframe];
+  if (branch == "T1")
+    return T1[iframe];
+  if (branch == "T")
+    return T[iframe];
+
+  std::cerr << " --- unsupported timing reference branch: " << branch
+            << " (valid choices are T, T0, T1)" << std::endl;
+  return std::numeric_limits<double>::quiet_NaN();
+}
 
 void
 deltat(const std::string filename,
@@ -220,6 +249,286 @@ struct hit_ref_t {
   category_reader_t *cat;
   int index;
 };
+
+void
+deltat(const std::string filename,
+       field_selector_t target_selector,
+       timing_reference_t timing_reference,
+       const std::string outfilename = "deltat.root")
+{
+  auto fin = TFile::Open(filename.c_str());
+  if (!fin || fin->IsZombie()) {
+    std::cerr << " --- could not open input file: " << filename << std::endl;
+    return;
+  }
+
+  auto tin = (TTree *)fin->Get("frames");
+  if (!tin) {
+    std::cerr << " --- could not find 'frames' tree in input file" << std::endl;
+    fin->Close();
+    return;
+  }
+
+  if (!tin->GetBranch("timing_valid") ||
+      !tin->GetBranch("T0") ||
+      !tin->GetBranch("T1") ||
+      !tin->GetBranch("T")) {
+    std::cerr << " --- input file does not contain timing estimator branches" << std::endl;
+    fin->Close();
+    return;
+  }
+
+  if (timing_reference.branch != "T" &&
+      timing_reference.branch != "T0" &&
+      timing_reference.branch != "T1") {
+    std::cerr << " --- unsupported timing reference branch: " << timing_reference.branch
+              << " (valid choices are T, T0, T1)" << std::endl;
+    fin->Close();
+    return;
+  }
+
+  auto scan = [&](TH2D *hist, TH2D **hist_tdc, TH2D *hist_spill, int &nframes_used, int &nfills) {
+    TTreeReader reader(tin);
+    TTreeReaderValue<int> spill_id(reader, "id");
+    TTreeReaderValue<int> nframes(reader, "nframes");
+    TTreeReaderArray<int> timing_valid(reader, "timing_valid");
+    TTreeReaderArray<double> T0(reader, "T0");
+    TTreeReaderArray<double> T1(reader, "T1");
+    TTreeReaderArray<double> T(reader, "T");
+    category_reader_t trigger(reader, "trigger");
+    category_reader_t timing(reader, "timing");
+    category_reader_t cherenkov(reader, "cherenkov");
+    category_reader_t *cats[] = {&trigger, &timing, &cherenkov};
+
+    while (reader.Next()) {
+      for (int iframe = 0; iframe < *nframes; ++iframe) {
+        if (timing_valid[iframe] == 0)
+          continue;
+
+        auto reference_time = timing_reference_value(timing_reference.branch, iframe, T0, T1, T);
+        if (!std::isfinite(reference_time))
+          continue;
+
+        std::vector<hit_ref_t> targets;
+        for (auto cat : cats) {
+          int first = (*cat->frame_start)[iframe];
+          int nhits = (*cat->frame_nhits)[iframe];
+          for (int ihit = 0; ihit < nhits; ++ihit) {
+            int i = first + ihit;
+            if (cat->match(i, target_selector))
+              targets.push_back({cat, i});
+          }
+        }
+
+        if (targets.empty())
+          continue;
+
+        ++nframes_used;
+        for (const auto &target : targets) {
+          auto delta_t = target.cat->hit_time(target.index) - reference_time;
+          if (hist) {
+            int channel = target.cat->channel(target.index);
+            hist->Fill(channel, delta_t);
+            if (hist_spill)
+              hist_spill->Fill(*spill_id, delta_t);
+            int tdc = (*target.cat->tdc)[target.index];
+            if (tdc >= 0 && tdc < 4 && hist_tdc && hist_tdc[tdc])
+              hist_tdc[tdc]->Fill((*target.cat->fine)[target.index], delta_t);
+            ++nfills;
+          }
+        }
+      }
+    }
+  };
+
+  auto fout = TFile::Open(outfilename.c_str(), "RECREATE");
+  if (!fout || fout->IsZombie()) {
+    std::cerr << " --- could not create output file: " << outfilename << std::endl;
+    fin->Close();
+    return;
+  }
+
+  constexpr int min_device = 192;
+  constexpr int max_device = 200;
+  constexpr int channels_per_device = 256;
+  constexpr int nchannels = (max_device - min_device + 1) * channels_per_device;
+  auto hDeltaT = new TH2D("hDeltaT", "", nchannels, 0., nchannels, deltat_nbins, deltat_min, deltat_max);
+  auto hDeltaT_spill = new TH2D("hDeltaT_spill", "", spill_nbins, spill_min, spill_max, deltat_nbins, deltat_min, deltat_max);
+
+  TH2D *hDeltaT_tdc[4] = {nullptr, nullptr, nullptr, nullptr};
+  for (int itdc = 0; itdc < 4; ++itdc)
+    hDeltaT_tdc[itdc] = new TH2D(Form("hDeltaT_tdc%d", itdc), "", 256, 0., 256., deltat_nbins, deltat_min, deltat_max);
+
+  int nframes_used = 0;
+  int nfills = 0;
+  scan(hDeltaT, hDeltaT_tdc, hDeltaT_spill, nframes_used, nfills);
+
+  if (nframes_used == 0)
+    std::cerr << " --- no valid timing-reference frames with target hits found" << std::endl;
+  std::cout << " --- timing reference: " << timing_reference.branch << std::endl;
+  std::cout << " --- frames with target/timing-reference hits: " << nframes_used << std::endl;
+  std::cout << " --- histogram fills: " << nfills << std::endl;
+
+  hDeltaT->Sumw2();
+  if (nframes_used > 0)
+    hDeltaT->Scale(1. / nframes_used);
+  hDeltaT->Write();
+
+  hDeltaT_spill->Sumw2();
+  if (nframes_used > 0)
+    hDeltaT_spill->Scale(1. / nframes_used);
+  hDeltaT_spill->Write();
+
+  for (int itdc = 0; itdc < 4; ++itdc) {
+    hDeltaT_tdc[itdc]->Sumw2();
+    if (nframes_used > 0)
+      hDeltaT_tdc[itdc]->Scale(1. / nframes_used);
+    hDeltaT_tdc[itdc]->Write();
+  }
+
+  fout->Close();
+  fin->Close();
+}
+
+void
+deltat(const std::string filename,
+       channel_selector_t target_selector,
+       timing_reference_t timing_reference,
+       const std::string outfilename = "deltat.root")
+{
+  auto fin = TFile::Open(filename.c_str());
+  if (!fin || fin->IsZombie()) {
+    std::cerr << " --- could not open input file: " << filename << std::endl;
+    return;
+  }
+
+  auto tin = (TTree *)fin->Get("frames");
+  if (!tin) {
+    std::cerr << " --- could not find 'frames' tree in input file" << std::endl;
+    fin->Close();
+    return;
+  }
+
+  if (!tin->GetBranch("timing_valid") ||
+      !tin->GetBranch("T0") ||
+      !tin->GetBranch("T1") ||
+      !tin->GetBranch("T")) {
+    std::cerr << " --- input file does not contain timing estimator branches" << std::endl;
+    fin->Close();
+    return;
+  }
+
+  if (timing_reference.branch != "T" &&
+      timing_reference.branch != "T0" &&
+      timing_reference.branch != "T1") {
+    std::cerr << " --- unsupported timing reference branch: " << timing_reference.branch
+              << " (valid choices are T, T0, T1)" << std::endl;
+    fin->Close();
+    return;
+  }
+
+  auto scan = [&](TH2D *hist, TH2D **hist_tdc, TH2D *hist_spill, int &nframes_used, int &nfills) {
+    TTreeReader reader(tin);
+    TTreeReaderValue<int> spill_id(reader, "id");
+    TTreeReaderValue<int> nframes(reader, "nframes");
+    TTreeReaderArray<int> timing_valid(reader, "timing_valid");
+    TTreeReaderArray<double> T0(reader, "T0");
+    TTreeReaderArray<double> T1(reader, "T1");
+    TTreeReaderArray<double> T(reader, "T");
+    category_reader_t trigger(reader, "trigger");
+    category_reader_t timing(reader, "timing");
+    category_reader_t cherenkov(reader, "cherenkov");
+    category_reader_t *cats[] = {&trigger, &timing, &cherenkov};
+
+    while (reader.Next()) {
+      for (int iframe = 0; iframe < *nframes; ++iframe) {
+        if (timing_valid[iframe] == 0)
+          continue;
+
+        auto reference_time = timing_reference_value(timing_reference.branch, iframe, T0, T1, T);
+        if (!std::isfinite(reference_time))
+          continue;
+
+        std::vector<hit_ref_t> targets;
+        for (auto cat : cats) {
+          int first = (*cat->frame_start)[iframe];
+          int nhits = (*cat->frame_nhits)[iframe];
+          for (int ihit = 0; ihit < nhits; ++ihit) {
+            int i = first + ihit;
+            if (cat->match(i, target_selector))
+              targets.push_back({cat, i});
+          }
+        }
+
+        if (targets.empty())
+          continue;
+
+        ++nframes_used;
+        for (const auto &target : targets) {
+          auto delta_t = target.cat->hit_time(target.index) - reference_time;
+          if (hist) {
+            int channel = target.cat->channel(target.index);
+            hist->Fill(channel, delta_t);
+            if (hist_spill)
+              hist_spill->Fill(*spill_id, delta_t);
+            int tdc = (*target.cat->tdc)[target.index];
+            if (tdc >= 0 && tdc < 4 && hist_tdc && hist_tdc[tdc])
+              hist_tdc[tdc]->Fill((*target.cat->fine)[target.index], delta_t);
+            ++nfills;
+          }
+        }
+      }
+    }
+  };
+
+  auto fout = TFile::Open(outfilename.c_str(), "RECREATE");
+  if (!fout || fout->IsZombie()) {
+    std::cerr << " --- could not create output file: " << outfilename << std::endl;
+    fin->Close();
+    return;
+  }
+
+  constexpr int min_device = 192;
+  constexpr int max_device = 200;
+  constexpr int channels_per_device = 256;
+  constexpr int nchannels = (max_device - min_device + 1) * channels_per_device;
+  auto hDeltaT = new TH2D("hDeltaT", "", nchannels, 0., nchannels, deltat_nbins, deltat_min, deltat_max);
+  auto hDeltaT_spill = new TH2D("hDeltaT_spill", "", spill_nbins, spill_min, spill_max, deltat_nbins, deltat_min, deltat_max);
+
+  TH2D *hDeltaT_tdc[4] = {nullptr, nullptr, nullptr, nullptr};
+  for (int itdc = 0; itdc < 4; ++itdc)
+    hDeltaT_tdc[itdc] = new TH2D(Form("hDeltaT_tdc%d", itdc), "", 256, 0., 256., deltat_nbins, deltat_min, deltat_max);
+
+  int nframes_used = 0;
+  int nfills = 0;
+  scan(hDeltaT, hDeltaT_tdc, hDeltaT_spill, nframes_used, nfills);
+
+  if (nframes_used == 0)
+    std::cerr << " --- no valid timing-reference frames with target hits found" << std::endl;
+  std::cout << " --- timing reference: " << timing_reference.branch << std::endl;
+  std::cout << " --- frames with target/timing-reference hits: " << nframes_used << std::endl;
+  std::cout << " --- histogram fills: " << nfills << std::endl;
+
+  hDeltaT->Sumw2();
+  if (nframes_used > 0)
+    hDeltaT->Scale(1. / nframes_used);
+  hDeltaT->Write();
+
+  hDeltaT_spill->Sumw2();
+  if (nframes_used > 0)
+    hDeltaT_spill->Scale(1. / nframes_used);
+  hDeltaT_spill->Write();
+
+  for (int itdc = 0; itdc < 4; ++itdc) {
+    hDeltaT_tdc[itdc]->Sumw2();
+    if (nframes_used > 0)
+      hDeltaT_tdc[itdc]->Scale(1. / nframes_used);
+    hDeltaT_tdc[itdc]->Write();
+  }
+
+  fout->Close();
+  fin->Close();
+}
 
 void
 deltat(const std::string filename,

@@ -91,6 +91,21 @@ deltat("triggered.root",
        "deltat.root");
 ```
 
+Files augmented by `process/bin/timing` can also use the trained TIMING estimator as the reference. The timing-reference overloads compute:
+
+```text
+delta_t = target.time - timing_reference
+```
+
+where `timing_reference_t("T")` uses the combined estimate, `timing_reference_t("T0")` uses TIMING0, and `timing_reference_t("T1")` uses TIMING1. Only frames with `timing_valid == 1` are used. The output filename remains the last argument:
+
+```cpp
+deltat("triggered.with_timing.root",
+       channel_selector_t(1, -1),
+       timing_reference_t("T"),
+       "deltat.timing_reference.root");
+```
+
 The old positional target/reference form remains available as a wrapper:
 
 ```cpp
