@@ -261,7 +261,7 @@ pixel  = *
 To compare all ALCOR hits against that trigger reference:
 
 ```bash
-root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/<run>/trigger/triggered.fingers.root\", {1, -1}, {9, 200}, \"/data/2026-testbeam/process/<run>/trigger/deltat.fingers.root\")"
+root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/<run>/trigger/triggered.fingers.root\", channel_selector_t(1, -1), channel_selector_t(9, 200), \"/data/2026-testbeam/process/<run>/trigger/deltat.fingers.trigger.root\")"
 ```
 
 This fills:
@@ -275,7 +275,19 @@ hDeltaT_tdc2   delta_t versus fine for target TDC 2
 hDeltaT_tdc3   delta_t versus fine for target TDC 3
 ```
 
-The target selector `{1, -1}` means all type-1 ALCOR hits, with `-1` used as the wildcard channel index.
+The target selector `channel_selector_t(1, -1)` means all type-1 ALCOR hits, with `-1` used as the wildcard channel index. The reference selector `channel_selector_t(9, 200)` means trigger tags from device `200`.
+
+If the triggered file has first been augmented with the trained TIMING estimator, `deltat.C` can also use the reconstructed TIMING as the reference:
+
+```bash
+process/bin/timing \
+    --input /data/2026-testbeam/process/<run>/trigger/triggered.fingers.root \
+    --output /data/2026-testbeam/process/<run>/trigger/triggered.fingers.timing.root
+
+root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/<run>/trigger/triggered.fingers.timing.root\", channel_selector_t(1, -1), timing_reference_t(\"T\"), \"/data/2026-testbeam/process/<run>/trigger/deltat.fingers.timing.root\")"
+```
+
+The timing-reference choices are `timing_reference_t("T")` for the combined estimator, `timing_reference_t("T0")` for TIMING0, and `timing_reference_t("T1")` for TIMING1. This mode uses only frames with `timing_valid == 1`.
 
 ## Normal Physics Example
 
@@ -304,7 +316,13 @@ sipm4eic-testbeam2026-process/process/scripts/trigger.sh \
     --trigger sipm4eic-testbeam2026-process/process/config/trigger/fingers.conf fingers \
     --window 256
 
-root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/${run}/trigger/triggered.fingers.root\", {1, -1}, {9, 200}, \"/data/2026-testbeam/process/${run}/trigger/deltat.fingers.root\")"
+root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/${run}/trigger/triggered.fingers.root\", channel_selector_t(1, -1), channel_selector_t(9, 200), \"/data/2026-testbeam/process/${run}/trigger/deltat.fingers.trigger.root\")"
+
+process/bin/timing \
+    --input "/data/2026-testbeam/process/${run}/trigger/triggered.fingers.root" \
+    --output "/data/2026-testbeam/process/${run}/trigger/triggered.fingers.timing.root"
+
+root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/${run}/trigger/triggered.fingers.timing.root\", channel_selector_t(1, -1), timing_reference_t(\"T\"), \"/data/2026-testbeam/process/${run}/trigger/deltat.fingers.timing.root\")"
 ```
 
 The final triggered output is:
@@ -316,7 +334,8 @@ The final triggered output is:
 The delta-t check output is:
 
 ```text
-/data/2026-testbeam/process/20260623-185238/trigger/deltat.fingers.root
+/data/2026-testbeam/process/20260623-185238/trigger/deltat.fingers.trigger.root
+/data/2026-testbeam/process/20260623-185238/trigger/deltat.fingers.timing.root
 ```
 
 ## Device Subsets

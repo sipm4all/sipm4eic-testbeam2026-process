@@ -123,4 +123,4 @@ calib_check_20260618-185127_rdo-199.conf
   seed: type=1, device=199, fifo=16, column=0, pixel=0
 ```
 
-These are intended for the same-RDO validation workflow documented in `process/docs/calibration.md`.
+These are intended for the same-RDO validation workflow documented in `docs/calibration.md`.

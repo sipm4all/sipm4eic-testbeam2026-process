@@ -528,6 +528,14 @@ delta_t = hit.time - trigger.time
 
 Here `time` is the calibrated time stored by the processing chain in the triggered-frame output. The histogram x axis is the global channel index, and the y axis is `delta_t`. The histogram is normalised by the number of trigger hits found.
 
+For this calibration closure check, keep using the stored test-pulse trigger hit as the reference. This checks the calibrated hit times propagated by:
+
+```text
+decode -> calibrate -> sort -> merge -> trigger/frame
+```
+
+without adding the trained TIMING estimator as another processing stage.
+
 For run `20260618-183625`, use the same test-pulse trigger channel as the diagnostic trigger. Example loop:
 
 ```bash
@@ -545,6 +553,25 @@ done
 ```
 
 The useful closure check is whether channels in the same RDO produce narrow, stable `delta_t` structures relative to that RDO's direct test-pulse trigger. For `20260618-183625`, the LASER-side channels are expected on FIFOs `16..31`; for `20260618-185127`, they are expected on FIFOs `0..15`. Do not use these runs to judge timing offsets between different devices.
+
+For physics timing studies, after a triggered file has been augmented with:
+
+```bash
+process/bin/timing \
+    --input triggered.fingers.root \
+    --output triggered.fingers.timing.root
+```
+
+the same macro can use the trained TIMING estimator as the reference:
+
+```cpp
+deltat("triggered.fingers.timing.root",
+       channel_selector_t(1, -1),
+       timing_reference_t("T"),
+       "deltat.fingers.timing.root");
+```
+
+Valid timing-reference names are `"T"`, `"T0"`, and `"T1"`. This mode requires the estimator branches `timing_valid`, `T0`, `T1`, and `T`, and uses only frames with `timing_valid == 1`.
 
 ### What To Inspect
 

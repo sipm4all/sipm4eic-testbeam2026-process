@@ -79,7 +79,7 @@ Run `process/scripts/checker.sh` first when you want a non-destructive sanity pa
 ## User Guides
 
 - `docs/reconstruction.md`: standard physics reconstruction workflow, from raw decoding through triggered-frame output.
-- `process/docs/calibration.md`: TDC calibration notes and calibration-check workflows.
+- `docs/calibration.md`: TDC calibration notes and calibration-check workflows.
 - `docs/todo.md`: design notes and deferred technical improvements.
 
 Generated ROOT files, logs, build products, and local binaries are ignored by git.
