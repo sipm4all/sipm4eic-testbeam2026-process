@@ -492,3 +492,73 @@ and writes:
 /data/2026-testbeam/process/<run>/trigger/triggered.calibcheck_rdo-192.spill_0000.root
 /data/2026-testbeam/process/<run>/trigger/triggered.calibcheck_rdo-192.root
 ```
+
+## timing.sh
+
+`timing.sh` is the post-trigger TIMING-estimator workflow. It consumes triggered-frame ROOT files produced by `trigger.sh` and adds one set of timing-estimator branches per frame.
+
+Run on the final `hadd` output:
+
+```bash
+process/scripts/timing.sh \
+  --run RUN_NAME \
+  --trigger fingers
+```
+
+Required command-line options:
+
+```text
+--run RUN                  run name/directory
+--trigger TAG              trigger output tag; may be repeated
+```
+
+Optional command-line options:
+
+```text
+--run-type TYPE            accepted for symmetry with the other workflows, default physics
+--parallel-spills          process triggered.<tag>.spill_*.root files in parallel, then hadd
+--jobs N                   maximum parallel spill jobs with --parallel-spills, default 8
+--overwrite                overwrite existing timing outputs instead of skipping them
+--clean-timing-spills      remove triggered.<tag>.timing.spill_*.root after hadd
+--help                     print usage
+```
+
+Default mode reads:
+
+```text
+/data/2026-testbeam/process/<run>/trigger/triggered.<tag>.root
+```
+
+and writes:
+
+```text
+/data/2026-testbeam/process/<run>/trigger/triggered.<tag>.timing.root
+```
+
+This is the preferred mode unless the final triggered file is large enough that per-spill parallelism is useful.
+
+With `--parallel-spills`, the script reads:
+
+```text
+/data/2026-testbeam/process/<run>/trigger/triggered.<tag>.spill_*.root
+```
+
+writes:
+
+```text
+/data/2026-testbeam/process/<run>/trigger/triggered.<tag>.timing.spill_*.root
+```
+
+and combines them into:
+
+```text
+/data/2026-testbeam/process/<run>/trigger/triggered.<tag>.timing.root
+```
+
+By default:
+
+```bash
+CLEAN_TIMING_SPILLS=0
+```
+
+so the per-spill timing files are kept. Pass `--clean-timing-spills` only when those intermediate files should be removed after the final `hadd`.

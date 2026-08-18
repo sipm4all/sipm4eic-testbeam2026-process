@@ -557,6 +557,14 @@ The useful closure check is whether channels in the same RDO produce narrow, sta
 For physics timing studies, after a triggered file has been augmented with:
 
 ```bash
+sipm4eic-testbeam2026-process/process/scripts/timing.sh \
+    --run <run> \
+    --trigger fingers
+```
+
+which is equivalent to running:
+
+```bash
 process/bin/timing \
     --input triggered.fingers.root \
     --output triggered.fingers.timing.root

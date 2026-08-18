@@ -9,6 +9,7 @@ decoder.sh
   -> checker.sh
   -> process.sh
   -> trigger.sh
+  -> timing.sh
 ```
 
 Conceptually this expands to:
@@ -22,6 +23,7 @@ raw per-FIFO data
   -> run-level split-spill merge
   -> trigger frame production
   -> hadd per-trigger output
+  -> optional trained TIMING estimator
 ```
 
 The scripts use `/data/2026-testbeam/process/<run>/` as the working area. For physics data, `--run-type physics` is the default and can be omitted.
@@ -238,7 +240,33 @@ Pass:
 
 to remove `triggered.<tag>.spill_*.root` after a successful `hadd`.
 
-## 5. Check Delta-T Distributions
+## 5. Add TIMING Estimator
+
+After `trigger.sh`, the triggered file can be augmented with the trained TIMING estimator:
+
+```bash
+sipm4eic-testbeam2026-process/process/scripts/timing.sh \
+    --run <run> \
+    --trigger <tag>
+```
+
+By default, `timing.sh` reads:
+
+```text
+/data/2026-testbeam/process/<run>/trigger/triggered.<tag>.root
+```
+
+and writes:
+
+```text
+/data/2026-testbeam/process/<run>/trigger/triggered.<tag>.timing.root
+```
+
+This stage adds per-frame `timing_valid`, `T0`, `sigma0`, `T1`, `sigma1`, `T`, and `sigmaT` branches. It preserves the existing triggered-frame tree and the `spill_participation` metadata.
+
+For large triggered files, `timing.sh --parallel-spills` can instead run on the per-spill triggered files left by `trigger.sh`, then combine the timing-augmented spill files with `hadd`.
+
+## 6. Check Delta-T Distributions
 
 After triggered frames have been built, run the example `deltat.C` macro as a first reconstruction check.
 
@@ -280,9 +308,9 @@ The target selector `channel_selector_t(1, -1)` means all type-1 ALCOR hits, wit
 If the triggered file has first been augmented with the trained TIMING estimator, `deltat.C` can also use the reconstructed TIMING as the reference:
 
 ```bash
-process/bin/timing \
-    --input /data/2026-testbeam/process/<run>/trigger/triggered.fingers.root \
-    --output /data/2026-testbeam/process/<run>/trigger/triggered.fingers.timing.root
+sipm4eic-testbeam2026-process/process/scripts/timing.sh \
+    --run <run> \
+    --trigger fingers
 
 root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/<run>/trigger/triggered.fingers.timing.root\", channel_selector_t(1, -1), timing_reference_t(\"T\"), \"/data/2026-testbeam/process/<run>/trigger/deltat.fingers.timing.root\")"
 ```
@@ -318,9 +346,9 @@ sipm4eic-testbeam2026-process/process/scripts/trigger.sh \
 
 root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/${run}/trigger/triggered.fingers.root\", channel_selector_t(1, -1), channel_selector_t(9, 200), \"/data/2026-testbeam/process/${run}/trigger/deltat.fingers.trigger.root\")"
 
-process/bin/timing \
-    --input "/data/2026-testbeam/process/${run}/trigger/triggered.fingers.root" \
-    --output "/data/2026-testbeam/process/${run}/trigger/triggered.fingers.timing.root"
+sipm4eic-testbeam2026-process/process/scripts/timing.sh \
+    --run "${run}" \
+    --trigger fingers
 
 root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/${run}/trigger/triggered.fingers.timing.root\", channel_selector_t(1, -1), timing_reference_t(\"T\"), \"/data/2026-testbeam/process/${run}/trigger/deltat.fingers.timing.root\")"
 ```

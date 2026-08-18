@@ -3,7 +3,7 @@
 This repository contains ROOT-based tools for processing SiPM4EIC 2026 test-beam data after decoding. The processing chain is organized as:
 
 ```text
-raw decode -> optional check -> clean -> calibrate -> coordinate -> sort -> merge -> trigger/frame -> analysis macros
+raw decode -> optional check -> clean -> calibrate -> coordinate -> sort -> merge -> trigger/frame -> timing estimator -> analysis macros
 ```
 
 The repository is intentionally split between compiled processing programs and ROOT analysis macros:
@@ -54,7 +54,7 @@ The workflow scripts use one run directory under `/data/2026-testbeam/process` a
 /data/2026-testbeam/process/<run>/<device>/process/   calibrated/sorted/AP-suppressed processing products
 /data/2026-testbeam/process/<run>/check/              run-level checker reports
 /data/2026-testbeam/process/<run>/process/            run-level merged split-spill ROOT files
-/data/2026-testbeam/process/<run>/trigger/            triggered-frame ROOT files
+/data/2026-testbeam/process/<run>/trigger/            triggered-frame ROOT files and timing-estimator augmented files
 ```
 
 Downstream workflows read the decoded ROOT files from the `decoded/` directory. They no longer read decoded files directly from `/data/2026-testbeam/actual`.
