@@ -193,6 +193,13 @@ matrix mapping -> detector channel
 detector channel -> global x/y
 ```
 
+The Cherenkov electronics-oriented channel follows the same decoded convention as `data_word.h`:
+
+```cpp
+local_eoch = pixel + 4 * column
+eoch = local_eoch + 32 * ((fifo / 4) % 2)
+```
+
 Control words and trigger tags are preserved with:
 
 ```text

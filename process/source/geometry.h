@@ -111,9 +111,10 @@ private:
     int chip = data.fifo / 4;
     int chip_side = chip % 2;
 
-    // The decoded 2026 data use column=0..7 and pixel=0..3 inside one ALCOR chip.
-    // The legacy mapping table expects pixel=0..7 and column=0..3.
-    int local_eoch = data.column + 8 * data.pixel;
+    // Decoded 2026 data keep the ALCOR channel convention used elsewhere:
+    // eoch = pixel + 4 * column.  The matrix table addresses the two chips
+    // on one ALCOR-dual board as eoch=0..63.
+    int local_eoch = data.pixel + 4 * data.column;
     int eoch = local_eoch + 32 * chip_side;
     if (local_eoch < 0 || local_eoch >= 32 || eoch < 0 || eoch >= 64)
       return -1;
