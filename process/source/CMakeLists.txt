@@ -42,16 +42,19 @@ add_executable(sorter sorter.cc)
 add_executable(after-pulse-suppressor after-pulse-suppressor.cc)
 add_executable(merger merger.cc)
 add_executable(trigger trigger.cc)
+add_executable(timing timing.cc)
 add_executable(validate_timing_estimator timing/test/validate_timing_estimator.cc)
 target_include_directories(validate_timing_estimator PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/timing/include
 )
 target_link_libraries(validate_timing_estimator PRIVATE timing_estimator)
 
-foreach(target decoder dcalib calibrator coordinator cleaner checker sorter after-pulse-suppressor merger trigger)
+foreach(target decoder dcalib calibrator coordinator cleaner checker sorter after-pulse-suppressor merger trigger timing)
   target_compile_options(${target} PRIVATE ${ROOT_CFLAGS_LIST})
   target_link_libraries(${target} PRIVATE ${ROOT_LIBS_LIST} Boost::program_options)
 endforeach()
+target_include_directories(timing PRIVATE ${CMAKE_CURRENT_LIST_DIR}/timing/include)
+target_link_libraries(timing PRIVATE timing_estimator)
 
 install(TARGETS
   timing_estimator
@@ -65,6 +68,7 @@ install(TARGETS
   after-pulse-suppressor
   merger
   trigger
+  timing
   validate_timing_estimator
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib

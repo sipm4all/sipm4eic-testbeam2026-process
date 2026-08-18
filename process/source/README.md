@@ -257,6 +257,30 @@ process/bin/trigger \
 
 The persistent output tree is named `frames`. Each stored hit includes the original raw fields plus the calibrated `time` value used for triggering and the spatial coordinates `x` and `y` when they were added upstream by `coordinator`. These are persisted in category branches such as `trigger_time`, `timing_time`, `cherenkov_time`, and similarly `trigger_x`, `timing_x`, `cherenkov_x`, `trigger_y`, `timing_y`, `cherenkov_y`.
 
+### timing
+
+Adds trained TIMING event-estimator results to an existing triggered-frame ROOT file:
+
+```bash
+process/bin/timing \
+  --input triggered.root \
+  --output triggered.timing.root
+```
+
+The input must be a `frames` tree produced by `trigger`, with calibrated `timing_time` values. The program preserves the original tree contents and adds one array element per accepted frame:
+
+```text
+timing_valid[nframes]
+T0[nframes]
+sigma0[nframes]
+T1[nframes]
+sigma1[nframes]
+T[nframes]
+sigmaT[nframes]
+```
+
+`T0` and `sigma0` refer to TIMING0, `T1` and `sigma1` refer to TIMING1, and `T = (T0 + T1) / 2`. Values are in the estimator native time unit, `3.125 ns`. `timing_valid` is `1` only when the frame contains one usable time for every TIMING DO channel in both scintillators. If one or more channels are missing, the timing values are written as `NaN` and `timing_valid` is `0`.
+
 ## Shared Headers
 
 - `data_word.h`: common `data_t` representation for the `alcor` tree, optional calibrated time binding, and word-type helpers.

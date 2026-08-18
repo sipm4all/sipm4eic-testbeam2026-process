@@ -64,6 +64,50 @@ result.sigma1_ps();
 result.sigmaT_ps();
 ```
 
+## ROOT Triggered-Frame Augmentation
+
+The compiled `timing` executable applies the estimator to every accepted frame in a triggered ROOT file:
+
+```bash
+process/bin/timing \
+  --input triggered.root \
+  --output triggered.timing.root
+```
+
+It reads the current `frames` tree layout produced by `trigger`, preserves all existing branches, copies the optional `spill_participation` tree, and adds one timing-estimator result per frame:
+
+```text
+timing_valid[nframes]
+T0[nframes]
+sigma0[nframes]
+T1[nframes]
+sigma1[nframes]
+T[nframes]
+sigmaT[nframes]
+```
+
+The 64 estimator inputs are built from the `timing_*` collection:
+
+```text
+TIMING0: device 200, fifo 0..3, DO0..DO31
+TIMING1: device 200, fifo 4..7, DO0..DO31
+```
+
+The detector-output channel is obtained from the existing TIMING `eo2do` mapping with:
+
+```text
+EO channel = pixel + 4 * column
+DO channel = eo2do[EO channel]
+```
+
+If a frame contains more than one hit for the same TIMING DO channel, the earliest calibrated `timing_time` is used for that channel. If any of the 64 channels are missing, the frame is marked with:
+
+```text
+timing_valid = 0
+```
+
+and the estimator output values are stored as `NaN`. This prevents incomplete frames from being silently converted into artificial timing measurements.
+
 ## Model Conversion
 
 The Python estimator has two model families.

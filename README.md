@@ -39,6 +39,7 @@ sorter
 after-pulse-suppressor
 merger
 trigger
+timing
 ```
 
 
@@ -70,6 +71,7 @@ Downstream workflows read the decoded ROOT files from the `decoded/` directory. 
 - `after-pulse-suppressor`: suppresses close repeated ALCOR hits per channel.
 - `merger`: merges sorted lane/device streams while preserving spill boundaries and writes spill participation metadata.
 - `trigger`: creates triggered frame trees using declarative trigger configurations and propagates spill participation metadata.
+- `timing`: reads triggered frame trees and adds per-frame TIMING estimator branches.
 - `macros/lib/trigger_reader.h`: header-only helper for reading triggered frame output.
 
 Run `process/scripts/checker.sh` first when you want a non-destructive sanity pass over decoded per-FIFO files before launching calibration or full processing. The checker writes run-level `*.good-fifos.list` and `*.bad-fifos.list` diagnostic files that show which FIFOs are consistent with the run-level spill structure. Merged ROOT files contain the usual `alcor` tree plus a `spill_participation` tree with one entry per merged spill and the `(device,fifo)` sources that contributed to that spill.
