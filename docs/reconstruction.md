@@ -153,7 +153,7 @@ calibrator -> coordinator -> sorter -> after-pulse-suppressor
 
 in parallel within each device.
 
-`coordinator` is intentionally placed after `calibrator` and before `sorter`. The calibrated `time` branch and the spatial `x/y` branches are both per-hit enrichments of the original `alcor` stream. Running them before sorting keeps the later sorting, merging, and triggering stages focused on time ordering and event construction rather than detector geometry.
+`coordinator` is intentionally placed after `calibrator` and before `sorter`. The calibrated `time` branch and the spatial `x/y` branches are both per-hit enrichments of the original `alcor` stream. Running them before sorting keeps the later sorting, merging, and triggering stages focused on time ordering and event construction rather than detector geometry. When `trigger.sh` later builds triggered frames, `trigger.cc` copies `time`, `x`, and `y` into the split trigger/timing/Cherenkov frame collections.
 
 It then merges each device with `merger --split-spills`, producing device-level split-spill files:
 

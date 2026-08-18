@@ -15,7 +15,11 @@ struct data_t {
   int fine;
 
   double time = 0.;
+  double x = 0.;
+  double y = 0.;
   bool has_time = false;
+  bool has_x = false;
+  bool has_y = false;
 
   static const int rollover_to_clock = 32768;
 
@@ -31,6 +35,8 @@ struct data_t {
   {
     if (!t) return;
     has_time = false;
+    has_x = false;
+    has_y = false;
     t->SetBranchAddress("device", &device);
     t->SetBranchAddress("fifo", &fifo);
     t->SetBranchAddress("type", &type);
@@ -44,6 +50,14 @@ struct data_t {
     if (t->GetBranch("time")) {
       t->SetBranchAddress("time", &time);
       has_time = true;
+    }
+    if (t->GetBranch("x")) {
+      t->SetBranchAddress("x", &x);
+      has_x = true;
+    }
+    if (t->GetBranch("y")) {
+      t->SetBranchAddress("y", &y);
+      has_y = true;
     }
   }
 

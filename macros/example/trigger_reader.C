@@ -39,6 +39,8 @@ void trigger_reader(const char *filename = "frames.root")
                   << " column=" << hit.column
                   << " pixel=" << hit.pixel
                   << " time=" << hit.time
+                  << " x=" << hit.x
+                  << " y=" << hit.y
                   << std::endl;
         break;
       }

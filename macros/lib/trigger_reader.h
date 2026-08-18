@@ -28,6 +28,8 @@ struct hit_t {
   int coarse;
   int fine;
   double time;
+  double x;
+  double y;
 };
 
 class trigger_reader_t {
@@ -67,6 +69,8 @@ private:
     std::unique_ptr<TTreeReaderArray<int>> coarse;
     std::unique_ptr<TTreeReaderArray<int>> fine;
     std::unique_ptr<TTreeReaderArray<double>> time;
+    std::unique_ptr<TTreeReaderArray<double>> x;
+    std::unique_ptr<TTreeReaderArray<double>> y;
 
     void reset();
     bool bind(TTree *tree, TTreeReader &reader, const std::string &prefix);
@@ -132,6 +136,8 @@ trigger_reader_t::category_t::reset()
   coarse.reset();
   fine.reset();
   time.reset();
+  x.reset();
+  y.reset();
 }
 
 inline bool
@@ -154,7 +160,9 @@ trigger_reader_t::category_t::bind(TTree *tree, TTreeReader &reader,
     prefix + "_rollover",
     prefix + "_coarse",
     prefix + "_fine",
-    prefix + "_time"
+    prefix + "_time",
+    prefix + "_x",
+    prefix + "_y"
   };
 
   for (auto &name : names) {
@@ -176,6 +184,8 @@ trigger_reader_t::category_t::bind(TTree *tree, TTreeReader &reader,
   coarse.reset(new TTreeReaderArray<int>(reader, (prefix + "_coarse").c_str()));
   fine.reset(new TTreeReaderArray<int>(reader, (prefix + "_fine").c_str()));
   time.reset(new TTreeReaderArray<double>(reader, (prefix + "_time").c_str()));
+  x.reset(new TTreeReaderArray<double>(reader, (prefix + "_x").c_str()));
+  y.reset(new TTreeReaderArray<double>(reader, (prefix + "_y").c_str()));
 
   return true;
 }
@@ -220,6 +230,8 @@ trigger_reader_t::category_t::fill(std::vector<hit_t> &out, int iframe,
     hit.coarse = (*coarse)[i];
     hit.fine = (*fine)[i];
     hit.time = (*time)[i];
+    hit.x = (*x)[i];
+    hit.y = (*y)[i];
     out.push_back(hit);
   }
 
