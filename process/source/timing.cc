@@ -153,7 +153,7 @@ timing(const std::string &filename,
   }
 
   fout->cd();
-  auto tout = tin->CloneTree(0);
+  auto tout = tin->CloneTree(-1, "fast");
   if (!tout) {
     std::cerr << "ERROR: could not clone 'frames' tree" << std::endl;
     fout->Close();
@@ -169,13 +169,15 @@ timing(const std::string &filename,
   auto T = std::make_unique<double[]>(maxframes);
   auto sigmaT = std::make_unique<double[]>(maxframes);
 
-  tout->Branch("timing_valid", timing_valid.get(), "timing_valid[nframes]/I");
-  tout->Branch("T0", T0.get(), "T0[nframes]/D");
-  tout->Branch("sigma0", sigma0.get(), "sigma0[nframes]/D");
-  tout->Branch("T1", T1.get(), "T1[nframes]/D");
-  tout->Branch("sigma1", sigma1.get(), "sigma1[nframes]/D");
-  tout->Branch("T", T.get(), "T[nframes]/D");
-  tout->Branch("sigmaT", sigmaT.get(), "sigmaT[nframes]/D");
+  int nframes_out = 0;
+  tout->SetBranchAddress("nframes", &nframes_out);
+  auto b_timing_valid = tout->Branch("timing_valid", timing_valid.get(), "timing_valid[nframes]/I");
+  auto b_T0 = tout->Branch("T0", T0.get(), "T0[nframes]/D");
+  auto b_sigma0 = tout->Branch("sigma0", sigma0.get(), "sigma0[nframes]/D");
+  auto b_T1 = tout->Branch("T1", T1.get(), "T1[nframes]/D");
+  auto b_sigma1 = tout->Branch("sigma1", sigma1.get(), "sigma1[nframes]/D");
+  auto b_T = tout->Branch("T", T.get(), "T[nframes]/D");
+  auto b_sigmaT = tout->Branch("sigmaT", sigmaT.get(), "sigmaT[nframes]/D");
 
   TimingEstimator estimator;
   auto nan = std::numeric_limits<double>::quiet_NaN();
@@ -190,6 +192,7 @@ timing(const std::string &filename,
   auto entries = tin->GetEntries();
   while (reader.Next()) {
     ++nspills;
+    nframes_out = *nframes;
 
     if (*nframes < 0 || *nframes > maxframes) {
       std::cerr << "ERROR: invalid nframes=" << *nframes
@@ -286,7 +289,13 @@ timing(const std::string &filename,
       ++nframes_timed;
     }
 
-    tout->Fill();
+    b_timing_valid->Fill();
+    b_T0->Fill();
+    b_sigma0->Fill();
+    b_T1->Fill();
+    b_sigma1->Fill();
+    b_T->Fill();
+    b_sigmaT->Fill();
   }
 
   if (tout->GetEntries() != entries) {
@@ -295,6 +304,19 @@ timing(const std::string &filename,
     fout->Close();
     fin->Close();
     return false;
+  }
+
+  for (auto branch : {b_timing_valid, b_T0, b_sigma0, b_T1, b_sigma1, b_T, b_sigmaT}) {
+    if (branch->GetEntries() != entries) {
+      std::cerr << "ERROR: timing branch entry count mismatch: branch="
+                << branch->GetName()
+                << " entries=" << branch->GetEntries()
+                << " expected=" << entries
+                << std::endl;
+      fout->Close();
+      fin->Close();
+      return false;
+    }
   }
 
   if (!copy_tree_if_present(fin, fout, "spill_participation")) {
