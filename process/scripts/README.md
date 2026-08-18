@@ -295,8 +295,9 @@ The fallback values are global medians computed from measured rows with the same
 
 ```text
 calibrate each decoded FIFO file
-sort each calibrated FIFO file
-after-pulse suppress each sorted calibrated FIFO file
+assign coordinates to each calibrated FIFO file
+sort each coordinated/calibrated FIFO file
+after-pulse suppress each sorted coordinated/calibrated FIFO file
 merge lanes per device with --split-spills
 merge matching spills across devices
 ```
@@ -307,8 +308,9 @@ Per-FIFO intermediate data files use stage-preserving prefixes:
 
 ```text
 /data/2026-testbeam/process/<run>/<device>/process/calibrated.fifo_0.root
-/data/2026-testbeam/process/<run>/<device>/process/sorted.calibrated.fifo_0.root
-/data/2026-testbeam/process/<run>/<device>/process/aps.sorted.calibrated.fifo_0.root
+/data/2026-testbeam/process/<run>/<device>/process/coordinated.calibrated.fifo_0.root
+/data/2026-testbeam/process/<run>/<device>/process/sorted.coordinated.calibrated.fifo_0.root
+/data/2026-testbeam/process/<run>/<device>/process/aps.sorted.coordinated.calibrated.fifo_0.root
 ```
 
 Run:

@@ -17,7 +17,7 @@ Conceptually this expands to:
 raw per-FIFO data
   -> decoded ROOT files
   -> read-only sanity checks
-  -> clean / calibrate / sort / after-pulse suppress
+  -> clean / calibrate / coordinate / sort / after-pulse suppress
   -> device-level split-spill merge
   -> run-level split-spill merge
   -> trigger frame production
@@ -148,10 +148,12 @@ sipm4eic-testbeam2026-process/process/scripts/process.sh \
 For each decoded FIFO file, `process.sh` runs:
 
 ```text
-calibrator -> sorter -> after-pulse-suppressor
+calibrator -> coordinator -> sorter -> after-pulse-suppressor
 ```
 
 in parallel within each device.
+
+`coordinator` is intentionally placed after `calibrator` and before `sorter`. The calibrated `time` branch and the spatial `x/y` branches are both per-hit enrichments of the original `alcor` stream. Running them before sorting keeps the later sorting, merging, and triggering stages focused on time ordering and event construction rather than detector geometry.
 
 It then merges each device with `merger --split-spills`, producing device-level split-spill files:
 

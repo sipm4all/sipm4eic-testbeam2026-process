@@ -11,6 +11,7 @@ raw per-FIFO DAT file
   -> optional checker
   -> cleaner
   -> calibrator
+  -> coordinator
   -> sorter
   -> after-pulse-suppressor
   -> merger
@@ -45,6 +46,8 @@ config/trigger/         trigger-definition files
 ```
 
 The `cleaner` stage removes malformed stream words before calibration, currently ALCOR hits with invalid `fifo`/`column` combinations. The key design point is that low-level timing calibration happens once, early, in `calibrator`. Downstream tools prefer the calibrated `time` branch when present and only use the old nominal timing expression for legacy uncalibrated files.
+
+`coordinator` is the analogous geometry stage. It preserves the `alcor` tree and adds spatial `x` and `y` branches for ALCOR hits. TIMING hits from device 200 use the TIMING `eo2do` mapping and a 3.5 mm pitch. Cherenkov hits use the TESTBEAM2026 PDU/matrix mapping inherited from the analysis `mapping.h` logic.
 
 The optional `checker` program scans decoded per-FIFO files before processing and writes ASCII `.check` reports with word counts and spill-counter consistency checks. It is read-only with respect to ROOT data products, but it also writes run-level `*.good-fifos.list` and `*.bad-fifos.list` diagnostic files that show which FIFOs are consistent with the run-level spill structure.
 

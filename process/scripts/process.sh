@@ -9,6 +9,7 @@ ipath="/data/2026-testbeam/process"
 opath="/data/2026-testbeam/process"
 
 CALIBRATOR="${ROOT_DIR}/process/bin/calibrator"
+COORDINATOR="${ROOT_DIR}/process/bin/coordinator"
 SORTER="${ROOT_DIR}/process/bin/sorter"
 APS="${ROOT_DIR}/process/bin/after-pulse-suppressor"
 MERGER="${ROOT_DIR}/process/bin/merger"
@@ -268,41 +269,45 @@ for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do
         fifo_id=${fname#alcdaq.fifo_}; fifo_id=${fifo_id%.root}
         [[ "${fifo_id}" =~ ^[0-9]+$ ]] || fail "could not extract numeric FIFO id from ${fname}"
 
-        ### calibrate, sort and AP suppress
+        ### calibrate, assign coordinates, sort and AP suppress
         run_job "${odpath}/aps.sorted.${fifo}.log" bash -c '
             set -euo pipefail
 
             calibrator=$1
-            sorter=$2
-            aps=$3
-            input=$4
-            calibrated=$5
-            sorted=$6
-            output=$7
-            calibration_config=$8
-            sort_window=$9
-            aps_window=${10}
-            overwrite=${11}
+            coordinator=$2
+            sorter=$3
+            aps=$4
+            input=$5
+            calibrated=$6
+            coordinated=$7
+            sorted=$8
+            output=$9
+            calibration_config=${10}
+            sort_window=${11}
+            aps_window=${12}
+            overwrite=${13}
 
             if [ "${overwrite}" -ne 1 ] && [ -f "${output}" ]; then
                 echo " --- output exists, skipping FIFO processing: ${output}"
                 exit 0
             fi
 
-            if [ "${overwrite}" -ne 1 ] && { [ -f "${calibrated}" ] || [ -f "${sorted}" ]; }; then
-                echo " --- intermediate output exists, skipping FIFO processing: ${calibrated} ${sorted}"
+            if [ "${overwrite}" -ne 1 ] && { [ -f "${calibrated}" ] || [ -f "${coordinated}" ] || [ -f "${sorted}" ]; }; then
+                echo " --- intermediate output exists, skipping FIFO processing: ${calibrated} ${coordinated} ${sorted}"
                 exit 0
             fi
 
             "${calibrator}" --input "${input}" --output "${calibrated}" --config "${calibration_config}"
-            "${sorter}" --input "${calibrated}" --output "${sorted}" --window "${sort_window}"
+            "${coordinator}" --input "${calibrated}" --output "${coordinated}"
+            "${sorter}" --input "${coordinated}" --output "${sorted}" --window "${sort_window}"
             "${aps}" --input "${sorted}" --output "${output}" --window "${aps_window}"
-            rm -f "${calibrated}" "${sorted}"
-        ' _ "${CALIBRATOR}" "${SORTER}" "${APS}" \
+            rm -f "${calibrated}" "${coordinated}" "${sorted}"
+        ' _ "${CALIBRATOR}" "${COORDINATOR}" "${SORTER}" "${APS}" \
             "${fpath}" \
             "${odpath}/calibrated.${fifo}.root" \
-            "${odpath}/sorted.calibrated.${fifo}.root" \
-            "${odpath}/aps.sorted.calibrated.${fifo}.root" \
+            "${odpath}/coordinated.calibrated.${fifo}.root" \
+            "${odpath}/sorted.coordinated.calibrated.${fifo}.root" \
+            "${odpath}/aps.sorted.coordinated.calibrated.${fifo}.root" \
             "${CALIBRATION_CONFIG}" \
             "${SORT_WINDOW}" \
             "${APS_WINDOW}" \
@@ -323,7 +328,7 @@ for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do
         fifo=${fname#alcdaq.}; fifo=${fifo%.root}
         fifo_id=${fname#alcdaq.fifo_}; fifo_id=${fifo_id%.root}
         [[ "${fifo_id}" =~ ^[0-9]+$ ]] || fail "could not extract numeric FIFO id from ${fname}"
-        aps_file="${odpath}/aps.sorted.calibrated.${fifo}.root"
+        aps_file="${odpath}/aps.sorted.coordinated.calibrated.${fifo}.root"
         if [ -f "${aps_file}" ]; then
             aps_files+=("${aps_file}")
         fi

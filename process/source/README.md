@@ -148,6 +148,58 @@ For trigger tags:
 time = coarse + 32768 * rollover - trigger_offset
 ```
 
+### coordinator
+
+Creates or updates spatial coordinate branches in the `alcor` tree:
+
+```bash
+process/bin/coordinator \
+  --input calibrated.root \
+  --output coordinated.root
+```
+
+The program preserves the input tree entry order and writes exactly one output entry per input entry. It adds or recalculates:
+
+```text
+x
+y
+```
+
+For ALCOR hits with `device == 200`, the coordinates are TIMING scintillator coordinates. The electronics channel is:
+
+```cpp
+eoch = pixel + 4 * column
+```
+
+and is converted to detector-output channel with the TIMING `eo2do` table. The TIMING pitch is:
+
+```text
+3.5 mm
+```
+
+so:
+
+```cpp
+x = 3.5 * (DO % 4)
+y = 3.5 * (DO / 4)
+```
+
+For ALCOR hits with `device != 200`, the coordinates use the TESTBEAM2026 Cherenkov mapping from the legacy `mapping.h` logic:
+
+```text
+device, fifo -> chip -> PDU/matrix
+column, pixel -> electronics-oriented channel
+matrix mapping -> detector channel
+detector channel -> global x/y
+```
+
+Control words and trigger tags are preserved with:
+
+```text
+x = 0
+y = 0
+```
+
 ### sorter
 
 Sorts one already decoded/calibrated single-lane ROOT file by `data.time` within spill boundaries:
@@ -202,3 +254,4 @@ The persistent output tree is named `frames`. Each stored hit includes the origi
 
 - `data_word.h`: common `data_t` representation for the `alcor` tree, optional calibrated time binding, and word-type helpers.
 - `calibration.h`: parser and cached lookup API for timing calibration files.
+- `geometry.h`: TESTBEAM2026 spatial mapping helpers used by `coordinator`.

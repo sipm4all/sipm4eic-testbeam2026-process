@@ -3,7 +3,7 @@
 This repository contains ROOT-based tools for processing SiPM4EIC 2026 test-beam data after decoding. The processing chain is organized as:
 
 ```text
-raw decode -> optional check -> clean -> calibrate -> sort -> merge -> trigger/frame -> analysis macros
+raw decode -> optional check -> clean -> calibrate -> coordinate -> sort -> merge -> trigger/frame -> analysis macros
 ```
 
 The repository is intentionally split between compiled processing programs and ROOT analysis macros:
@@ -34,6 +34,7 @@ dcalib
 cleaner
 checker
 calibrator
+coordinator
 sorter
 after-pulse-suppressor
 merger
@@ -64,6 +65,7 @@ Downstream workflows read the decoded ROOT files from the `decoded/` directory. 
 - `cleaner`: clones the `alcor` tree while dropping malformed ALCOR hits, currently invalid `fifo`/`column` combinations.
 - `checker`: scans a per-FIFO `alcor` tree and writes an ASCII `.check` sanity report.
 - `calibrator`: creates or updates the calibrated `time` branch in the decoded `alcor` tree.
+- `coordinator`: creates or updates the spatial `x` and `y` branches in the calibrated `alcor` tree.
 - `sorter`: sorts each single-lane stream in calibrated time.
 - `after-pulse-suppressor`: suppresses close repeated ALCOR hits per channel.
 - `merger`: merges sorted lane/device streams while preserving spill boundaries and writes spill participation metadata.
