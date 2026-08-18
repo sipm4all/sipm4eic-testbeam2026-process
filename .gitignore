@@ -2,6 +2,8 @@
 build/
 process/build/
 process/bin/
+process/include/
+process/lib/
 
 # Local compiled binaries if built in source directories
 /process/source/calibrator
