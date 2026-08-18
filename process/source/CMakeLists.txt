@@ -25,6 +25,13 @@ execute_process(
 separate_arguments(ROOT_CFLAGS_LIST UNIX_COMMAND "${ROOT_CFLAGS}")
 separate_arguments(ROOT_LIBS_LIST UNIX_COMMAND "${ROOT_LIBS}")
 
+add_library(timing_estimator SHARED
+  timing/src/TimingEstimator.cxx
+)
+target_include_directories(timing_estimator PUBLIC
+  ${CMAKE_CURRENT_LIST_DIR}/timing/include
+)
+
 add_executable(decoder decoder.cc)
 add_executable(dcalib dcalib.cc)
 add_executable(calibrator calibrator.cc)
@@ -35,6 +42,11 @@ add_executable(sorter sorter.cc)
 add_executable(after-pulse-suppressor after-pulse-suppressor.cc)
 add_executable(merger merger.cc)
 add_executable(trigger trigger.cc)
+add_executable(validate_timing_estimator timing/test/validate_timing_estimator.cc)
+target_include_directories(validate_timing_estimator PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}/timing/include
+)
+target_link_libraries(validate_timing_estimator PRIVATE timing_estimator)
 
 foreach(target decoder dcalib calibrator coordinator cleaner checker sorter after-pulse-suppressor merger trigger)
   target_compile_options(${target} PRIVATE ${ROOT_CFLAGS_LIST})
@@ -42,6 +54,7 @@ foreach(target decoder dcalib calibrator coordinator cleaner checker sorter afte
 endforeach()
 
 install(TARGETS
+  timing_estimator
   decoder
   dcalib
   calibrator
@@ -52,5 +65,13 @@ install(TARGETS
   after-pulse-suppressor
   merger
   trigger
+  validate_timing_estimator
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
+)
+
+install(FILES
+  timing/include/TimingEstimator.h
+  DESTINATION include
 )

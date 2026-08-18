@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "input": {
+    "n_values": 64,
+    "timing0_columns": [
+      0,
+      31
+    ],
+    "timing1_columns": [
+      32,
+      63
+    ],
+    "calibration_convention": "calibrated_time = hit.time - offset_860",
+    "native_time_unit_ns": 3.125,
+    "native_time_unit_ps": 3125.0,
+    "requires_channel_order": true
+  },
+  "feature_definition": {
+    "anchor": "mean of 10 earliest channel times in that scintillator",
+    "model_A": "62 raw translation-invariant features: 32 relative channels + first 24 sorted relative times + 6 order-statistic summaries",
+    "model_B_and_sigma": "52 features: 32 relative channels + first 20 sorted relative times, standardized with per-detector training scaler"
+  },
+  "time_model": {
+    "type": "blend of two independent per-scintillator HistGradientBoostingRegressor backfit estimators",
+    "ensemble_blend_model_A": 0.65,
+    "ensemble_blend_model_B": 0.35,
+    "translation_equivariant": true,
+    "formula_timing0": "T0 = B0 - [a*p0_A + (1-a)*p0_B]",
+    "formula_timing1": "T1 = B1 + [a*p1_A + (1-a)*p1_B]"
+  },
+  "sigma_model": {
+    "variance_calibration_scale": 1.0084866285324097,
+    "sigma_event_formula": "sqrt(sigma0^2 + sigma1^2) / 2",
+    "note": "Individual global sigma0/sigma1 normalization is not uniquely identifiable from DeltaT alone; training used a neutral gauge convention. Their quadrature combination is calibrated against DeltaT."
+  }
+}

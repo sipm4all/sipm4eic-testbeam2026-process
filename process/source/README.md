@@ -255,3 +255,13 @@ The persistent output tree is named `frames`. Each stored hit includes the origi
 - `data_word.h`: common `data_t` representation for the `alcor` tree, optional calibrated time binding, and word-type helpers.
 - `calibration.h`: parser and cached lookup API for timing calibration files.
 - `geometry.h`: TESTBEAM2026 spatial mapping helpers used by `coordinator`.
+
+## TIMING Estimator
+
+The self-contained trained TIMING event estimator lives under:
+
+```text
+timing/
+```
+
+It provides the native C++ `TimingEstimator` API and keeps the original Python package as the validation reference. See `timing/README.md` for the input order, calibration convention, model conversion details, and validation procedure.
