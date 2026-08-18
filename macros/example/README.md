@@ -84,6 +84,169 @@ void timing(const char *filename,
 
 The macro uses the calibrated `hit.time` value persisted in the triggered frame file. It does not recompute nominal time from `coarse`, `rollover`, and `fine`.
 
+## timing_pairs.C
+
+Writes one delta-t histogram for every independent pair of DO channels inside each TIMING scintillator. It reads only the triggered-frame `timing` collection and uses the calibrated `hit.time` value stored in the file.
+
+For every frame, the macro keeps the earliest hit in each DO channel. It then fills:
+
+```cpp
+deltat = time_A - time_B
+```
+
+for all independent pairs `A < B` among the 32 DO channels, separately for:
+
+```text
+TIMING0: FIFOs 0..3
+TIMING1: FIFOs 4..7
+```
+
+The electronics channel is:
+
+```cpp
+eoch = pixel + 4 * column
+```
+
+and it is converted to detector-output channel with:
+
+```cpp
+eo2do[32] = {22,20,18,16,24,26,28,30,25,27,29,31,23,21,19,17,
+             9,11,13,15,7,5,3,1,6,4,2,0,8,10,12,14}
+```
+
+Histograms are named:
+
+```text
+deltat_A_B_timingC
+```
+
+where `A` and `B` are two-digit DO channel numbers and `C` is `0` or `1`, for example:
+
+```text
+deltat_00_01_timing0
+deltat_12_27_timing1
+```
+
+Example:
+
+```bash
+root -l 'macros/example/timing_pairs.C("triggered.timing.root")'
+```
+
+or interactively:
+
+```cpp
+.L macros/example/timing_pairs.C
+timing_pairs("triggered.timing.root", "timing_pairs.root")
+```
+
+Arguments:
+
+```cpp
+void timing_pairs(const char *filename,
+                  const char *outfilename = "timing_pairs.root",
+                  int nbins = 2048,
+                  double range = 32.)
+```
+
+## timing_event_display.C
+
+Interactive event display for the TIMING scintillators. It reads triggered-frame data with `trigger_reader.h`, applies a `[CHANNEL]` timing-offset file such as the Cherenkov-860 calibration, and draws one frame at a time as two 4 by 8 DO-channel maps plus the corresponding per-scintillator time distributions:
+
+```text
+TIMING0: FIFOs 0..3
+TIMING1: FIFOs 4..7
+```
+
+The macro keeps the earliest hit per DO channel. By default it plots:
+
+```text
+calibrated_time - earliest_calibrated_TIMING_time_in_frame
+```
+
+so the color scale shows the event time pattern rather than the large absolute clock. The absolute reference time is printed in the terminal.
+
+Run interactively from a directory containing the calibration file:
+
+```cpp
+.L macros/example/timing_event_display.C
+timing_event_display("triggered.timing.root",
+                     "timing_offsets_from_cherenkov860.conf")
+```
+
+Press Enter to move to the next event, or type `q` then Enter to stop.
+
+Arguments:
+
+```cpp
+void timing_event_display(const char *filename,
+                          const char *calibfilename = "timing_offsets_from_cherenkov860.conf",
+                          int first_event = 0,
+                          int max_events = 0,
+                          bool relative_time = true,
+                          bool require_trigger = false)
+```
+
+## timing0_minuit.C
+
+Fits a diagnostic set of TIMING0 channel offsets using only relative time differences between neighbouring DO channels. The macro is intentionally limited to TIMING0 while we study whether local channel-to-channel constraints are a better calibration handle than global scintillator means.
+
+For every frame, it keeps the earliest hit in each TIMING0 electronics channel:
+
+```cpp
+eoch = pixel + 4 * column
+```
+
+The electronics channel is converted to DO channel using the same `eo2do` table as `timing_pairs.C`. DO channel coordinates are:
+
+```cpp
+x = DO % 4
+y = DO / 4
+```
+
+The fit uses all channel pairs whose Manhattan distance in this DO grid is at most one:
+
+```cpp
+abs(xA - xB) + abs(yA - yB) <= 1
+```
+
+For each selected pair, the residual entering the `TMinuit` objective is:
+
+```cpp
+dt_corrected =
+    (timeA - offsetA)
+  - (timeB - offsetB)
+```
+
+and the minimized objective is the mean of `dt_corrected^2` over all selected neighbour-pair entries. There are 32 electronics-channel offsets, with `EOCH 0` fixed to zero.
+
+Example:
+
+```bash
+root -l 'macros/example/timing0_minuit.C("triggered.timing.root")'
+```
+
+or interactively:
+
+```cpp
+.L macros/example/timing0_minuit.C
+timing0_minuit("triggered.timing.root",
+               "timing0_minuit.root",
+               "timing0_offsets.conf")
+```
+
+Arguments:
+
+```cpp
+void timing0_minuit(const char *filename,
+                    const char *outfilename = "timing0_minuit.root",
+                    const char *calibfilename = "timing0_offsets.conf",
+                    int max_calls = 5000,
+                    double delta_range = 32.)
+```
+
+The ROOT output contains summary histograms `hDeltaBefore`, `hDeltaAfter`, `hOffsetEo`, `hOffsetDo`, `hPairCountDo`, plus before/after histograms for every fitted neighbouring DO pair. The optional text output is a `[CHANNEL]` calibration snippet for TIMING0 FIFOs 0..3.
+
 ## timing_calib.C
 
 Only frames containing at least one `trigger` hit are used. Frames without a trigger hit are counted and skipped before timing-channel selection.

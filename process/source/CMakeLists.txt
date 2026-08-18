@@ -32,13 +32,16 @@ add_executable(after-pulse-suppressor after-pulse-suppressor.cc)
 add_executable(merger merger.cc)
 add_executable(trigger trigger.cc)
 add_executable(timing_calib timing_calib.cc)
+add_executable(timing_propagation_calib timing_propagation_calib.cc)
+add_executable(timing_position_fit timing_position_fit.cc)
 
-foreach(target dcalib calibrator sorter after-pulse-suppressor merger trigger timing_calib)
+foreach(target dcalib calibrator sorter after-pulse-suppressor merger trigger timing_calib timing_propagation_calib timing_position_fit)
   target_compile_options(${target} PRIVATE ${ROOT_CFLAGS_LIST})
   target_link_libraries(${target} PRIVATE ${ROOT_LIBS_LIST} Boost::program_options)
 endforeach()
 
 target_link_libraries(timing_calib PRIVATE Minuit)
+target_link_libraries(timing_propagation_calib PRIVATE Minuit)
 
 install(TARGETS
   dcalib
@@ -48,5 +51,12 @@ install(TARGETS
   merger
   trigger
   timing_calib
+  timing_propagation_calib
+  timing_position_fit
   RUNTIME DESTINATION bin
+)
+
+install(PROGRAMS
+  timing_ml.py
+  DESTINATION bin
 )
