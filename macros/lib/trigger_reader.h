@@ -8,6 +8,7 @@
 
 #include <iostream>
 #include <memory>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -45,6 +46,14 @@ public:
   int frame_index() const;
   int nframes() const;
   int nsources() const;
+  bool has_timing() const;
+  int timing_valid() const;
+  double T0() const;
+  double sigma0() const;
+  double T1() const;
+  double sigma1() const;
+  double T() const;
+  double sigmaT() const;
 
   // Source and hit vectors describe the current spill/frame and remain valid
   // until open(), next_spill(), or next_frame() is called again.
@@ -92,6 +101,13 @@ private:
   std::unique_ptr<TTreeReaderValue<int>> meta_nsources_branch_;
   std::unique_ptr<TTreeReaderArray<int>> meta_source_device_branch_;
   std::unique_ptr<TTreeReaderArray<int>> meta_source_fifo_branch_;
+  std::unique_ptr<TTreeReaderArray<int>> timing_valid_branch_;
+  std::unique_ptr<TTreeReaderArray<double>> T0_branch_;
+  std::unique_ptr<TTreeReaderArray<double>> sigma0_branch_;
+  std::unique_ptr<TTreeReaderArray<double>> T1_branch_;
+  std::unique_ptr<TTreeReaderArray<double>> sigma1_branch_;
+  std::unique_ptr<TTreeReaderArray<double>> T_branch_;
+  std::unique_ptr<TTreeReaderArray<double>> sigmaT_branch_;
 
   category_t trigger_;
   category_t timing_;
@@ -102,6 +118,7 @@ private:
   int spill_id_ = 0;
   int nframes_ = 0;
   int frame_index_ = -1;
+  bool has_timing_ = false;
 
   std::vector<source_t> sources_;
   std::vector<hit_t> trigger_hits_;
@@ -256,6 +273,13 @@ trigger_reader_t::reset()
   meta_nsources_branch_.reset();
   meta_source_device_branch_.reset();
   meta_source_fifo_branch_.reset();
+  timing_valid_branch_.reset();
+  T0_branch_.reset();
+  sigma0_branch_.reset();
+  T1_branch_.reset();
+  sigma1_branch_.reset();
+  T_branch_.reset();
+  sigmaT_branch_.reset();
   meta_reader_.reset();
   reader_.reset();
   meta_tree_ = nullptr;
@@ -267,6 +291,7 @@ trigger_reader_t::reset()
   spill_id_ = 0;
   nframes_ = 0;
   frame_index_ = -1;
+  has_timing_ = false;
 }
 
 inline bool
@@ -302,6 +327,25 @@ trigger_reader_t::open(const std::string &filename)
       !cherenkov_.bind(tree_, *reader_, "cherenkov")) {
     reset();
     return false;
+  }
+
+  has_timing_ =
+    tree_->GetBranch("timing_valid") &&
+    tree_->GetBranch("T0") &&
+    tree_->GetBranch("sigma0") &&
+    tree_->GetBranch("T1") &&
+    tree_->GetBranch("sigma1") &&
+    tree_->GetBranch("T") &&
+    tree_->GetBranch("sigmaT");
+
+  if (has_timing_) {
+    timing_valid_branch_.reset(new TTreeReaderArray<int>(*reader_, "timing_valid"));
+    T0_branch_.reset(new TTreeReaderArray<double>(*reader_, "T0"));
+    sigma0_branch_.reset(new TTreeReaderArray<double>(*reader_, "sigma0"));
+    T1_branch_.reset(new TTreeReaderArray<double>(*reader_, "T1"));
+    sigma1_branch_.reset(new TTreeReaderArray<double>(*reader_, "sigma1"));
+    T_branch_.reset(new TTreeReaderArray<double>(*reader_, "T"));
+    sigmaT_branch_.reset(new TTreeReaderArray<double>(*reader_, "sigmaT"));
   }
 
   meta_tree_ = (TTree *)file_->Get("spill_participation");
@@ -431,6 +475,68 @@ inline int
 trigger_reader_t::nsources() const
 {
   return (int)sources_.size();
+}
+
+inline bool
+trigger_reader_t::has_timing() const
+{
+  return has_timing_;
+}
+
+inline int
+trigger_reader_t::timing_valid() const
+{
+  if (!has_timing_ || frame_index_ < 0)
+    return 0;
+  return (*timing_valid_branch_)[frame_index_];
+}
+
+inline double
+trigger_reader_t::T0() const
+{
+  if (!has_timing_ || frame_index_ < 0)
+    return std::numeric_limits<double>::quiet_NaN();
+  return (*T0_branch_)[frame_index_];
+}
+
+inline double
+trigger_reader_t::sigma0() const
+{
+  if (!has_timing_ || frame_index_ < 0)
+    return std::numeric_limits<double>::quiet_NaN();
+  return (*sigma0_branch_)[frame_index_];
+}
+
+inline double
+trigger_reader_t::T1() const
+{
+  if (!has_timing_ || frame_index_ < 0)
+    return std::numeric_limits<double>::quiet_NaN();
+  return (*T1_branch_)[frame_index_];
+}
+
+inline double
+trigger_reader_t::sigma1() const
+{
+  if (!has_timing_ || frame_index_ < 0)
+    return std::numeric_limits<double>::quiet_NaN();
+  return (*sigma1_branch_)[frame_index_];
+}
+
+inline double
+trigger_reader_t::T() const
+{
+  if (!has_timing_ || frame_index_ < 0)
+    return std::numeric_limits<double>::quiet_NaN();
+  return (*T_branch_)[frame_index_];
+}
+
+inline double
+trigger_reader_t::sigmaT() const
+{
+  if (!has_timing_ || frame_index_ < 0)
+    return std::numeric_limits<double>::quiet_NaN();
+  return (*sigmaT_branch_)[frame_index_];
 }
 
 inline const std::vector<source_t> &

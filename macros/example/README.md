@@ -12,6 +12,86 @@ root -l 'macros/example/trigger_reader.C("frames.root")'
 
 It iterates over spills and frames and prints the number of trigger, timing, and Cherenkov hits in each frame.
 
+## display.C
+
+Interactive Cherenkov event display for triggered frames. It draws one frame at a time using the stored hit `x/y` positions and one square per channel, rather than a regular `TH2D` bin grid. This is important because the channel centres are not assumed to lie on a perfectly regular ROOT histogram grid.
+
+Run:
+
+```bash
+root -l 'macros/example/display.C("triggered.root")'
+```
+
+It displays only Cherenkov hits. The drawn square size defaults to 3.2 mm and can be changed with the optional `pixel_size` argument. The display axes are fixed to:
+
+```text
+x = [-100, 100] mm
+y = [-100, 100] mm
+```
+
+The colour of each square is:
+
+```text
+hit.time - minimum hit.time in the displayed frame
+```
+
+so very large absolute calibrated times do not dominate the colour scale. Press Enter to advance to the next frame, or `q` then Enter to quit.
+
+The colour reference can also be selected explicitly, using the same selector style as `deltat.C`. For example, subtract the trigger tag time from device 200:
+
+```cpp
+display("triggered.root", channel_selector_t(9, 200));
+```
+
+For hit selectors, the first matching hit in the current frame is used as the reference, scanning trigger, then timing, then Cherenkov hits.
+
+or subtract a fully specified hit:
+
+```cpp
+display("triggered.root", field_selector_t(9, 200, 32, -1, -1));
+```
+
+For files augmented by `process/bin/timing`, the display can subtract the trained TIMING estimator:
+
+```cpp
+display("triggered.timing.root", timing_selection_t("T"));
+```
+
+Valid timing selections are `"T"`, `"T0"`, and `"T1"`.
+
+A specific frame can be drawn directly:
+
+```cpp
+display("triggered.root", spill_id, frame_index);
+display("triggered.root", spill_id, frame_index, channel_selector_t(9, 200));
+display("triggered.timing.root", spill_id, frame_index, timing_selection_t("T"));
+```
+
+## xymap.C
+
+Integrated Cherenkov occupancy map for triggered frames. It loops over all available frames, counts entries per physical channel using the stored `x/y` positions, and draws one square per channel. The drawn square size defaults to 3.2 mm and can be changed with the optional `pixel_size` argument. The display axes are fixed to:
+
+```text
+x = [-100, 100] mm
+y = [-100, 100] mm
+```
+
+The colour is:
+
+```text
+entries in channel / maximum entries in any displayed channel
+```
+
+The function is named `draw_map` because a global ROOT macro function named `map` collides with C++ standard-library names in interactive ROOT.
+
+Run:
+
+```bash
+root -l -b -q -e '.L macros/example/xymap.C' -e 'draw_map("triggered.root", "xymap.root")'
+```
+
+The output ROOT file contains the canvas `cMap` and axis object `hMapAxis`.
+
 ## deltat.C
 
 Reads the triggered-frame `frames` tree and fills 2D delta-t histograms using hits contained in each stored frame. Selector values of `-1` are wildcards. All delta-t histograms use 2048 bins over `[-32, 32]`.
