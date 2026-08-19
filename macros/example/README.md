@@ -196,7 +196,7 @@ deltat("triggered.timing.timing.root",
        "deltat.ring.root");
 ```
 
-The `ring_selection_t` arguments are minimum inliers, maximum inliers, RANSAC iterations, radial tolerance in mm, minimum radius, and maximum radius. A frame is accepted only when the fitted ring has an inlier count within the inclusive minimum/maximum range. Ring selection requires `cherenkov_x` and `cherenkov_y` branches, normally added by `coordinator`. The default overload remains unchanged and does not apply ring selection. Ring diagnostics are written as `hRingRadius` and `hRingInliers`.
+The `ring_selection_t` arguments are minimum inliers, maximum inliers, RANSAC iterations, radial tolerance in mm, minimum radius, and maximum radius. A frame is accepted only when the fitted ring has an inlier count within the inclusive minimum/maximum range. Ring selection requires `cherenkov_x` and `cherenkov_y` branches, normally added by `coordinator`. The default overload remains unchanged and does not apply ring selection. Ring diagnostics are written as `hRingRadius`, `hRingInliers`, and `hRingResidual`. The latter plots the exact selection variable `abs(distance(hit, fitted_center) - fitted_radius)`; hits at or below the configured tolerance are ring-compatible.
 
 The old positional target/reference form remains available as a wrapper:
 

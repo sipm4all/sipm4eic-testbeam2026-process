@@ -306,14 +306,19 @@ struct ring_t {
   double y = 0.;
   double radius = 0.;
   int inliers = 0;
-  double residual = std::numeric_limits<double>::infinity();
+  double residual_sum = std::numeric_limits<double>::infinity();
   bool valid = false;
 
   bool contains(double px, double py, double tolerance) const
   {
     if (!valid)
       return false;
-    return std::abs(std::hypot(px - x, py - y) - radius) <= tolerance;
+    return residual(px, py) <= tolerance;
+  }
+
+  double residual(double px, double py) const
+  {
+    return std::abs(std::hypot(px - x, py - y) - radius);
   }
 };
 
@@ -391,9 +396,9 @@ fit_ring(const category_reader_t &cherenkov,
     }
 
     if (inliers > best.inliers ||
-        (inliers == best.inliers && residual < best.residual)) {
+        (inliers == best.inliers && residual < best.residual_sum)) {
       candidate.inliers = inliers;
-      candidate.residual = residual;
+      candidate.residual_sum = residual;
       best = candidate;
     }
   }
@@ -590,6 +595,7 @@ deltat_timing_reference_impl(const std::string filename,
 
   auto scan = [&](TH2D *hist, TH2D **hist_tdc, TH2D *hist_spill,
                   TH1D *hist_ring_radius, TH1D *hist_ring_inliers,
+                  TH1D *hist_ring_residual,
                   int &nframes_used, int &nfills, int &nring_frames) {
     TTreeReader reader(tin);
     TTreeReaderValue<int> spill_id(reader, "id");
@@ -622,6 +628,17 @@ deltat_timing_reference_impl(const std::string filename,
             hist_ring_radius->Fill(ring.radius);
           if (hist_ring_inliers)
             hist_ring_inliers->Fill(ring.inliers);
+          if (hist_ring_residual) {
+            int ring_first = (*cherenkov.frame_start)[iframe];
+            int ring_nhits = (*cherenkov.frame_nhits)[iframe];
+            for (int ihit = 0; ihit < ring_nhits; ++ihit) {
+              int index = ring_first + ihit;
+              if (std::isfinite(cherenkov.hit_x(index)) &&
+                  std::isfinite(cherenkov.hit_y(index)))
+                hist_ring_residual->Fill(ring.residual(cherenkov.hit_x(index),
+                                                        cherenkov.hit_y(index)));
+            }
+          }
         }
 
         std::vector<hit_ref_t> targets;
@@ -675,11 +692,17 @@ deltat_timing_reference_impl(const std::string filename,
 
   TH1D *hRingRadius = nullptr;
   TH1D *hRingInliers = nullptr;
+  TH1D *hRingResidual = nullptr;
   if (ring_selection) {
     hRingRadius = new TH1D("hRingRadius", "RANSAC ring radius;radius [mm];frames",
                            200, ring_selection->min_radius, ring_selection->max_radius);
     hRingInliers = new TH1D("hRingInliers", "RANSAC ring inliers;inlier hits;frames",
                             256, -0.5, 255.5);
+    double residual_max = std::max(20., 4. * ring_selection->tolerance);
+    hRingResidual = new TH1D("hRingResidual",
+                             Form("RANSAC radial residual (selection <= %.3g mm);residual [mm];hits",
+                                  ring_selection->tolerance),
+                             200, 0., residual_max);
   }
 
   TH2D *hDeltaT_tdc[4] = {nullptr, nullptr, nullptr, nullptr};
@@ -689,7 +712,7 @@ deltat_timing_reference_impl(const std::string filename,
   int nframes_used = 0;
   int nfills = 0;
   int nring_frames = 0;
-  scan(hDeltaT, hDeltaT_tdc, hDeltaT_spill, hRingRadius, hRingInliers,
+  scan(hDeltaT, hDeltaT_tdc, hDeltaT_spill, hRingRadius, hRingInliers, hRingResidual,
        nframes_used, nfills, nring_frames);
 
   if (nframes_used == 0)
@@ -721,6 +744,8 @@ deltat_timing_reference_impl(const std::string filename,
     hRingRadius->Write();
   if (hRingInliers)
     hRingInliers->Write();
+  if (hRingResidual)
+    hRingResidual->Write();
 
   fout->Close();
   fin->Close();
