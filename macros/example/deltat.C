@@ -596,7 +596,10 @@ deltat_timing_reference_impl(const std::string filename,
   auto scan = [&](TH2D *hist, TH2D **hist_tdc, TH2D *hist_spill,
                   TH1D *hist_ring_radius, TH1D *hist_ring_inliers,
                   TH1D *hist_ring_residual,
-                  int &nframes_used, int &nfills, int &nring_frames) {
+                  int &nframes_used, int &nfills, int &nring_frames,
+                  long long &nring_target_candidates,
+                  long long &nring_target_selected,
+                  long long &nring_target_rejected) {
     TTreeReader reader(tin);
     TTreeReaderValue<int> spill_id(reader, "id");
     TTreeReaderValue<int> nframes(reader, "nframes");
@@ -647,11 +650,21 @@ deltat_timing_reference_impl(const std::string filename,
           int nhits = (*cat->frame_nhits)[iframe];
           for (int ihit = 0; ihit < nhits; ++ihit) {
             int i = first + ihit;
-            if (cat->match(i, target_selector) &&
-                (!ring_selection ||
-                 (cat == &cherenkov && ring.contains(cat->hit_x(i), cat->hit_y(i),
-                                                     ring_selection->tolerance))))
-              targets.push_back({cat, i});
+            if (!cat->match(i, target_selector))
+              continue;
+
+            if (ring_selection) {
+              ++nring_target_candidates;
+              bool selected = cat == &cherenkov &&
+                              ring.contains(cat->hit_x(i), cat->hit_y(i),
+                                            ring_selection->tolerance);
+              if (!selected) {
+                ++nring_target_rejected;
+                continue;
+              }
+              ++nring_target_selected;
+            }
+            targets.push_back({cat, i});
           }
         }
 
@@ -712,8 +725,12 @@ deltat_timing_reference_impl(const std::string filename,
   int nframes_used = 0;
   int nfills = 0;
   int nring_frames = 0;
+  long long nring_target_candidates = 0;
+  long long nring_target_selected = 0;
+  long long nring_target_rejected = 0;
   scan(hDeltaT, hDeltaT_tdc, hDeltaT_spill, hRingRadius, hRingInliers, hRingResidual,
-       nframes_used, nfills, nring_frames);
+       nframes_used, nfills, nring_frames,
+       nring_target_candidates, nring_target_selected, nring_target_rejected);
 
   if (nframes_used == 0)
     std::cerr << " --- no valid timing-reference frames with target hits found" << std::endl;
@@ -722,6 +739,11 @@ deltat_timing_reference_impl(const std::string filename,
   std::cout << " --- histogram fills: " << nfills << std::endl;
   if (ring_selection)
     std::cout << " --- frames with accepted Cherenkov rings: " << nring_frames << std::endl;
+  if (ring_selection) {
+    std::cout << " --- ring target candidates: " << nring_target_candidates << std::endl;
+    std::cout << " --- ring target hits selected: " << nring_target_selected << std::endl;
+    std::cout << " --- ring target hits rejected: " << nring_target_rejected << std::endl;
+  }
 
   hDeltaT->Sumw2();
   if (nframes_used > 0)
