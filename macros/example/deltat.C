@@ -1,4 +1,5 @@
 #include <TFile.h>
+#include <TH1D.h>
 #include <TH2D.h>
 #include <TTree.h>
 #include <TTreeReader.h>
@@ -8,6 +9,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <random>
 #include <string>
 #include <vector>
 
@@ -50,6 +52,24 @@ struct timing_reference_t {
   }
 };
 
+struct ring_selection_t {
+  int min_inliers;
+  int iterations;
+  double tolerance;
+  double min_radius;
+  double max_radius;
+
+  ring_selection_t(int min_inliers_ = 8,
+                   int iterations_ = 256,
+                   double tolerance_ = 3.5,
+                   double min_radius_ = 1.,
+                   double max_radius_ = 200.)
+    : min_inliers(min_inliers_), iterations(iterations_), tolerance(tolerance_),
+      min_radius(min_radius_), max_radius(max_radius_)
+  {
+  }
+};
+
 struct category_reader_t {
   TTreeReaderArray<int> *frame_start;
   TTreeReaderArray<int> *frame_nhits;
@@ -63,6 +83,8 @@ struct category_reader_t {
   TTreeReaderArray<int> *coarse;
   TTreeReaderArray<int> *fine;
   TTreeReaderArray<double> *time;
+  TTreeReaderArray<double> *x;
+  TTreeReaderArray<double> *y;
 
   category_reader_t(TTreeReader &reader, const std::string &prefix)
     : frame_start(new TTreeReaderArray<int>(reader, (prefix + "_frame_start").c_str())),
@@ -76,13 +98,34 @@ struct category_reader_t {
       rollover(new TTreeReaderArray<int>(reader, (prefix + "_rollover").c_str())),
       coarse(new TTreeReaderArray<int>(reader, (prefix + "_coarse").c_str())),
       fine(new TTreeReaderArray<int>(reader, (prefix + "_fine").c_str())),
-      time(new TTreeReaderArray<double>(reader, (prefix + "_time").c_str()))
+      time(new TTreeReaderArray<double>(reader, (prefix + "_time").c_str())),
+      x(nullptr),
+      y(nullptr)
   {
+    if (reader.GetTree()->GetBranch((prefix + "_x").c_str()))
+      x = new TTreeReaderArray<double>(reader, (prefix + "_x").c_str());
+    if (reader.GetTree()->GetBranch((prefix + "_y").c_str()))
+      y = new TTreeReaderArray<double>(reader, (prefix + "_y").c_str());
   }
 
   double hit_time(int i) const
   {
     return (*time)[i];
+  }
+
+  bool has_xy() const
+  {
+    return x && y;
+  }
+
+  double hit_x(int i) const
+  {
+    return (*x)[i];
+  }
+
+  double hit_y(int i) const
+  {
+    return (*y)[i];
   }
 
   int channel(int i) const
@@ -250,6 +293,112 @@ struct hit_ref_t {
   int index;
 };
 
+struct ring_point_t {
+  double x;
+  double y;
+};
+
+struct ring_t {
+  double x = 0.;
+  double y = 0.;
+  double radius = 0.;
+  int inliers = 0;
+  double residual = std::numeric_limits<double>::infinity();
+  bool valid = false;
+
+  bool contains(double px, double py, double tolerance) const
+  {
+    if (!valid)
+      return false;
+    return std::abs(std::hypot(px - x, py - y) - radius) <= tolerance;
+  }
+};
+
+bool
+circle_from_three(const ring_point_t &a,
+                  const ring_point_t &b,
+                  const ring_point_t &c,
+                  ring_t &ring)
+{
+  double determinant = 2. * (a.x * (b.y - c.y) +
+                             b.x * (c.y - a.y) +
+                             c.x * (a.y - b.y));
+  if (std::abs(determinant) < 1.e-9)
+    return false;
+
+  double aa = a.x * a.x + a.y * a.y;
+  double bb = b.x * b.x + b.y * b.y;
+  double cc = c.x * c.x + c.y * c.y;
+  ring.x = (aa * (b.y - c.y) + bb * (c.y - a.y) + cc * (a.y - b.y)) / determinant;
+  ring.y = (aa * (c.x - b.x) + bb * (a.x - c.x) + cc * (b.x - a.x)) / determinant;
+  ring.radius = std::hypot(a.x - ring.x, a.y - ring.y);
+  return std::isfinite(ring.x) && std::isfinite(ring.y) && std::isfinite(ring.radius);
+}
+
+ring_t
+fit_ring(const category_reader_t &cherenkov,
+         int iframe,
+         int spill,
+         const ring_selection_t &selection)
+{
+  ring_t best;
+  if (!cherenkov.has_xy())
+    return best;
+
+  std::vector<ring_point_t> points;
+  int first = (*cherenkov.frame_start)[iframe];
+  int nhits = (*cherenkov.frame_nhits)[iframe];
+  points.reserve(nhits);
+  for (int ihit = 0; ihit < nhits; ++ihit) {
+    int index = first + ihit;
+    double x = cherenkov.hit_x(index);
+    double y = cherenkov.hit_y(index);
+    if (std::isfinite(x) && std::isfinite(y))
+      points.push_back({x, y});
+  }
+
+  if (points.size() < 3)
+    return best;
+
+  std::mt19937 generator(static_cast<unsigned>(0x9e3779b9u ^
+                                                static_cast<unsigned>(spill * 65537 + iframe)));
+  std::uniform_int_distribution<int> pick(0, points.size() - 1);
+  for (int iteration = 0; iteration < selection.iterations; ++iteration) {
+    int ia = pick(generator);
+    int ib = pick(generator);
+    int ic = pick(generator);
+    if (ia == ib || ia == ic || ib == ic)
+      continue;
+
+    ring_t candidate;
+    if (!circle_from_three(points[ia], points[ib], points[ic], candidate))
+      continue;
+    if (candidate.radius < selection.min_radius || candidate.radius > selection.max_radius)
+      continue;
+
+    int inliers = 0;
+    double residual = 0.;
+    for (const auto &point : points) {
+      double distance = std::abs(std::hypot(point.x - candidate.x,
+                                             point.y - candidate.y) - candidate.radius);
+      if (distance <= selection.tolerance) {
+        ++inliers;
+        residual += distance;
+      }
+    }
+
+    if (inliers > best.inliers ||
+        (inliers == best.inliers && residual < best.residual)) {
+      candidate.inliers = inliers;
+      candidate.residual = residual;
+      best = candidate;
+    }
+  }
+
+  best.valid = best.inliers >= selection.min_inliers;
+  return best;
+}
+
 void
 deltat(const std::string filename,
        field_selector_t target_selector,
@@ -391,10 +540,11 @@ deltat(const std::string filename,
 }
 
 void
-deltat(const std::string filename,
-       channel_selector_t target_selector,
-       timing_reference_t timing_reference,
-       const std::string outfilename = "deltat.root")
+deltat_timing_reference_impl(const std::string filename,
+                             channel_selector_t target_selector,
+                             timing_reference_t timing_reference,
+                             const ring_selection_t *ring_selection,
+                             const std::string outfilename)
 {
   auto fin = TFile::Open(filename.c_str());
   if (!fin || fin->IsZombie()) {
@@ -418,6 +568,13 @@ deltat(const std::string filename,
     return;
   }
 
+  if (ring_selection &&
+      (!tin->GetBranch("cherenkov_x") || !tin->GetBranch("cherenkov_y"))) {
+    std::cerr << " --- ring selection requires cherenkov_x and cherenkov_y branches" << std::endl;
+    fin->Close();
+    return;
+  }
+
   if (timing_reference.branch != "T" &&
       timing_reference.branch != "T0" &&
       timing_reference.branch != "T1") {
@@ -427,7 +584,9 @@ deltat(const std::string filename,
     return;
   }
 
-  auto scan = [&](TH2D *hist, TH2D **hist_tdc, TH2D *hist_spill, int &nframes_used, int &nfills) {
+  auto scan = [&](TH2D *hist, TH2D **hist_tdc, TH2D *hist_spill,
+                  TH1D *hist_ring_radius, TH1D *hist_ring_inliers,
+                  int &nframes_used, int &nfills, int &nring_frames) {
     TTreeReader reader(tin);
     TTreeReaderValue<int> spill_id(reader, "id");
     TTreeReaderValue<int> nframes(reader, "nframes");
@@ -449,13 +608,28 @@ deltat(const std::string filename,
         if (!std::isfinite(reference_time))
           continue;
 
+        ring_t ring;
+        if (ring_selection) {
+          ring = fit_ring(cherenkov, iframe, *spill_id, *ring_selection);
+          if (!ring.valid)
+            continue;
+          ++nring_frames;
+          if (hist_ring_radius)
+            hist_ring_radius->Fill(ring.radius);
+          if (hist_ring_inliers)
+            hist_ring_inliers->Fill(ring.inliers);
+        }
+
         std::vector<hit_ref_t> targets;
         for (auto cat : cats) {
           int first = (*cat->frame_start)[iframe];
           int nhits = (*cat->frame_nhits)[iframe];
           for (int ihit = 0; ihit < nhits; ++ihit) {
             int i = first + ihit;
-            if (cat->match(i, target_selector))
+            if (cat->match(i, target_selector) &&
+                (!ring_selection ||
+                 (cat == &cherenkov && ring.contains(cat->hit_x(i), cat->hit_y(i),
+                                                     ring_selection->tolerance))))
               targets.push_back({cat, i});
           }
         }
@@ -495,19 +669,32 @@ deltat(const std::string filename,
   auto hDeltaT = new TH2D("hDeltaT", "", nchannels, 0., nchannels, deltat_nbins, deltat_min, deltat_max);
   auto hDeltaT_spill = new TH2D("hDeltaT_spill", "", spill_nbins, spill_min, spill_max, deltat_nbins, deltat_min, deltat_max);
 
+  TH1D *hRingRadius = nullptr;
+  TH1D *hRingInliers = nullptr;
+  if (ring_selection) {
+    hRingRadius = new TH1D("hRingRadius", "RANSAC ring radius;radius [mm];frames",
+                           200, ring_selection->min_radius, ring_selection->max_radius);
+    hRingInliers = new TH1D("hRingInliers", "RANSAC ring inliers;inlier hits;frames",
+                            256, -0.5, 255.5);
+  }
+
   TH2D *hDeltaT_tdc[4] = {nullptr, nullptr, nullptr, nullptr};
   for (int itdc = 0; itdc < 4; ++itdc)
     hDeltaT_tdc[itdc] = new TH2D(Form("hDeltaT_tdc%d", itdc), "", 256, 0., 256., deltat_nbins, deltat_min, deltat_max);
 
   int nframes_used = 0;
   int nfills = 0;
-  scan(hDeltaT, hDeltaT_tdc, hDeltaT_spill, nframes_used, nfills);
+  int nring_frames = 0;
+  scan(hDeltaT, hDeltaT_tdc, hDeltaT_spill, hRingRadius, hRingInliers,
+       nframes_used, nfills, nring_frames);
 
   if (nframes_used == 0)
     std::cerr << " --- no valid timing-reference frames with target hits found" << std::endl;
   std::cout << " --- timing reference: " << timing_reference.branch << std::endl;
   std::cout << " --- frames with target/timing-reference hits: " << nframes_used << std::endl;
   std::cout << " --- histogram fills: " << nfills << std::endl;
+  if (ring_selection)
+    std::cout << " --- frames with accepted Cherenkov rings: " << nring_frames << std::endl;
 
   hDeltaT->Sumw2();
   if (nframes_used > 0)
@@ -526,8 +713,33 @@ deltat(const std::string filename,
     hDeltaT_tdc[itdc]->Write();
   }
 
+  if (hRingRadius)
+    hRingRadius->Write();
+  if (hRingInliers)
+    hRingInliers->Write();
+
   fout->Close();
   fin->Close();
+}
+
+void
+deltat(const std::string filename,
+       channel_selector_t target_selector,
+       timing_reference_t timing_reference,
+       const std::string outfilename = "deltat.root")
+{
+  deltat_timing_reference_impl(filename, target_selector, timing_reference, nullptr, outfilename);
+}
+
+void
+deltat(const std::string filename,
+       channel_selector_t target_selector,
+       timing_reference_t timing_reference,
+       ring_selection_t ring_selection,
+       const std::string outfilename = "deltat.root")
+{
+  deltat_timing_reference_impl(filename, target_selector, timing_reference,
+                                &ring_selection, outfilename);
 }
 
 void
