@@ -595,7 +595,7 @@ deltat_timing_reference_impl(const std::string filename,
 
   auto scan = [&](TH2D *hist, TH2D **hist_tdc, TH2D *hist_spill,
                   TH1D *hist_ring_radius, TH1D *hist_ring_inliers,
-                  TH1D *hist_ring_residual,
+                  TH1D *hist_ring_residual, TH2D *hist_ring_center,
                   int &nframes_used, int &nfills, int &nring_frames,
                   long long &nring_target_candidates,
                   long long &nring_target_selected,
@@ -631,6 +631,8 @@ deltat_timing_reference_impl(const std::string filename,
             hist_ring_radius->Fill(ring.radius);
           if (hist_ring_inliers)
             hist_ring_inliers->Fill(ring.inliers);
+          if (hist_ring_center)
+            hist_ring_center->Fill(ring.x, ring.y);
           if (hist_ring_residual) {
             int ring_first = (*cherenkov.frame_start)[iframe];
             int ring_nhits = (*cherenkov.frame_nhits)[iframe];
@@ -706,6 +708,7 @@ deltat_timing_reference_impl(const std::string filename,
   TH1D *hRingRadius = nullptr;
   TH1D *hRingInliers = nullptr;
   TH1D *hRingResidual = nullptr;
+  TH2D *hRingCenter = nullptr;
   if (ring_selection) {
     hRingRadius = new TH1D("hRingRadius", "RANSAC ring radius;radius [mm];frames",
                            200, ring_selection->min_radius, ring_selection->max_radius);
@@ -716,6 +719,9 @@ deltat_timing_reference_impl(const std::string filename,
                              Form("RANSAC radial residual (selection <= %.3g mm);residual [mm];hits",
                                   ring_selection->tolerance),
                              200, 0., residual_max);
+    hRingCenter = new TH2D("hRingCenter",
+                           "RANSAC ring centre;x centre [mm];y centre [mm]",
+                           200, -200., 200., 200, -200., 200.);
   }
 
   TH2D *hDeltaT_tdc[4] = {nullptr, nullptr, nullptr, nullptr};
@@ -729,6 +735,7 @@ deltat_timing_reference_impl(const std::string filename,
   long long nring_target_selected = 0;
   long long nring_target_rejected = 0;
   scan(hDeltaT, hDeltaT_tdc, hDeltaT_spill, hRingRadius, hRingInliers, hRingResidual,
+       hRingCenter,
        nframes_used, nfills, nring_frames,
        nring_target_candidates, nring_target_selected, nring_target_rejected);
 
@@ -768,6 +775,8 @@ deltat_timing_reference_impl(const std::string filename,
     hRingInliers->Write();
   if (hRingResidual)
     hRingResidual->Write();
+  if (hRingCenter)
+    hRingCenter->Write();
 
   fout->Close();
   fin->Close();
