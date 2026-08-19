@@ -554,6 +554,70 @@ done
 
 The useful closure check is whether channels in the same RDO produce narrow, stable `delta_t` structures relative to that RDO's direct test-pulse trigger. For `20260618-183625`, the LASER-side channels are expected on FIFOs `16..31`; for `20260618-185127`, they are expected on FIFOs `0..15`. Do not use these runs to judge timing offsets between different devices.
 
+### Deriving Channel Offsets With `fit_calib.C`
+
+The `fit_calib.C` macro derives per-channel `[CHANNEL]` timing offsets from the
+`hDeltaT` histogram produced by `deltat.C`. It is intentionally inclusive: the
+statistics decision is made from the fraction
+
+```text
+integraler = histogram error / histogram integral
+```
+
+inside the `[-2,2]` interval. The current tiers are:
+
+```text
+integraler > 0.30       skip the channel
+0.15 .. 0.30            use the restricted mean
+0.08 .. 0.15            rebin by 4, then fit the peak
+0.04 .. 0.08            rebin by 2, then fit the peak
+<= 0.04                 fit at the original binning
+```
+
+The thresholds correspond approximately to increasing effective statistics.
+When a fit fails, the restricted mean is used as a fallback. A skipped channel
+is not shifted in the aligned diagnostic histogram and is omitted from the
+generated calibration file.
+
+Run it from the repository checkout with:
+
+```bash
+root -l -b -q \
+  -e '.L macros/example/fit_calib.C' \
+  -e 'fit_calib("deltat.ring.root", "fit_calib.ring.root", "timing_offsets.ring.conf")'
+```
+
+The third argument is optional. If it is omitted, the macro replaces the final
+`.root` suffix of the output name with `.conf`. The ROOT output contains:
+
+```text
+hCalib             fitted/mean channel offsets
+hMethod            method used for each channel (0 skipped, 1 mean,
+                   2 rebin-4 fit, 3 rebin-2 fit, 4 full fit)
+hDeltaT_aligned    hDeltaT after applying accepted channel offsets
+```
+
+The generated text file has this format:
+
+```text
+[CHANNEL]
+# device fifo column pixel offset
+```
+
+Only accepted channels are written. The macro converts the global Cherenkov
+channel index back to the electronics address using 2048 channels arranged as
+eight devices, eight 32-channel chips per device, and four pixels per column.
+The calibration convention is:
+
+```text
+calibrated_time = raw_time - offset
+```
+
+Inspect `hDeltaT_aligned` and the fit uncertainties before using the generated
+`.conf` in a production `calibrator` run. The macro does not invent values for
+channels with insufficient information; such channels remain available for a
+later hardware-pattern or wildcard fallback.
+
 For physics timing studies, after a triggered file has been augmented with:
 
 ```bash
