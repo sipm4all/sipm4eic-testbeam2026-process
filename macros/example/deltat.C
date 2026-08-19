@@ -54,17 +54,20 @@ struct timing_reference_t {
 
 struct ring_selection_t {
   int min_inliers;
+  int max_inliers;
   int iterations;
   double tolerance;
   double min_radius;
   double max_radius;
 
   ring_selection_t(int min_inliers_ = 8,
+                   int max_inliers_ = std::numeric_limits<int>::max(),
                    int iterations_ = 256,
                    double tolerance_ = 3.5,
                    double min_radius_ = 1.,
                    double max_radius_ = 200.)
-    : min_inliers(min_inliers_), iterations(iterations_), tolerance(tolerance_),
+    : min_inliers(min_inliers_), max_inliers(max_inliers_), iterations(iterations_),
+      tolerance(tolerance_),
       min_radius(min_radius_), max_radius(max_radius_)
   {
   }
@@ -395,7 +398,8 @@ fit_ring(const category_reader_t &cherenkov,
     }
   }
 
-  best.valid = best.inliers >= selection.min_inliers;
+  best.valid = best.inliers >= selection.min_inliers &&
+               best.inliers <= selection.max_inliers;
   return best;
 }
 
