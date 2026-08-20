@@ -755,10 +755,11 @@ spill-local timing adjustment.
 
 The temporary diagnostic macro
 `macros/example/clock_transition.C` detects the two spill states using only the
-central `delta_t` interval `[-2,2]`. It determines the two state means, uses
-their midpoint as the classification threshold, shifts the low state by one
-native unit, and writes both a corrected spill histogram and a run-specific
-`[CLOCK]` file. For lane 173 in the example run:
+central `delta_t` interval `[-2,2]`. It performs a two-cluster fit of the
+per-spill means, uses the midpoint of the two cluster means as the
+classification threshold, keeps the majority state as reference, shifts only
+the minority state by one native unit, and writes both a corrected spill
+histogram and a run-specific `[CLOCK]` file. For lane 173 in the example run:
 
 ```bash
 root -l -b -q \
@@ -779,11 +780,12 @@ row of the form:
 20260623-185238 197 13 -1 4 6 9 ...
 ```
 
-The sign is `-1` for spills whose delta-t state is shifted low, because the
-calibrator applies `corrected_time = calibrated_time - correction`. This macro
-is a diagnostic starting point; the spill-state classification should be
-validated for each run and lane before using the generated corrections in
-production processing.
+The correction sign is derived from the direction of the minority-state shift:
+the calibrator applies `corrected_time = calibrated_time - correction`. Thus a
+minority state one unit above the majority state receives `+1`, while a
+minority state one unit below it receives `-1`. This macro is a diagnostic
+starting point; the spill-state classification should be validated for each
+run and lane before using the generated corrections in production processing.
 
 For physics timing studies, after a triggered file has been augmented with:
 

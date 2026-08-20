@@ -4,6 +4,8 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <algorithm>
+#include <utility>
 #include <vector>
 
 void
@@ -36,22 +38,56 @@ clock_transition(const std::string &infilename,
       means[ix - 1] /= weights[ix - 1];
   }
 
-  double high_sum = 0., high_weight = 0.;
-  double low_sum = 0., low_weight = 0.;
-  for (int i = 0; i < hin->GetNbinsX(); ++i) {
-    if (weights[i] <= 0.)
-      continue;
-    if (means[i] > -0.2) {
-      high_sum += weights[i] * means[i];
-      high_weight += weights[i];
-    } else {
-      low_sum += weights[i] * means[i];
-      low_weight += weights[i];
+  std::vector<std::pair<double, double>> valid_means;
+  for (int i = 0; i < hin->GetNbinsX(); ++i)
+    if (weights[i] > 0.)
+      valid_means.emplace_back(means[i], weights[i]);
+  double low_mean = 0., high_mean = 0.;
+  if (!valid_means.empty()) {
+    low_mean = valid_means.front().first;
+    high_mean = valid_means.front().first;
+    for (const auto &entry : valid_means) {
+      low_mean = std::min(low_mean, entry.first);
+      high_mean = std::max(high_mean, entry.first);
+    }
+    for (int iteration = 0; iteration < 32; ++iteration) {
+      double low_sum = 0., low_weight = 0.;
+      double high_sum = 0., high_weight = 0.;
+      double threshold = 0.5 * (low_mean + high_mean);
+      for (const auto &entry : valid_means) {
+        if (entry.first < threshold) {
+          low_sum += entry.first * entry.second;
+          low_weight += entry.second;
+        } else {
+          high_sum += entry.first * entry.second;
+          high_weight += entry.second;
+        }
+      }
+      if (low_weight == 0. || high_weight == 0.)
+        break;
+      double new_low = low_sum / low_weight;
+      double new_high = high_sum / high_weight;
+      if (std::abs(new_low - low_mean) + std::abs(new_high - high_mean) < 1.e-9)
+        break;
+      low_mean = new_low;
+      high_mean = new_high;
     }
   }
-  double high_mean = high_sum / high_weight;
-  double low_mean = low_sum / low_weight;
-  double threshold = 0.5 * (high_mean + low_mean);
+  if (low_mean > high_mean)
+    std::swap(low_mean, high_mean);
+  double separation = high_mean - low_mean;
+  double threshold = (low_mean + high_mean) / 2.;
+  double low_weight = 0., high_weight = 0.;
+  int low_count = 0, high_count = 0;
+  for (const auto &entry : valid_means) {
+    if (entry.first < threshold) {
+      low_weight += entry.second;
+      ++low_count;
+    } else {
+      high_weight += entry.second;
+      ++high_count;
+    }
+  }
 
   auto fout = TFile::Open(outfilename.c_str(), "RECREATE");
   auto hout = (TH2 *)hin->Clone("hDeltaT_spill_aligned");
@@ -62,10 +98,17 @@ clock_transition(const std::string &infilename,
   for (int ix = 1; ix <= hin->GetNbinsX(); ++ix) {
     if (weights[ix - 1] <= 0.)
       continue;
+    bool separated = separation >= 0.5 && low_weight > 0. && high_weight > 0.;
     bool low_state = means[ix - 1] < threshold;
-    int shift = low_state ? 1 : 0;
-    if (low_state)
+    bool minority_state = separated &&
+                          ((low_count < high_count && low_state) ||
+                           (high_count < low_count && !low_state));
+    int shift = 0;
+    if (minority_state) {
+      // Keep the majority state fixed and move the minority by one unit.
+      shift = low_count < high_count ? 1 : -1;
       corrected_spills.push_back(ix - 1);
+    }
 
     for (int iy = 1; iy <= hin->GetNbinsY(); ++iy) {
       double content = hin->GetBinContent(ix, iy);
@@ -93,16 +136,21 @@ clock_transition(const std::string &infilename,
        << "[CLOCK]\n"
        << "# run device fifo correction spill...\n";
   if (!corrected_spills.empty()) {
-    conf << run << ' ' << device << ' ' << fifo << " -1";
+    int correction = low_count < high_count ? -1 : 1;
+    conf << run << ' ' << device << ' ' << fifo << ' ' << correction;
     for (int spill : corrected_spills)
       conf << ' ' << spill;
     conf << '\n';
   }
   conf.close();
 
+  std::cout << "state separation: " << separation << std::endl;
   std::cout << "low-state mean:  " << low_mean << std::endl;
   std::cout << "high-state mean: " << high_mean << std::endl;
   std::cout << "threshold:       " << threshold << std::endl;
+  std::cout << "state counts:     low=" << low_count << " high=" << high_count << std::endl;
+  std::cout << "reference state:  " << (low_count >= high_count ? "low" : "high") << std::endl;
+  std::cout << "clock correction: " << (low_count < high_count ? -1 : 1) << std::endl;
   std::cout << "corrected spills: " << corrected_spills.size() << std::endl;
   std::cout << "output:           " << outfilename << std::endl;
   std::cout << "clock config:     " << conffilename << std::endl;
