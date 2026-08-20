@@ -66,6 +66,20 @@ Downstream workflows read the decoded ROOT files from the `decoded/` directory. 
 - `cleaner`: clones the `alcor` tree while dropping malformed ALCOR hits, currently invalid `fifo`/`column` combinations.
 - `checker`: scans a per-FIFO `alcor` tree and writes an ASCII `.check` sanity report.
 - `calibrator`: creates or updates the calibrated `time` branch in the decoded `alcor` tree.
+
+`calibrator` can also apply sparse, run-specific clock corrections with a
+separate file. Pass both `--clock` and `--run` through `process.sh`:
+
+```bash
+process/scripts/process.sh \
+    --run 20260623-185238 \
+    --calibration process/config/calibration/20260819.calib.conf \
+    --clock clock-corrections.conf
+```
+
+The clock file contains `[CLOCK]` rows of the form
+`run device fifo correction spill...`; only `+1` and `-1` corrections are
+allowed. It is optional and is not part of the stable TDC/channel calibration.
 - `coordinator`: creates or updates the spatial `x` and `y` branches in the calibrated `alcor` tree.
 - `sorter`: sorts each single-lane stream in calibrated time.
 - `after-pulse-suppressor`: suppresses close repeated ALCOR hits per channel.

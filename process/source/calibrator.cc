@@ -6,6 +6,7 @@
 #include "data_word.h"
 
 #include "calibration.h"
+#include "clock_calibration.h"
 
 #include <iostream>
 #include <string>
@@ -14,7 +15,9 @@
 bool
 calibrator(const std::string &filename,
            const std::string &outfilename,
-           const std::string &config)
+           const std::string &config,
+           const std::string &clock_config,
+           const std::string &run)
 {
   calibration_t calibration;
   if (!calibration.load(config))
@@ -24,6 +27,19 @@ calibrator(const std::string &filename,
   std::cout << "TDC rules:      " << calibration.tdc_rules() << std::endl;
   std::cout << "CHANNEL rules:  " << calibration.channel_rules() << std::endl;
   std::cout << "TRIGGER rules:  " << calibration.trigger_rules() << std::endl;
+
+  clock_calibration_t clock_calibration;
+  bool use_clock_calibration = !clock_config.empty();
+  if (use_clock_calibration) {
+    if (run.empty()) {
+      std::cerr << "ERROR: --run is required when --clock is provided" << std::endl;
+      return false;
+    }
+    if (!clock_calibration.load(clock_config, run))
+      return false;
+    std::cout << "clock correction file: " << clock_config << std::endl;
+    std::cout << "CLOCK rules:    " << clock_calibration.rules() << std::endl;
+  }
 
   auto fin = TFile::Open(filename.c_str(), "READ");
   if (!fin || fin->IsZombie()) {
@@ -58,6 +74,8 @@ calibrator(const std::string &filename,
   Long64_t ntrigger = 0;
   Long64_t ncontrol = 0;
   Long64_t nother = 0;
+  Long64_t nclock_corrected = 0;
+  int current_spill = -1;
 
   for (Long64_t iev = 0; iev < nev; ++iev) {
     auto bytes = tin->GetEntry(iev);
@@ -97,6 +115,14 @@ calibrator(const std::string &filename,
       data.time = data.coarse + data_t::rollover_to_clock * data.rollover;
       data.time -= phase;
       data.time -= channel.offset;
+      if (use_clock_calibration && current_spill >= 0) {
+        int clock_correction = clock_calibration.correction(run, data.device, data.fifo,
+                                                             current_spill);
+        if (clock_correction != 0) {
+          data.time -= clock_correction;
+          ++nclock_corrected;
+        }
+      }
       ++nalcor;
     } else if (data.is_trigger_tag()) {
       trigger_calib_t trigger;
@@ -112,10 +138,15 @@ calibrator(const std::string &filename,
       data.time -= trigger.offset;
       ++ntrigger;
     } else {
-      if (data.is_start_spill() || data.is_end_spill())
+      if (data.is_start_spill()) {
+        current_spill = data.counter;
         ++ncontrol;
-      else
+      } else if (data.is_end_spill()) {
+        ++ncontrol;
+        current_spill = -1;
+      } else {
         ++nother;
+      }
     }
 
     tout->Fill();
@@ -145,6 +176,7 @@ calibrator(const std::string &filename,
   std::cout << "trigger words calibrated:  " << ntrigger << std::endl;
   std::cout << "control words preserved:   " << ncontrol << std::endl;
   std::cout << "other words preserved:     " << nother << std::endl;
+  std::cout << "clock-corrected hits:      " << nclock_corrected << std::endl;
   std::cout << "output entries:            " << written << std::endl;
   std::cout << "cached TDC calibrations:   " << calibration.cached_tdc() << std::endl;
   std::cout << "cached channel offsets:    " << calibration.cached_channels() << std::endl;
@@ -161,13 +193,17 @@ main(int argc, char **argv)
   std::string input;
   std::string output;
   std::string config;
+  std::string clock_config;
+  std::string run;
 
   po::options_description options("options");
   options.add_options()
     ("help,h", "show this help message")
     ("input,i", po::value<std::string>(&input)->required(), "input ROOT file")
     ("output,o", po::value<std::string>(&output)->required(), "output ROOT file")
-    ("config,c", po::value<std::string>(&config)->required(), "timing calibration file");
+    ("config,c", po::value<std::string>(&config)->required(), "timing calibration file")
+    ("clock", po::value<std::string>(&clock_config), "optional run-specific clock correction file")
+    ("run", po::value<std::string>(&run), "run identifier required with --clock");
 
   po::variables_map vm;
   try {
@@ -183,5 +219,5 @@ main(int argc, char **argv)
     return 1;
   }
 
-  return calibrator(input, output, config) ? 0 : 1;
+  return calibrator(input, output, config, clock_config, run) ? 0 : 1;
 }

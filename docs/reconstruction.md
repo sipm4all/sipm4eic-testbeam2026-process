@@ -147,6 +147,29 @@ sipm4eic-testbeam2026-process/process/scripts/process.sh \
     --calibration <calibration.conf>
 ```
 
+For runs with known spill-dependent lane clock states, pass a separate clock
+correction file. `process.sh` forwards it to `calibrator` for every FIFO and
+also supplies the run identifier:
+
+```bash
+sipm4eic-testbeam2026-process/process/scripts/process.sh \
+    --run 20260623-185238 \
+    --calibration process/config/calibration/20260819.calib.conf \
+    --clock clock-corrections.conf
+```
+
+The stable calibration remains in `--calibration`. The optional clock file has
+rows such as:
+
+```text
+[CLOCK]
+# run device fifo correction spill...
+20260623-185238 197 13 +1 4 7 12 18
+```
+
+The correction applies only to ALCOR hits from that `(device,fifo)` and those
+spills. Omitting `--clock` preserves the normal processing behavior.
+
 For each decoded FIFO file, `process.sh` runs:
 
 ```text

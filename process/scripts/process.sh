@@ -15,6 +15,7 @@ APS="${ROOT_DIR}/process/bin/after-pulse-suppressor"
 MERGER="${ROOT_DIR}/process/bin/merger"
 run=""
 CALIBRATION_CONFIG=""
+CLOCK_CONFIG=""
 SORT_WINDOW=32768
 APS_WINDOW=50
 DEVICE_FILTER=()
@@ -34,6 +35,7 @@ usage:
 required:
   --run, -r RUN                  run name/directory
   --calibration, -c FILE         timing calibration configuration
+  --clock FILE                   optional run-specific clock correction file
 
 options:
   --run-type TYPE                accepted for compatibility with decoder.sh; process.sh reads decoded files from /data/2026-testbeam/process/RUN
@@ -181,6 +183,11 @@ while [ $# -gt 0 ]; do
             CALIBRATION_CONFIG=$2
             shift 2
             ;;
+        --clock)
+            [ $# -ge 2 ] || fail "$1 requires FILE"
+            CLOCK_CONFIG=$2
+            shift 2
+            ;;
         --help|-h)
             usage
             exit 0
@@ -202,6 +209,9 @@ esac
 [ -n "${CALIBRATION_CONFIG}" ] || fail "missing --calibration"
 if [ ! -f "${CALIBRATION_CONFIG}" ]; then
     fail "calibration config does not exist: ${CALIBRATION_CONFIG}"
+fi
+if [ -n "${CLOCK_CONFIG}" ] && [ ! -f "${CLOCK_CONFIG}" ]; then
+    fail "clock correction file does not exist: ${CLOCK_CONFIG}"
 fi
 
 irpath="${ipath}/${run}"
@@ -286,6 +296,8 @@ for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do
             sort_window=${11}
             aps_window=${12}
             overwrite=${13}
+            clock_config=${14}
+            run=${15}
 
             if [ "${overwrite}" -ne 1 ] && [ -f "${output}" ]; then
                 echo " --- output exists, skipping FIFO processing: ${output}"
@@ -297,7 +309,11 @@ for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do
                 exit 0
             fi
 
-            "${calibrator}" --input "${input}" --output "${calibrated}" --config "${calibration_config}"
+            calibrator_args=(--input "${input}" --output "${calibrated}" --config "${calibration_config}")
+            if [ -n "${clock_config}" ]; then
+                calibrator_args+=(--clock "${clock_config}" --run "${run}")
+            fi
+            "${calibrator}" "${calibrator_args[@]}"
             "${coordinator}" --input "${calibrated}" --output "${coordinated}"
             "${sorter}" --input "${coordinated}" --output "${sorted}" --window "${sort_window}"
             "${aps}" --input "${sorted}" --output "${output}" --window "${aps_window}"
@@ -311,7 +327,9 @@ for device_path in "${irpath}"/kc705* "${irpath}"/rdo*; do
             "${CALIBRATION_CONFIG}" \
             "${SORT_WINDOW}" \
             "${APS_WINDOW}" \
-            "${OVERWRITE}" &
+            "${OVERWRITE}" \
+            "${CLOCK_CONFIG}" \
+            "${run}" &
         pids+=($!)
 
     done

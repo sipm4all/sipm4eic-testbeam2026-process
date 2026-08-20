@@ -618,6 +618,173 @@ Inspect `hDeltaT_aligned` and the fit uncertainties before using the generated
 channels with insufficient information; such channels remain available for a
 later hardware-pattern or wildcard fallback.
 
+### Suspected Lane Clock Instabilities
+
+The aligned `hDeltaT` data were also inspected after grouping the global
+Cherenkov channels in blocks of eight:
+
+```text
+lane_number = global_channel / 8
+chip_number = lane_number / 4
+lane_in_chip = lane_number % 4
+```
+
+Each lane corresponds to one electronics FIFO in the analysis channel mapping.
+Several lanes show a second lane-wide population displaced by approximately one
+native time unit from the main peak. The suspected lanes are:
+
+```text
+lane   chip   lane-in-chip   displacement
+----   ----   ------------   ------------
+90     22     2              +1
+102    25     2              +1
+117    29     1              -1
+120    30     0              +1
+137    34     1              +1
+142    35     2              -1
+173    43     1              -1
+178    44     2              -1
+191    47     3              -1
+```
+
+There are nine suspected lanes in total. They all belong to different chips:
+no chip has more than one suspicious lane. These are suspected clock
+instabilities or one-clock phase ambiguities, not final calibration corrections.
+The effect is common to the eight channels in a lane and should therefore not
+be treated as eight unrelated channel offsets without further validation.
+
+The initial investigation used the following physics runs, but these runs are
+not homogeneous. A lane compared against the timing-estimator reference
+`T` does not necessarily produce the same `delta_t` distribution in all three
+groups. The beam conditions were different:
+
+```text
+Group A: 11 GeV negative beam, collimators at 24, focus at 20 m
+
+20260623-185238
+20260623-191413
+20260623-200510
+20260623-202754
+20260623-222714
+20260623-224255
+
+Group B: 11 GeV positive beam, collimators at 10, focus at 4 m
+
+20260623-204903
+20260623-210048
+20260623-211302
+
+Group C: 11 GeV negative beam, collimators at 24, focus at 4 m
+
+20260623-212754
+20260623-214144
+20260623-221530
+```
+
+The reason for the observed run-to-run difference is currently unknown and is
+under investigation. Until it is understood, lane stability studies and any
+further calibration comparison should be performed separately within Groups
+A, B, and C. A calibration or offset derived from one group must not be
+assumed to describe the other groups.
+
+For completeness, the complete run list used in the initial study was:
+
+```text
+20260623-185238
+20260623-191413
+20260623-200510
+20260623-202754
+20260623-204903
+20260623-210048
+20260623-211302
+20260623-212754
+20260623-214144
+20260623-221530
+20260623-222714
+20260623-224255
+```
+
+For a focused check of lane 173, use the field selector for device 197,
+FIFO 13, all columns and pixels. Global channels 1384 through 1391 map to
+this FIFO. Use the trained timing estimator result `T` as the reference:
+
+```bash
+root -l -b -q \
+  -e '.L macros/example/deltat.C' \
+  -e 'deltat("ring.root", \
+             field_selector_t(1,197,13,-1,-1), \
+             timing_reference_t("T"), \
+             "deltat_fifo173.root")'
+```
+
+This produces `hDeltaT` with:
+
+```text
+delta_t = time_fifo173 - T
+```
+
+The output can be inspected together with the FIFO-specific histograms
+`hDeltaT_fifo090`, `hDeltaT_fifo102`, and so on, produced by `fit_calib.C`.
+
+### Spill-Dependent Clock Jump
+
+The spill-resolved histogram
+
+```text
+20260623-185238.deltat.fifo173.root:hDeltaT_spill
+```
+
+shows an additional effect in lane 173. The lane corresponds to device
+197, FIFO 13. Restricting the per-spill calculation to the central
+`delta_t` interval `[-2,2]`, its distribution relative to the timing-estimator
+reference `T` changes from spill to spill: one state has a mean around
+`+0.25` native time units, while the other is around `-0.73`. The separation is
+close to one native clock unit.
+
+This is therefore not simply a fixed FIFO offset. It is a spill-dependent clock
+state or phase jump which occurs at spill transitions. In the inspected file,
+the spill means alternate between these two broad levels; the exact mean varies
+because of the finite statistics and the intrinsic distribution width. The
+observation is important because a single channel or FIFO calibration constant
+cannot remove this effect from all spills.
+
+Until the mechanism is understood, calibration checks should retain the spill
+dimension and should not collapse all spills into one `hDeltaT` distribution.
+Potential future corrections will need either a spill-state indicator or a
+spill-local timing adjustment.
+
+The temporary diagnostic macro
+`macros/example/clock_transition.C` detects the two spill states using only the
+central `delta_t` interval `[-2,2]`. It determines the two state means, uses
+their midpoint as the classification threshold, shifts the low state by one
+native unit, and writes both a corrected spill histogram and a run-specific
+`[CLOCK]` file. For lane 173 in the example run:
+
+```bash
+root -l -b -q \
+  -e '.L macros/example/clock_transition.C' \
+  -e 'clock_transition("20260623-185238.deltat.fifo173.root", \
+                       "20260623-185238", 197, 13, \
+                       "clock_transition.fifo173.root", \
+                       "clock-corrections.fifo173.conf")'
+```
+
+The ROOT output contains `hDeltaT_spill` and
+`hDeltaT_spill_aligned`. The generated correction file contains one compact
+row of the form:
+
+```text
+[CLOCK]
+# run device fifo correction spill...
+20260623-185238 197 13 -1 4 6 9 ...
+```
+
+The sign is `-1` for spills whose delta-t state is shifted low, because the
+calibrator applies `corrected_time = calibrated_time - correction`. This macro
+is a diagnostic starting point; the spill-state classification should be
+validated for each run and lane before using the generated corrections in
+production processing.
+
 For physics timing studies, after a triggered file has been augmented with:
 
 ```bash
@@ -662,3 +829,40 @@ The trigger is a direct test-pulse channel in the same RDO being checked. The in
 - `dcalib.sh` currently hardcodes `SORT_WINDOW=32768` for the sorting step before TDC calibration.
 - The TDC calibration should be derived from otherwise uncalibrated data. The sorter stage may compute nominal hit time internally for ordering, but it does not create or persist a `time` branch when the input does not already have one.
 - The output `.conf` fragments are per-FIFO `[TDC]` snippets. A complete calibration file still needs `[CHANNEL]` and `[TRIGGER]` sections, or suitable defaults, before it can be used by `calibrator`.
+
+### Run-Specific Clock Corrections
+
+Clock instabilities are kept in a separate file from the stable TDC/channel
+calibration. The optional file is passed to `calibrator` with `--clock`, and
+the run identifier must be supplied with `--run`:
+
+```bash
+process/bin/calibrator \
+    --input decoded.root \
+    --output calibrated.root \
+    --config process/config/calibration/20260819.calib.conf \
+    --clock clock-corrections.conf \
+    --run 20260623-185238
+```
+
+The format stores one fixed correction sign and an explicit list of affected
+spills for each `(run, device, fifo)`:
+
+```text
+[CLOCK]
+# run device fifo correction spill...
+20260623-185238 197 13 +1 4 7 12 18
+20260623-185238 194 26 -1 3 9 15
+```
+
+Only `+1` and `-1` are valid corrections. A missing row means no correction;
+unaffected spills are not listed. The calibrator applies:
+
+```text
+corrected_time = calibrated_time - clock_correction
+```
+
+to ALCOR hits from the specified `(device,fifo)` while processing the listed
+spill. Duplicate `(run,device,fifo)` rows, duplicate spills, malformed spill
+numbers, and rows belonging to a different run are rejected. Omitting
+`--clock` preserves the normal calibration behavior.

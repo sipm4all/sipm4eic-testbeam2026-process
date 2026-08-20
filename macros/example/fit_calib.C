@@ -1,6 +1,9 @@
 #include <fstream>
 #include <iomanip>
+#include <algorithm>
+#include <cmath>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -166,6 +169,67 @@ fit_calib(std::string infilename,
   }
 
   hAligned->Write();
+
+  // Search the aligned data for a FIFO-wide secondary population displaced
+  // by one native time unit. Eight global channels correspond to one FIFO.
+  // The input histograms are normalized, so total_weight is used as a
+  // statistics proxy; 0.001 corresponds to roughly 245 events in the usual
+  // 244877-frame calibration sample.
+  const double fifo_min_weight = 0.001;
+  const double fifo_min_fraction = 0.05;
+  const double fifo_window = 0.20;
+  std::vector<int> flagged_fifos;
+  for (int fifo = 0; fifo < 256; ++fifo) {
+    int first_channel = 8 * fifo;
+    if (first_channel >= hAligned->GetNbinsX())
+      break;
+
+    double total_weight = 0.;
+    double zero_weight = 0.;
+    double plus_one_weight = 0.;
+    double minus_one_weight = 0.;
+    for (int iy = 1; iy <= hAligned->GetNbinsY(); ++iy) {
+      double delta = hAligned->GetYaxis()->GetBinCenter(iy);
+      double weight = hAligned->Integral(first_channel + 1,
+                                         std::min(first_channel + 8,
+                                                  hAligned->GetNbinsX()),
+                                         iy, iy);
+      total_weight += weight;
+      if (std::abs(delta) < fifo_window)
+        zero_weight += weight;
+      if (std::abs(delta - 1.) < fifo_window)
+        plus_one_weight += weight;
+      if (std::abs(delta + 1.) < fifo_window)
+        minus_one_weight += weight;
+    }
+
+    if (total_weight < fifo_min_weight)
+      continue;
+
+    double plus_fraction = plus_one_weight / total_weight;
+    double minus_fraction = minus_one_weight / total_weight;
+    if (plus_fraction >= fifo_min_fraction || minus_fraction >= fifo_min_fraction) {
+      flagged_fifos.push_back(fifo);
+      std::cout << "FIFO " << fifo
+                << ": total=" << total_weight
+                << " near0=" << zero_weight
+                << " plus1=" << plus_one_weight
+                << " minus1=" << minus_one_weight
+                << " fractions=(" << plus_fraction
+                << "," << minus_fraction << ")" << std::endl;
+
+      auto hFifo = (TH1 *)hAligned->ProjectionY(Form("hDeltaT_fifo%03d", fifo),
+                                                first_channel + 1,
+                                                std::min(first_channel + 8,
+                                                         hAligned->GetNbinsX()));
+      hFifo->SetTitle(Form("aligned delta-t, FIFO %d;delta-t;weighted entries", fifo));
+      hFifo->Write();
+      delete hFifo;
+    }
+  }
+  std::cout << "FIFO one-cycle diagnostics: " << flagged_fifos.size()
+            << " selected" << std::endl;
+
   fout->Close();
   fin->Close();
 }
