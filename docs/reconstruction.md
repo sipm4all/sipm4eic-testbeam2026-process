@@ -168,7 +168,10 @@ rows such as:
 ```
 
 The correction applies only to ALCOR hits from that `(device,fifo)` and those
-spills. Omitting `--clock` preserves the normal processing behavior.
+spills. A single clock file may contain rows for multiple runs; `--run` selects
+the rows for the current run and ignores rows for other runs. If the selected
+run has no rows, no clock correction is applied. Omitting `--clock` preserves
+the normal processing behavior.
 
 For each decoded FIFO file, `process.sh` runs:
 

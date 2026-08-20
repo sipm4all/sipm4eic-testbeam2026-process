@@ -79,7 +79,10 @@ process/scripts/process.sh \
 
 The clock file contains `[CLOCK]` rows of the form
 `run device fifo correction spill...`; only `+1` and `-1` corrections are
-allowed. It is optional and is not part of the stable TDC/channel calibration.
+allowed. A file may contain rows for multiple runs: `--run` selects the rows
+for the current run, and a run with no matching rows receives no clock
+correction. It is optional and is not part of the stable TDC/channel
+calibration.
 - `coordinator`: creates or updates the spatial `x` and `y` branches in the calibrated `alcor` tree.
 - `sorter`: sorts each single-lane stream in calibrated time.
 - `after-pulse-suppressor`: suppresses close repeated ALCOR hits per channel.

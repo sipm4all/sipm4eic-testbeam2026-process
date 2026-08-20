@@ -67,9 +67,6 @@ clock_calibration_t::load(const std::string &filename, const std::string &run)
         throw std::runtime_error("line " + std::to_string(lineno) + ": clock row before [CLOCK] section");
       if (token.size() < 5)
         throw std::runtime_error("line " + std::to_string(lineno) + ": [CLOCK] expects run device fifo correction spill...");
-      if (token[0] != run)
-        throw std::runtime_error("line " + std::to_string(lineno) + ": clock correction belongs to run '" + token[0] + "', expected '" + run + "'");
-
       std::size_t pos = 0;
       int device = std::stoi(token[1], &pos);
       if (pos != token[1].size())
@@ -81,10 +78,7 @@ clock_calibration_t::load(const std::string &filename, const std::string &run)
       if (pos != token[3].size() || (sign != -1 && sign != 1))
         throw std::runtime_error("line " + std::to_string(lineno) + ": correction must be +1 or -1");
 
-      auto key = std::make_tuple(run, device, fifo);
-      if (!seen.insert(key).second)
-        throw std::runtime_error("line " + std::to_string(lineno) + ": duplicate correction for run/device/fifo");
-      entry_t entry{run, device, fifo, sign, {}};
+      entry_t entry{token[0], device, fifo, sign, {}};
       for (std::size_t i = 4; i < token.size(); ++i) {
         int spill = std::stoi(token[i], &pos);
         if (pos != token[i].size() || spill < 0)
@@ -94,6 +88,16 @@ clock_calibration_t::load(const std::string &filename, const std::string &run)
       }
       if (entry.spills.empty())
         throw std::runtime_error("line " + std::to_string(lineno) + ": empty spill list");
+
+      // A combined clock file may contain rows for many runs. Only retain
+      // rows for the run selected by calibrator's --run argument.
+      if (token[0] != run)
+        continue;
+
+      auto key = std::make_tuple(run, device, fifo);
+      if (!seen.insert(key).second)
+        throw std::runtime_error("line " + std::to_string(lineno) + ": duplicate correction for run/device/fifo");
+      entry.run = run;
       entries_.push_back(std::move(entry));
       ++rules_;
     }

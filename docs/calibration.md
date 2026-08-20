@@ -865,6 +865,8 @@ corrected_time = calibrated_time - clock_correction
 ```
 
 to ALCOR hits from the specified `(device,fifo)` while processing the listed
-spill. Duplicate `(run,device,fifo)` rows, duplicate spills, malformed spill
-numbers, and rows belonging to a different run are rejected. Omitting
-`--clock` preserves the normal calibration behavior.
+spill. A single clock file may contain rows for multiple runs; `--run` selects
+which rows are active and rows for other runs are ignored. If the selected run
+has no rows, no clock correction is applied. Duplicate `(run,device,fifo)` rows,
+duplicate spills, and malformed spill numbers are rejected. Omitting `--clock`
+preserves the normal calibration behavior.
