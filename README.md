@@ -78,8 +78,9 @@ process/scripts/process.sh \
 ```
 
 The clock file contains `[CLOCK]` rows of the form
-`run device fifo correction spill...`; only `+1` and `-1` corrections are
-allowed. A file may contain rows for multiple runs: `--run` selects the rows
+`run device fifo correction spill...`. Clock-transition files use `+1`: the
+lower-time state is canonical and higher-time spills are corrected. A file may
+contain rows for multiple runs: `--run` selects the rows
 for the current run, and a run with no matching rows receives no clock
 correction. It is optional and is not part of the stable TDC/channel
 calibration.

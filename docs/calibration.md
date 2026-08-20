@@ -854,11 +854,13 @@ spills for each `(run, device, fifo)`:
 [CLOCK]
 # run device fifo correction spill...
 20260623-185238 197 13 +1 4 7 12 18
-20260623-185238 194 26 -1 3 9 15
+20260623-185238 194 26 +1 3 9 15
 ```
 
-Only `+1` and `-1` are valid corrections. A missing row means no correction;
-unaffected spills are not listed. The calibrator applies:
+Clock-transition correction files use a fixed `+1` convention. The lower-time
+state is the canonical state and only higher-time spills are listed for
+correction. A missing row means no correction; unaffected spills are not
+listed. The calibrator applies:
 
 ```text
 corrected_time = calibrated_time - clock_correction

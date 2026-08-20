@@ -100,13 +100,11 @@ clock_transition(const std::string &infilename,
       continue;
     bool separated = separation >= 0.5 && low_weight > 0. && high_weight > 0.;
     bool low_state = means[ix - 1] < threshold;
-    bool minority_state = separated &&
-                          ((low_count < high_count && low_state) ||
-                           (high_count < low_count && !low_state));
     int shift = 0;
-    if (minority_state) {
-      // Keep the majority state fixed and move the minority by one unit.
-      shift = low_count < high_count ? 1 : -1;
+    if (separated && !low_state) {
+      // The low state is the canonical state. Every emitted correction is +1.
+      // The high state is shifted down by one clock unit.
+      shift = 1;
       corrected_spills.push_back(ix - 1);
     }
 
@@ -136,7 +134,7 @@ clock_transition(const std::string &infilename,
        << "[CLOCK]\n"
        << "# run device fifo correction spill...\n";
   if (!corrected_spills.empty()) {
-    int correction = low_count < high_count ? -1 : 1;
+    const int correction = 1;
     conf << run << ' ' << device << ' ' << fifo << ' ' << correction;
     for (int spill : corrected_spills)
       conf << ' ' << spill;
@@ -149,8 +147,8 @@ clock_transition(const std::string &infilename,
   std::cout << "high-state mean: " << high_mean << std::endl;
   std::cout << "threshold:       " << threshold << std::endl;
   std::cout << "state counts:     low=" << low_count << " high=" << high_count << std::endl;
-  std::cout << "reference state:  " << (low_count >= high_count ? "low" : "high") << std::endl;
-  std::cout << "clock correction: " << (low_count < high_count ? -1 : 1) << std::endl;
+  std::cout << "reference state:  low (fixed convention)" << std::endl;
+  std::cout << "clock correction: +1" << std::endl;
   std::cout << "corrected spills: " << corrected_spills.size() << std::endl;
   std::cout << "output:           " << outfilename << std::endl;
   std::cout << "clock config:     " << conffilename << std::endl;
