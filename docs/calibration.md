@@ -604,6 +604,30 @@ The generated text file has this format:
 # device fifo column pixel offset
 ```
 
+### Merging Residual Channel Calibration
+
+The offsets written by `fit_calib.C` are residuals: they are measured after a
+base calibration has already been applied. Add them to the base `[CHANNEL]`
+offsets with:
+
+```bash
+process/scripts/merge_residual_calibration.py \
+    --base process/config/calibration/20260819.calib.conf \
+    --residual fit_calib.deltat.20260821.conf \
+    --output process/config/calibration/calibration.20260820.conf
+```
+
+For every matching exact channel, the script writes:
+
+```text
+final_offset = base_offset + residual_offset
+```
+
+Residual-only channels are appended as exact `[CHANNEL]` overrides, while the
+`[TDC]` and `[TRIGGER]` sections are preserved from the base file. The script
+prints the number of updated and added rows and the result should be checked
+by loading it with `process/bin/calibrator` before use.
+
 Only accepted channels are written. The macro converts the global Cherenkov
 channel index back to the electronics address using 2048 channels arranged as
 eight devices, eight 32-channel chips per device, and four pixels per column.

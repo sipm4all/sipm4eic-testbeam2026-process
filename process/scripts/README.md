@@ -10,6 +10,20 @@ cmake --build process/build -j
 cmake --install process/build
 ```
 
+## merge_residual_calibration.py
+
+`merge_residual_calibration.py` combines a base calibration with residual
+`[CHANNEL]` offsets produced by `macros/example/fit_calib.C`. It adds residual
+offsets to matching exact channels and appends residual-only channels as exact
+overrides. The TDC and trigger sections come from the base file.
+
+```bash
+process/scripts/merge_residual_calibration.py \
+  --base process/config/calibration/20260819.calib.conf \
+  --residual fit_calib.deltat.20260821.conf \
+  --output process/config/calibration/calibration.20260820.conf
+```
+
 
 
 ## decoder.sh
