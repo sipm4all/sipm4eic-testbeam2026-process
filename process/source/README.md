@@ -281,6 +281,79 @@ sigmaT[nframes]
 
 `T0` and `sigma0` refer to TIMING0, `T1` and `sigma1` refer to TIMING1, and `T = (T0 + T1) / 2`. Values are in the estimator native time unit, `3.125 ns`. `timing_valid` is `1` only when the frame contains one usable time for every TIMING DO channel in both scintillators. If one or more channels are missing, the timing values are written as `NaN` and `timing_valid` is `0`.
 
+### ring-finder
+
+Finds zero or more Cherenkov ring candidates in each frame using calibrated
+Cherenkov `x`, `y`, and `time` values:
+
+```bash
+process/bin/ring-finder \
+  --input triggered.timing.root \
+  --output triggered.rings.root \
+  --time-window 5
+```
+
+The finder obtains spatial circle candidates with RANSAC, estimates each
+candidate time from its spatial inliers using the median, and retains only
+hits passing both the radial tolerance and ring time window. Accepted inliers
+are removed and the search repeats, allowing multiple separated rings per
+frame.
+
+The output adds flattened per-frame branches:
+
+```text
+nring
+ring_frame_start[nframes]
+ring_frame_nrings[nframes]
+ring_x0[nring]
+ring_y0[nring]
+ring_r[nring]
+ring_e[nring]
+ring_phi[nring]
+ring_ninliers[nring]
+```
+
+For frame `i`, use `ring_frame_start[i]` and `ring_frame_nrings[i]` to access
+its rings in the flattened arrays. `ring_r` is the semi-major axis,
+`ring_e` is the eccentricity, `ring_phi` is the rotation angle in radians,
+and `ring_time` is the fitted ring time in native time units.
+Setting `ring_e=0` gives a circle. Defaults are a radial tolerance of `3.5`,
+a time window of `5` native units, and `8` rings maximum. Use
+`--tolerance`, `--time-window`, `--min-inliers`, `--iterations`, and
+`--max-rings` to change them. Candidate centers and radii are constrained by
+`--min-x0`, `--max-x0`, `--min-y0`, `--max-y0`, `--min-radius`, and
+`--max-radius` (defaults: center in `[-100,100]` and radius in `[1,200]`).
+There is no eccentricity cut: valid ellipse candidates are retained, while
+the original circle is used as a fallback if ellipse refinement loses inliers.
+
+### offset_calibrator
+
+Fits the peak position in each global-channel projection of the `hDeltaT` histogram produced by `macros/example/deltat.C` and writes channel timing offsets:
+
+```bash
+process/bin/offset_calibrator \
+  --input deltat.root \
+  --output timing_offsets.conf \
+  --min-entries 1000
+```
+
+The calibration output contains a `[CHANNEL]` section. The convention is:
+
+```text
+calibrated_time = raw_time - offset
+```
+
+The tool is currently restricted to Cherenkov global channels `0..2047` (devices `192..199`). Channels with at least `--min-entries` entries in the `[-5,5]` delta-t interval receive a local Gaussian fit around their highest bin. The default is `1000` entries. A fit is accepted only when its peak-position uncertainty is no larger than `0.1` clock units. Channels failing either criterion use the median fitted position from the repeated hardware, in this order:
+
+```text
+channel position within PDU:  global_channel % 256
+channel position within chip: global_channel % 32
+channel position within FIFO: global_channel % 8
+global median
+```
+
+The companion diagnostic file `<output>.root` contains `hOffset`, `hEntries` (the `[-5,5]` count), `hUncertainty`, `hSourceLevel`, the original `hDeltaT`, the shifted `hDeltaT_corrected`, and the `offsets` summary tree. The corrected histogram applies `delta_t_corrected = delta_t - offset` independently for every channel. Source levels are `256`, `32`, `8`, and `1` for PDU, chip, FIFO, and global fallback respectively; `0` means a direct fit. Inspect this diagnostic before using the generated calibration file in production.
+
 ## Shared Headers
 
 - `data_word.h`: common `data_t` representation for the `alcor` tree, optional calibrated time binding, and word-type helpers.

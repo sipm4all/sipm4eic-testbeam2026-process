@@ -33,6 +33,16 @@ struct hit_t {
   double y;
 };
 
+struct ring_t {
+  double x0;
+  double y0;
+  double radius;
+  double eccentricity;
+  double phi;
+  double time;
+  int ninliers;
+};
+
 class trigger_reader_t {
 public:
   trigger_reader_t() = default;
@@ -47,6 +57,7 @@ public:
   int nframes() const;
   int nsources() const;
   bool has_timing() const;
+  bool has_rings() const;
   int timing_valid() const;
   double T0() const;
   double sigma0() const;
@@ -61,6 +72,7 @@ public:
   const std::vector<hit_t> &trigger_hits() const;
   const std::vector<hit_t> &timing_hits() const;
   const std::vector<hit_t> &cherenkov_hits() const;
+  const std::vector<ring_t> &rings() const;
 
 private:
   struct category_t {
@@ -108,6 +120,16 @@ private:
   std::unique_ptr<TTreeReaderArray<double>> sigma1_branch_;
   std::unique_ptr<TTreeReaderArray<double>> T_branch_;
   std::unique_ptr<TTreeReaderArray<double>> sigmaT_branch_;
+  std::unique_ptr<TTreeReaderValue<int>> nring_branch_;
+  std::unique_ptr<TTreeReaderArray<int>> ring_frame_start_branch_;
+  std::unique_ptr<TTreeReaderArray<int>> ring_frame_nrings_branch_;
+  std::unique_ptr<TTreeReaderArray<double>> ring_x0_branch_;
+  std::unique_ptr<TTreeReaderArray<double>> ring_y0_branch_;
+  std::unique_ptr<TTreeReaderArray<double>> ring_r_branch_;
+  std::unique_ptr<TTreeReaderArray<double>> ring_e_branch_;
+  std::unique_ptr<TTreeReaderArray<double>> ring_phi_branch_;
+  std::unique_ptr<TTreeReaderArray<double>> ring_time_branch_;
+  std::unique_ptr<TTreeReaderArray<int>> ring_ninliers_branch_;
 
   category_t trigger_;
   category_t timing_;
@@ -119,11 +141,13 @@ private:
   int nframes_ = 0;
   int frame_index_ = -1;
   bool has_timing_ = false;
+  bool has_rings_ = false;
 
   std::vector<source_t> sources_;
   std::vector<hit_t> trigger_hits_;
   std::vector<hit_t> timing_hits_;
   std::vector<hit_t> cherenkov_hits_;
+  std::vector<ring_t> rings_;
 };
 
 inline bool
@@ -262,6 +286,7 @@ trigger_reader_t::reset()
   trigger_hits_.clear();
   timing_hits_.clear();
   cherenkov_hits_.clear();
+  rings_.clear();
 
   trigger_.reset();
   timing_.reset();
@@ -280,6 +305,16 @@ trigger_reader_t::reset()
   sigma1_branch_.reset();
   T_branch_.reset();
   sigmaT_branch_.reset();
+  nring_branch_.reset();
+  ring_frame_start_branch_.reset();
+  ring_frame_nrings_branch_.reset();
+  ring_x0_branch_.reset();
+  ring_y0_branch_.reset();
+  ring_r_branch_.reset();
+  ring_e_branch_.reset();
+  ring_phi_branch_.reset();
+  ring_time_branch_.reset();
+  ring_ninliers_branch_.reset();
   meta_reader_.reset();
   reader_.reset();
   meta_tree_ = nullptr;
@@ -292,6 +327,7 @@ trigger_reader_t::reset()
   nframes_ = 0;
   frame_index_ = -1;
   has_timing_ = false;
+  has_rings_ = false;
 }
 
 inline bool
@@ -348,6 +384,29 @@ trigger_reader_t::open(const std::string &filename)
     sigmaT_branch_.reset(new TTreeReaderArray<double>(*reader_, "sigmaT"));
   }
 
+  has_rings_ = tree_->GetBranch("nring") &&
+               tree_->GetBranch("ring_frame_start") &&
+               tree_->GetBranch("ring_frame_nrings") &&
+               tree_->GetBranch("ring_x0") &&
+               tree_->GetBranch("ring_y0") &&
+               tree_->GetBranch("ring_r") &&
+               tree_->GetBranch("ring_e") &&
+               tree_->GetBranch("ring_phi") &&
+               tree_->GetBranch("ring_time") &&
+               tree_->GetBranch("ring_ninliers");
+  if (has_rings_) {
+    nring_branch_.reset(new TTreeReaderValue<int>(*reader_, "nring"));
+    ring_frame_start_branch_.reset(new TTreeReaderArray<int>(*reader_, "ring_frame_start"));
+    ring_frame_nrings_branch_.reset(new TTreeReaderArray<int>(*reader_, "ring_frame_nrings"));
+    ring_x0_branch_.reset(new TTreeReaderArray<double>(*reader_, "ring_x0"));
+    ring_y0_branch_.reset(new TTreeReaderArray<double>(*reader_, "ring_y0"));
+    ring_r_branch_.reset(new TTreeReaderArray<double>(*reader_, "ring_r"));
+    ring_e_branch_.reset(new TTreeReaderArray<double>(*reader_, "ring_e"));
+    ring_phi_branch_.reset(new TTreeReaderArray<double>(*reader_, "ring_phi"));
+    ring_time_branch_.reset(new TTreeReaderArray<double>(*reader_, "ring_time"));
+    ring_ninliers_branch_.reset(new TTreeReaderArray<int>(*reader_, "ring_ninliers"));
+  }
+
   meta_tree_ = (TTree *)file_->Get("spill_participation");
   if (meta_tree_) {
     for (auto name : {"counter", "nsources", "source_device", "source_fifo"}) {
@@ -381,6 +440,7 @@ trigger_reader_t::next_spill()
   trigger_hits_.clear();
   timing_hits_.clear();
   cherenkov_hits_.clear();
+  rings_.clear();
   frame_index_ = -1;
 
   if (!reader_)
@@ -441,6 +501,7 @@ trigger_reader_t::next_frame()
   if (frame_index_ + 1 >= nframes_)
     return false;
 
+  rings_.clear();
   ++frame_index_;
 
   if (!trigger_.fill(trigger_hits_, frame_index_, nframes_, "trigger"))
@@ -449,6 +510,25 @@ trigger_reader_t::next_frame()
     return false;
   if (!cherenkov_.fill(cherenkov_hits_, frame_index_, nframes_, "cherenkov"))
     return false;
+
+  if (has_rings_) {
+    int total = **nring_branch_;
+    int first = (*ring_frame_start_branch_)[frame_index_];
+    int n = (*ring_frame_nrings_branch_)[frame_index_];
+    if (total < 0 || first < 0 || n < 0 || first + n > total) {
+      std::cerr << "ERROR: invalid ring frame indexing"
+                << " frame=" << frame_index_
+                << " first=" << first << " nrings=" << n
+                << " total=" << total << std::endl;
+      return false;
+    }
+    rings_.reserve(n);
+    for (int i = first; i < first + n; ++i)
+      rings_.push_back({(*ring_x0_branch_)[i], (*ring_y0_branch_)[i],
+                        (*ring_r_branch_)[i], (*ring_e_branch_)[i],
+                        (*ring_phi_branch_)[i], (*ring_time_branch_)[i],
+                        (*ring_ninliers_branch_)[i]});
+  }
 
   return true;
 }
@@ -481,6 +561,12 @@ inline bool
 trigger_reader_t::has_timing() const
 {
   return has_timing_;
+}
+
+inline bool
+trigger_reader_t::has_rings() const
+{
+  return has_rings_;
 }
 
 inline int
@@ -537,6 +623,12 @@ trigger_reader_t::sigmaT() const
   if (!has_timing_ || frame_index_ < 0)
     return std::numeric_limits<double>::quiet_NaN();
   return (*sigmaT_branch_)[frame_index_];
+}
+
+inline const std::vector<ring_t> &
+trigger_reader_t::rings() const
+{
+  return rings_;
 }
 
 inline const std::vector<source_t> &

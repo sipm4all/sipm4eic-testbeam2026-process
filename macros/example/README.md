@@ -29,6 +29,11 @@ x = [-100, 100] mm
 y = [-100, 100] mm
 ```
 
+If the input file contains the flattened ring branches produced by
+`process/bin/ring-finder`, `display.C` overlays the found circles in red and
+labels them per frame. Files without ring branches remain supported and show
+only the Cherenkov hit display.
+
 The colour of each square is:
 
 ```text
