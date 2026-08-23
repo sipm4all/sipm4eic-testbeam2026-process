@@ -315,7 +315,13 @@ pixel  = *
 To compare all ALCOR hits against that trigger reference:
 
 ```bash
-root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/<run>/trigger/triggered.fingers.root\", channel_selector_t(1, -1), channel_selector_t(9, 200), \"/data/2026-testbeam/process/<run>/trigger/deltat.fingers.trigger.root\")"
+root -l -b -q \
+  -e '.L sipm4eic-testbeam2026-process/macros/example/deltat.C' \
+  -e 'deltat("/data/2026-testbeam/process/<run>/trigger/triggered.fingers.root", \
+             {std::make_shared<channel_target_t>(-1)}, \
+             std::make_shared<trigger_reference_t>(200), \
+             {}, \
+             "/data/2026-testbeam/process/<run>/trigger/deltat.fingers.trigger.root")'
 ```
 
 This fills:
@@ -329,7 +335,7 @@ hDeltaT_tdc2   delta_t versus fine for target TDC 2
 hDeltaT_tdc3   delta_t versus fine for target TDC 3
 ```
 
-The target selector `channel_selector_t(1, -1)` means all type-1 ALCOR hits, with `-1` used as the wildcard channel index. The reference selector `channel_selector_t(9, 200)` means trigger tags from device `200`.
+The target selector `channel_selector_t(1, -1)` means all type-1 ALCOR hits, with `-1` used as the wildcard channel index. The reference `trigger_reference_t(200)` means trigger tags from device `200`.
 
 If the triggered file has first been augmented with the trained TIMING estimator, `deltat.C` can also use the reconstructed TIMING as the reference:
 
@@ -338,7 +344,13 @@ sipm4eic-testbeam2026-process/process/scripts/timing.sh \
     --run <run> \
     --trigger fingers
 
-root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/<run>/trigger/triggered.fingers.timing.root\", channel_selector_t(1, -1), timing_reference_t(\"T\"), \"/data/2026-testbeam/process/<run>/trigger/deltat.fingers.timing.root\")"
+root -l -b -q \
+  -e '.L sipm4eic-testbeam2026-process/macros/example/deltat.C' \
+  -e 'deltat("/data/2026-testbeam/process/<run>/trigger/triggered.fingers.timing.root", \
+             {std::make_shared<channel_target_t>(-1)}, \
+             std::make_shared<timing_reference_t>("T"), \
+             {}, \
+             "/data/2026-testbeam/process/<run>/trigger/deltat.fingers.timing.root")'
 ```
 
 The timing-reference choices are `timing_reference_t("T")` for the combined estimator, `timing_reference_t("T0")` for TIMING0, and `timing_reference_t("T1")` for TIMING1. This mode uses only frames with `timing_valid == 1`.
@@ -370,13 +382,25 @@ sipm4eic-testbeam2026-process/process/scripts/trigger.sh \
     --trigger sipm4eic-testbeam2026-process/process/config/trigger/fingers.conf fingers \
     --window 256
 
-root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/${run}/trigger/triggered.fingers.root\", channel_selector_t(1, -1), channel_selector_t(9, 200), \"/data/2026-testbeam/process/${run}/trigger/deltat.fingers.trigger.root\")"
+root -l -b -q \
+  -e '.L sipm4eic-testbeam2026-process/macros/example/deltat.C' \
+  -e 'deltat("/data/2026-testbeam/process/${run}/trigger/triggered.fingers.root", \
+             {std::make_shared<channel_target_t>(-1)}, \
+             std::make_shared<trigger_reference_t>(200), \
+             {}, \
+             "/data/2026-testbeam/process/${run}/trigger/deltat.fingers.trigger.root")'
 
 sipm4eic-testbeam2026-process/process/scripts/timing.sh \
     --run "${run}" \
     --trigger fingers
 
-root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/${run}/trigger/triggered.fingers.timing.root\", channel_selector_t(1, -1), timing_reference_t(\"T\"), \"/data/2026-testbeam/process/${run}/trigger/deltat.fingers.timing.root\")"
+root -l -b -q \
+  -e '.L sipm4eic-testbeam2026-process/macros/example/deltat.C' \
+  -e 'deltat("/data/2026-testbeam/process/${run}/trigger/triggered.fingers.timing.root", \
+             {std::make_shared<channel_target_t>(-1)}, \
+             std::make_shared<timing_reference_t>("T"), \
+             {}, \
+             "/data/2026-testbeam/process/${run}/trigger/deltat.fingers.timing.root")'
 ```
 
 The final triggered output is:

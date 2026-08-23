@@ -540,7 +540,13 @@ For run `20260618-183625`, use the same test-pulse trigger channel as the diagno
 
 ```bash
 for dev in {192..199}; do
-    root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/20260618-183625/trigger/triggered.calibcheck_rdo-${dev}.root\", 1, ${dev}, 0, 0, 0, \"/data/2026-testbeam/process/20260618-183625/trigger/deltat.calibcheck_rdo-${dev}.root\")"
+    root -l -b -q \
+        -e ".L sipm4eic-testbeam2026-process/macros/example/deltat.C" \
+        -e "deltat(\"/data/2026-testbeam/process/20260618-183625/trigger/triggered.calibcheck_rdo-${dev}.root\", \
+                    std::make_shared<field_target_t>(${dev}, 0, -1, -1), \
+                    std::make_shared<trigger_reference_t>(${dev}), \
+                    {}, \
+                    \"/data/2026-testbeam/process/20260618-183625/trigger/deltat.calibcheck_rdo-${dev}.root\")"
 done
 ```
 
@@ -548,7 +554,13 @@ For run `20260618-185127`, use the FIFO-16 test-pulse trigger channel:
 
 ```bash
 for dev in {192..199}; do
-    root -l -b -q "sipm4eic-testbeam2026-process/macros/example/deltat.C(\"/data/2026-testbeam/process/20260618-185127/trigger/triggered.calibcheck_rdo-${dev}.root\", 1, ${dev}, 16, 0, 0, \"/data/2026-testbeam/process/20260618-185127/trigger/deltat.calibcheck_rdo-${dev}.root\")"
+    root -l -b -q \
+        -e ".L sipm4eic-testbeam2026-process/macros/example/deltat.C" \
+        -e "deltat(\"/data/2026-testbeam/process/20260618-185127/trigger/triggered.calibcheck_rdo-${dev}.root\", \
+                    std::make_shared<field_target_t>(${dev}, 16, -1, -1), \
+                    std::make_shared<trigger_reference_t>(${dev}), \
+                    {}, \
+                    \"/data/2026-testbeam/process/20260618-185127/trigger/deltat.calibcheck_rdo-${dev}.root\")"
 done
 ```
 
@@ -736,8 +748,9 @@ this FIFO. Use the trained timing estimator result `T` as the reference:
 root -l -b -q \
   -e '.L macros/example/deltat.C' \
   -e 'deltat("ring.root", \
-             field_selector_t(1,197,13,-1,-1), \
-             timing_reference_t("T"), \
+             std::make_shared<field_target_t>(197, 13, -1, -1), \
+             std::make_shared<timing_reference_t>("T"), \
+             {}, \
              "deltat_fifo173.root")'
 ```
 
@@ -831,8 +844,9 @@ the same macro can use the trained TIMING estimator as the reference:
 
 ```cpp
 deltat("triggered.fingers.timing.root",
-       channel_selector_t(1, -1),
-       timing_reference_t("T"),
+       {std::make_shared<channel_target_t>(-1)},
+       std::make_shared<timing_reference_t>("T"),
+       {},
        "deltat.fingers.timing.root");
 ```
 

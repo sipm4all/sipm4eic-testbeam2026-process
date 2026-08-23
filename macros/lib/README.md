@@ -38,3 +38,42 @@ for (const auto &source : reader.sources()) {
 ```
 
 The returned source vector lists only the `(device,fifo)` sources that contributed to the current spill. Files without the metadata tree simply return an empty source vector.
+
+## frame_selection.h
+
+`frame_selection.h` contains the shared polymorphic selection API used by
+`display.C` and `deltat.C`.
+
+The API separates three roles:
+
+```text
+target_t     selects individual hits
+reference_t  calculates one reference time per frame
+selection_t  accepts or rejects a complete frame
+```
+
+Targets are processed once per frame and combined with logical AND. This is
+used, for example, to select type-1 hits that also belong to a stored ring:
+
+```cpp
+std::vector<target_ptr_t> targets = {
+    std::make_shared<channel_target_t>(-1),
+    std::make_shared<ring_target_t>(8, 64, 3.5, 1., 200.)
+};
+```
+
+The available hit-target constructors are:
+
+```cpp
+field_target_t(device, fifo, column, pixel)
+fifo_target_t(device, fifo)
+channel_target_t(channel)
+trigger_target_t(device)
+```
+
+The first three select type-1 hits. `trigger_target_t` selects type-9 hits;
+`-1` is a wildcard for address fields where applicable.
+
+`ring_target_t` consumes the rings already stored in the input `ring` tree. It
+does not run RANSAC. `ring_selection_t` is a separate frame-level filter used
+to select frames by stored ring centre, radius, and ring count.
