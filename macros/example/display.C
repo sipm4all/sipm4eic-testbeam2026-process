@@ -3,6 +3,7 @@
 #include <TBox.h>
 #include <TCanvas.h>
 #include <TH2D.h>
+#include <TH1D.h>
 #include <TPad.h>
 #include <TStyle.h>
 #include <TText.h>
@@ -15,6 +16,9 @@
 #include <limits>
 #include <string>
 #include <vector>
+
+constexpr double time_min = -5.;
+constexpr double time_max = 5.;
 
 struct field_selector_t {
   int type;
@@ -97,6 +101,8 @@ passes_ring_selection(const trigger_reader_t &reader,
   const int n = static_cast<int>(reader.rings().size());
   if (n < selection.min_n_rings || n > selection.max_n_rings)
     return false;
+  if (n == 0)
+    return true;
 
   for (const auto &ring : reader.rings()) {
     if (ring.x0 >= selection.min_x0 && ring.x0 <= selection.max_x0 &&
@@ -218,11 +224,55 @@ find_reference_time(const trigger_reader_t &reader,
 }
 
 void
+draw_frame_delta(const trigger_reader_t &reader,
+                 bool use_reference,
+                 double reference_time)
+{
+  constexpr double time_to_ns = 3.125;
+  static TCanvas *canvas = nullptr;
+  if (!canvas) {
+    canvas = new TCanvas("cDelta", "Cherenkov #Deltat", 800, 800);
+    canvas->SetMargin(0.15, 0.15, 0.15, 0.15);
+    canvas->SetFillColor(kWhite);
+    canvas->SetFrameFillColor(kWhite);
+  }
+  canvas->cd();
+
+  auto histogram = new TH1D("display_delta", "", 400, -100, 100);
+  histogram->SetDirectory(nullptr);
+  histogram->SetStats(0);
+  histogram->SetTitle(Form("spill %d frame %d Cherenkov timing;#Deltat [ns];hits",
+                           reader.spill_id(), reader.frame_index()));
+  histogram->SetLineColor(kBlack);
+  histogram->SetFillColor(kAzure - 9);
+
+  double reference = reference_time;
+  if (!use_reference) {
+    reference = std::numeric_limits<double>::infinity();
+    for (const auto &hit : reader.cherenkov_hits())
+      if (std::isfinite(hit.time))
+        reference = std::min(reference, hit.time);
+  }
+  if (std::isfinite(reference)) {
+    for (const auto &hit : reader.cherenkov_hits()) {
+      if (std::isfinite(hit.time))
+        histogram->Fill((hit.time - reference) * time_to_ns);
+    }
+  }
+
+  gPad->Clear();
+  histogram->Draw();
+  gPad->Modified();
+  gPad->Update();
+}
+
+void
 draw_frame_map(trigger_reader_t &reader,
                bool use_reference,
                double reference_time,
                double pixel_size)
 {
+  constexpr double time_to_ns = 3.125;
   auto hits = reader.cherenkov_hits();
   std::vector<hit_t> drawable;
   drawable.reserve(hits.size());
@@ -238,8 +288,8 @@ draw_frame_map(trigger_reader_t &reader,
     vmax = std::max(vmax, hit.time);
   }
 
-  constexpr double color_min = -15.;
-  constexpr double color_max = 15.;
+  constexpr double color_min = time_min;
+  constexpr double color_max = time_max;
 
   gStyle->SetPalette(kBird);
   gStyle->SetPalette(kRainbow);
@@ -253,6 +303,7 @@ draw_frame_map(trigger_reader_t &reader,
     frame->GetXaxis()->SetTitleOffset(1.5);
     frame->GetYaxis()->SetTitleOffset(1.5);
     gPad->Update();
+    draw_frame_delta(reader, use_reference, reference_time);
     return;
   }
 
@@ -296,7 +347,7 @@ draw_frame_map(trigger_reader_t &reader,
     box->Draw("same");
   }
   auto palette_title = new TText((palette_x1 + palette_x2) * 0.5, palette_y2 + 15.,
-                                 use_reference ? "t (au)" : "time");
+                                 use_reference ? "t (ns)" : "time (ns)");
   palette_title->SetTextSize(0.035);
   palette_title->SetTextFont(42);
   palette_title->SetTextAlign(21);
@@ -313,7 +364,7 @@ draw_frame_map(trigger_reader_t &reader,
   }
 
   for (const auto &hit : drawable) {
-    auto dt = use_reference ? hit.time - reference_time : hit.time - vmin;
+    auto dt = (use_reference ? hit.time - reference_time : hit.time - vmin) * time_to_ns;
     auto box = new TBox(hit.x - 0.5 * pixel_size, hit.y - 0.5 * pixel_size,
                         hit.x + 0.5 * pixel_size, hit.y + 0.5 * pixel_size);
     box->SetFillColor(color_index(dt, color_min, color_max));
@@ -330,7 +381,8 @@ draw_frame_map(trigger_reader_t &reader,
                                  0., 360., ring.phi * 180. / std::acos(-1.));
       circle->SetFillStyle(0);
       const double ring_value = use_reference ?
-        ring.time - reference_time : ring.time - vmin;
+        (ring.time - reference_time) * time_to_ns :
+        (ring.time - vmin) * time_to_ns;
       circle->SetLineColor(color_index(ring_value, color_min, color_max));
       circle->SetLineWidth(2);
       circle->Draw("same");
@@ -341,14 +393,18 @@ draw_frame_map(trigger_reader_t &reader,
   auto label = new TText(-98., 94.,
                          use_reference ?
                          Form("hits=%zu  dt=[%.3f, %.3f]",
-                              drawable.size(), vmin, vmax) :
+                              drawable.size(),
+                              (vmin - reference_time) * time_to_ns,
+                              (vmax - reference_time) * time_to_ns) :
                          Form("hits=%zu  time range=%.3f  rings=%zu",
-                              drawable.size(), vmax - vmin, reader.rings().size()));
+                              drawable.size(), (vmax - vmin) * time_to_ns,
+                              reader.rings().size()));
   label->SetTextSize(0.03);
   //  label->Draw("same");
 
   gPad->Modified();
   gPad->Update();
+  draw_frame_delta(reader, use_reference, reference_time);
 }
 
 } // namespace
