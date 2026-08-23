@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -17,9 +18,7 @@
 
 namespace {
 
-constexpr int maxframes = 65536;
 constexpr int maxrings = 8;
-constexpr int maxringhits = maxframes * maxrings;
 
 struct point_t {
   double x;
@@ -259,31 +258,38 @@ bool ring_finder(const std::string &filename, const std::string &outfilename,
     std::cerr << "ERROR: could not open input file: " << filename << std::endl;
     return false;
   }
-  auto tin = (TTree *)fin->Get("frames");
-  if (!tin) {
-    std::cerr << "ERROR: missing frames tree" << std::endl;
+  auto frames_in = (TTree *)fin->Get("frames");
+  auto cherenkov_in = (TTree *)fin->Get("cherenkov");
+  if (!frames_in || !cherenkov_in) {
+    std::cerr << "ERROR: input must contain 'frames' and 'cherenkov' trees" << std::endl;
+    fin->Close();
     return false;
   }
-  for (const char *name : {"nframes", "ncherenkovhits", "cherenkov_frame_start",
-                           "cherenkov_frame_nhits", "cherenkov_x", "cherenkov_y",
-                           "cherenkov_time"})
-    if (!has_branch(tin, name))
-      return false;
-  for (const char *name : {"nring", "ring_frame_start", "ring_frame_nrings",
-                           "ring_x0", "ring_y0", "ring_r", "ring_ninliers"})
-    if (tin->GetBranch(name)) {
-      std::cerr << "ERROR: output branch already exists: " << name << std::endl;
+  for (const char *name : {"nhits", "x", "y", "time"}) {
+    if (!has_branch(cherenkov_in, name)) {
+      fin->Close();
       return false;
     }
+  }
+  if (fin->Get("ring")) {
+    std::cerr << "ERROR: input already contains a 'ring' tree" << std::endl;
+    fin->Close();
+    return false;
+  }
 
-  TTreeReader reader(tin);
-  TTreeReaderValue<int> nframes(reader, "nframes");
-  TTreeReaderValue<int> ncherenkovhits(reader, "ncherenkovhits");
-  TTreeReaderArray<int> frame_start(reader, "cherenkov_frame_start");
-  TTreeReaderArray<int> frame_nhits(reader, "cherenkov_frame_nhits");
-  TTreeReaderArray<double> x(reader, "cherenkov_x");
-  TTreeReaderArray<double> y(reader, "cherenkov_y");
-  TTreeReaderArray<double> time(reader, "cherenkov_time");
+  const Long64_t entries = frames_in->GetEntries();
+  if (cherenkov_in->GetEntries() != entries) {
+    std::cerr << "ERROR: frames/cherenkov entry-count mismatch: frames="
+              << entries << " cherenkov=" << cherenkov_in->GetEntries() << std::endl;
+    fin->Close();
+    return false;
+  }
+
+  TTreeReader reader(cherenkov_in);
+  TTreeReaderValue<UShort_t> ncherenkovhits(reader, "nhits");
+  TTreeReaderArray<Float_t> x(reader, "x");
+  TTreeReaderArray<Float_t> y(reader, "y");
+  TTreeReaderArray<Float_t> time(reader, "time");
 
   auto fout = TFile::Open(outfilename.c_str(), "RECREATE");
   if (!fout || fout->IsZombie()) {
@@ -291,107 +297,122 @@ bool ring_finder(const std::string &filename, const std::string &outfilename,
     return false;
   }
   fout->cd();
-  auto tout = tin->CloneTree(-1, "fast");
-  if (!tout)
+  auto frames_out = frames_in->CloneTree(0);
+  auto trigger_in = (TTree *)fin->Get("trigger");
+  auto timing_in = (TTree *)fin->Get("timing");
+  auto trigger_out = trigger_in ? trigger_in->CloneTree(0) : nullptr;
+  auto timing_out = timing_in ? timing_in->CloneTree(0) : nullptr;
+  auto cherenkov_out = cherenkov_in->CloneTree(0);
+  if (!frames_out || !cherenkov_out || (trigger_in && !trigger_out) ||
+      (timing_in && !timing_out)) {
+    std::cerr << "ERROR: failed to create output frame trees" << std::endl;
+    fout->Close();
+    fin->Close();
     return false;
+  }
 
-  int nring = 0;
-  auto frame_ring_start = std::make_unique<int[]>(maxframes);
-  auto frame_nrings = std::make_unique<int[]>(maxframes);
-  auto ring_x0 = std::make_unique<double[]>(maxringhits);
-  auto ring_y0 = std::make_unique<double[]>(maxringhits);
-  auto ring_r = std::make_unique<double[]>(maxringhits);
-  auto ring_e = std::make_unique<double[]>(maxringhits);
-  auto ring_phi = std::make_unique<double[]>(maxringhits);
-  auto ring_time = std::make_unique<double[]>(maxringhits);
-  auto ring_ninliers = std::make_unique<int[]>(maxringhits);
-  auto b_nring = tout->Branch("nring", &nring, "nring/I");
-  auto b_frame_ring_start = tout->Branch("ring_frame_start", frame_ring_start.get(), "ring_frame_start[nframes]/I");
-  auto b_frame_nrings = tout->Branch("ring_frame_nrings", frame_nrings.get(), "ring_frame_nrings[nframes]/I");
-  auto b_ring_x0 = tout->Branch("ring_x0", ring_x0.get(), "ring_x0[nring]/D");
-  auto b_ring_y0 = tout->Branch("ring_y0", ring_y0.get(), "ring_y0[nring]/D");
-  auto b_ring_r = tout->Branch("ring_r", ring_r.get(), "ring_r[nring]/D");
-  auto b_ring_e = tout->Branch("ring_e", ring_e.get(), "ring_e[nring]/D");
-  auto b_ring_phi = tout->Branch("ring_phi", ring_phi.get(), "ring_phi[nring]/D");
-  auto b_ring_time = tout->Branch("ring_time", ring_time.get(), "ring_time[nring]/D");
-  auto b_ring_ninliers = tout->Branch("ring_ninliers", ring_ninliers.get(), "ring_ninliers[nring]/I");
+  UChar_t nring = 0;
+  float ring_x0[maxrings];
+  float ring_y0[maxrings];
+  float ring_r[maxrings];
+  float ring_e[maxrings];
+  float ring_phi[maxrings];
+  float ring_time[maxrings];
+  UShort_t ring_ninliers[maxrings];
+  auto ring_out = new TTree("ring", "ring candidates, one entry per frame");
+  ring_out->Branch("nring", &nring, "nring/b");
+  ring_out->Branch("ring_x0", ring_x0, "ring_x0[nring]/F");
+  ring_out->Branch("ring_y0", ring_y0, "ring_y0[nring]/F");
+  ring_out->Branch("ring_r", ring_r, "ring_r[nring]/F");
+  ring_out->Branch("ring_e", ring_e, "ring_e[nring]/F");
+  ring_out->Branch("ring_phi", ring_phi, "ring_phi[nring]/F");
+  ring_out->Branch("ring_time", ring_time, "ring_time[nring]/F");
+  ring_out->Branch("ring_ninliers", ring_ninliers, "ring_ninliers[nring]/s");
 
   std::mt19937 generator(0x9e3779b9u);
   Long64_t frames = 0;
   Long64_t accepted = 0;
-  while (reader.Next()) {
-    if (*nframes < 0 || *nframes > maxframes || *ncherenkovhits < 0) {
-      std::cerr << "ERROR: invalid frame/hit count" << std::endl;
+  for (Long64_t iframe = 0; iframe < entries; ++iframe) {
+    if (frames_in->GetEntry(iframe) <= 0 || !reader.Next()) {
+      std::cerr << "ERROR: failed to read synchronized frame entry " << iframe << std::endl;
+      fout->Close();
+      fin->Close();
       return false;
     }
+
+    ++frames;
     nring = 0;
-    for (int iframe = 0; iframe < *nframes; ++iframe) {
-      ++frames;
-      frame_ring_start[iframe] = nring;
-      frame_nrings[iframe] = 0;
-      const int first = frame_start[iframe];
-      const int nhits = frame_nhits[iframe];
-      if (first < 0 || nhits < 0 || first + nhits > *ncherenkovhits) {
-        std::cerr << "ERROR: invalid Cherenkov frame indexing" << std::endl;
-        return false;
-      }
+    const int nhits = static_cast<int>(*ncherenkovhits);
+    if (x.GetSize() < nhits || y.GetSize() < nhits || time.GetSize() < nhits) {
+      std::cerr << "ERROR: invalid Cherenkov hit array at frame entry " << iframe
+                << " nhits=" << nhits << std::endl;
+      fout->Close();
+      fin->Close();
+      return false;
+    }
 
-      std::vector<point_t> points;
-      std::vector<int> remaining;
-      for (int index = first; index < first + nhits; ++index) {
-        if (std::isfinite(x[index]) && std::isfinite(y[index]) &&
-            std::isfinite(time[index])) {
-          points.push_back({x[index], y[index], time[index]});
-          remaining.push_back(static_cast<int>(points.size() - 1));
-        }
-      }
-      while (frame_nrings[iframe] < max_rings && remaining.size() >= 3) {
-        circle_t ring = find_one_ring(points, remaining, generator, iterations,
-                                      min_inliers, tolerance, time_window,
-                                      min_x0, max_x0, min_y0, max_y0,
-                                      min_radius, max_radius, force_circle);
-        if (!ring.valid)
-          break;
-        if (nring >= maxringhits) {
-          std::cerr << "ERROR: ring capacity exceeded" << std::endl;
-          return false;
-        }
-        ring_x0[nring] = ring.x;
-        ring_y0[nring] = ring.y;
-        ring_r[nring] = ring.radius;
-        ring_e[nring] = ring.eccentricity;
-        ring_phi[nring] = ring.phi;
-        ring_time[nring] = ring.ring_time;
-        ring_ninliers[nring] = ring.inliers;
-        ++nring;
-        ++frame_nrings[iframe];
-        ++accepted;
-
-        std::vector<int> next;
-        for (int index : remaining) {
-          const double spatial = ellipse_residual(ring, points[index]);
-          if (spatial > tolerance ||
-              std::abs(points[index].time - ring.ring_time) > time_window)
-            next.push_back(index);
-        }
-        if (next.size() == remaining.size())
-          break;
-        remaining.swap(next);
+    std::vector<point_t> points;
+    std::vector<int> remaining;
+    for (int index = 0; index < nhits; ++index) {
+      if (std::isfinite(x[index]) && std::isfinite(y[index]) &&
+          std::isfinite(time[index])) {
+        points.push_back({x[index], y[index], time[index]});
+        remaining.push_back(static_cast<int>(points.size() - 1));
       }
     }
-    b_nring->Fill();
-    b_frame_ring_start->Fill();
-    b_frame_nrings->Fill();
-    b_ring_x0->Fill();
-    b_ring_y0->Fill();
-    b_ring_r->Fill();
-    b_ring_e->Fill();
-    b_ring_phi->Fill();
-    b_ring_time->Fill();
-    b_ring_ninliers->Fill();
+
+    while (nring < max_rings && remaining.size() >= 3) {
+      circle_t ring = find_one_ring(points, remaining, generator, iterations,
+                                    min_inliers, tolerance, time_window,
+                                    min_x0, max_x0, min_y0, max_y0,
+                                    min_radius, max_radius, force_circle);
+      if (!ring.valid)
+        break;
+      ring_x0[nring] = static_cast<float>(ring.x);
+      ring_y0[nring] = static_cast<float>(ring.y);
+      ring_r[nring] = static_cast<float>(ring.radius);
+      ring_e[nring] = static_cast<float>(ring.eccentricity);
+      ring_phi[nring] = static_cast<float>(ring.phi);
+      ring_time[nring] = static_cast<float>(ring.ring_time);
+      ring_ninliers[nring] = static_cast<UShort_t>(ring.inliers);
+      ++nring;
+      ++accepted;
+
+      std::vector<int> next;
+      for (int index : remaining) {
+        const double spatial = ellipse_residual(ring, points[index]);
+        if (spatial > tolerance ||
+            std::abs(points[index].time - ring.ring_time) > time_window)
+          next.push_back(index);
+      }
+      if (next.size() == remaining.size())
+        break;
+      remaining.swap(next);
+    }
+
+    if (trigger_in)
+      trigger_in->GetEntry(iframe);
+    if (timing_in)
+      timing_in->GetEntry(iframe);
+    cherenkov_in->GetEntry(iframe);
+    frames_out->Fill();
+    if (trigger_out)
+      trigger_out->Fill();
+    if (timing_out)
+      timing_out->Fill();
+    cherenkov_out->Fill();
+    ring_out->Fill();
   }
-  if (tout->GetEntries() != tin->GetEntries())
-    return false;
+
+  for (auto tree : {frames_out, trigger_out, timing_out, cherenkov_out, ring_out}) {
+    if (tree && tree->GetEntries() != entries) {
+      std::cerr << "ERROR: output tree entry-count mismatch: " << tree->GetName()
+                << "=" << tree->GetEntries() << " expected=" << entries << std::endl;
+      fout->Close();
+      fin->Close();
+      return false;
+    }
+  }
   auto participation = (TTree *)fin->Get("spill_participation");
   if (participation) {
     fout->cd();
@@ -445,6 +466,7 @@ int main(int argc, char **argv)
     if (vm.count("help")) { std::cout << options << std::endl; return 0; }
     po::notify(vm);
     if (iterations < 1 || min_inliers < 3 || max_rings < 1 ||
+        max_rings > maxrings ||
         tolerance <= 0. || time_window < 0. || min_x0 > max_x0 ||
         min_y0 > max_y0 || min_radius <= 0. || min_radius > max_radius)
       throw std::runtime_error("invalid ring-finder parameter");

@@ -2,45 +2,44 @@
 
 #include <TFile.h>
 #include <TTree.h>
-#include <TTreeReader.h>
-#include <TTreeReaderArray.h>
-#include <TTreeReaderValue.h>
 
+#include <cmath>
+#include <cstdint>
 #include <iostream>
-#include <memory>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
 struct source_t {
-  int device;
-  int fifo;
+  int device = 0;
+  int fifo = 0;
 };
 
 struct hit_t {
-  int device;
-  int fifo;
-  int type;
-  int counter;
-  int column;
-  int pixel;
-  int tdc;
-  int rollover;
-  int coarse;
-  int fine;
-  double time;
-  double x;
-  double y;
+  int device = 0;
+  int fifo = 0;
+  int type = 0;
+  int counter = 0;
+  int column = 0;
+  int pixel = 0;
+  int tdc = 0;
+  int rollover = 0;
+  int coarse = 0;
+  int fine = 0;
+  double time = 0.;
+  double x = std::numeric_limits<double>::quiet_NaN();
+  double y = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct ring_t {
-  double x0;
-  double y0;
-  double radius;
-  double eccentricity;
-  double phi;
-  double time;
-  int ninliers;
+  double x0 = 0.;
+  double y0 = 0.;
+  double radius = 0.;
+  double eccentricity = 0.;
+  double phi = 0.;
+  double time = 0.;
+  int ninliers = 0;
 };
 
 class trigger_reader_t {
@@ -66,8 +65,8 @@ public:
   double T() const;
   double sigmaT() const;
 
-  // Source and hit vectors describe the current spill/frame and remain valid
-  // until open(), next_spill(), or next_frame() is called again.
+  // These vectors describe the current frame and remain valid until the next
+  // state-changing call.
   const std::vector<source_t> &sources() const;
   const std::vector<hit_t> &trigger_hits() const;
   const std::vector<hit_t> &timing_hits() const;
@@ -75,73 +74,89 @@ public:
   const std::vector<ring_t> &rings() const;
 
 private:
+  static constexpr int maxhits_ = 65535;
+  static constexpr int maxrings_ = 8;
+  static constexpr int maxsources_ = 4096;
+
   struct category_t {
-    std::unique_ptr<TTreeReaderValue<int>> nhits;
-    std::unique_ptr<TTreeReaderArray<int>> frame_start;
-    std::unique_ptr<TTreeReaderArray<int>> frame_nhits;
-    std::unique_ptr<TTreeReaderArray<int>> device;
-    std::unique_ptr<TTreeReaderArray<int>> fifo;
-    std::unique_ptr<TTreeReaderArray<int>> type;
-    std::unique_ptr<TTreeReaderArray<int>> counter;
-    std::unique_ptr<TTreeReaderArray<int>> column;
-    std::unique_ptr<TTreeReaderArray<int>> pixel;
-    std::unique_ptr<TTreeReaderArray<int>> tdc;
-    std::unique_ptr<TTreeReaderArray<int>> rollover;
-    std::unique_ptr<TTreeReaderArray<int>> coarse;
-    std::unique_ptr<TTreeReaderArray<int>> fine;
-    std::unique_ptr<TTreeReaderArray<double>> time;
-    std::unique_ptr<TTreeReaderArray<double>> x;
-    std::unique_ptr<TTreeReaderArray<double>> y;
+    bool trigger = false;
+    UShort_t nhits = 0;
+    std::vector<UChar_t> device;
+    std::vector<UChar_t> fifo;
+    std::vector<UChar_t> column;
+    std::vector<UChar_t> pixel;
+    std::vector<UChar_t> tdc;
+    std::vector<UShort_t> counter;
+    std::vector<UShort_t> rollover;
+    std::vector<UShort_t> coarse;
+    std::vector<UShort_t> fine;
+    std::vector<Float_t> time;
+    std::vector<Float_t> x;
+    std::vector<Float_t> y;
 
     void reset();
-    bool bind(TTree *tree, TTreeReader &reader, const std::string &prefix);
-    bool fill(std::vector<hit_t> &out, int iframe, int nframes,
-              const std::string &prefix) const;
+    bool bind(TTree *tree, bool is_trigger);
+    bool load_hits(std::vector<hit_t> &out) const;
   };
 
+  static bool has_branch(TTree *tree, const char *name);
+  static bool bind(TTree *tree, const char *name, void *address);
+  bool load_frame(Long64_t entry);
+  bool load_spill_sources();
   void reset();
-  static bool has_branch(TTree *tree, const std::string &name);
 
   std::unique_ptr<TFile> file_;
-  TTree *tree_ = nullptr;
+  TTree *frames_tree_ = nullptr;
+  TTree *trigger_tree_ = nullptr;
+  TTree *timing_tree_ = nullptr;
+  TTree *cherenkov_tree_ = nullptr;
+  TTree *ring_tree_ = nullptr;
   TTree *meta_tree_ = nullptr;
-  std::unique_ptr<TTreeReader> reader_;
-  std::unique_ptr<TTreeReader> meta_reader_;
-  std::unique_ptr<TTreeReaderValue<int>> id_branch_;
-  std::unique_ptr<TTreeReaderValue<int>> nframes_branch_;
-  std::unique_ptr<TTreeReaderValue<int>> meta_counter_branch_;
-  std::unique_ptr<TTreeReaderValue<int>> meta_nsources_branch_;
-  std::unique_ptr<TTreeReaderArray<int>> meta_source_device_branch_;
-  std::unique_ptr<TTreeReaderArray<int>> meta_source_fifo_branch_;
-  std::unique_ptr<TTreeReaderArray<int>> timing_valid_branch_;
-  std::unique_ptr<TTreeReaderArray<double>> T0_branch_;
-  std::unique_ptr<TTreeReaderArray<double>> sigma0_branch_;
-  std::unique_ptr<TTreeReaderArray<double>> T1_branch_;
-  std::unique_ptr<TTreeReaderArray<double>> sigma1_branch_;
-  std::unique_ptr<TTreeReaderArray<double>> T_branch_;
-  std::unique_ptr<TTreeReaderArray<double>> sigmaT_branch_;
-  std::unique_ptr<TTreeReaderValue<int>> nring_branch_;
-  std::unique_ptr<TTreeReaderArray<int>> ring_frame_start_branch_;
-  std::unique_ptr<TTreeReaderArray<int>> ring_frame_nrings_branch_;
-  std::unique_ptr<TTreeReaderArray<double>> ring_x0_branch_;
-  std::unique_ptr<TTreeReaderArray<double>> ring_y0_branch_;
-  std::unique_ptr<TTreeReaderArray<double>> ring_r_branch_;
-  std::unique_ptr<TTreeReaderArray<double>> ring_e_branch_;
-  std::unique_ptr<TTreeReaderArray<double>> ring_phi_branch_;
-  std::unique_ptr<TTreeReaderArray<double>> ring_time_branch_;
-  std::unique_ptr<TTreeReaderArray<int>> ring_ninliers_branch_;
+
+  UInt_t frame_spill_ = 0;
+  Double_t frame_time_ = 0.;
+  bool has_frame_time_ = false;
 
   category_t trigger_;
   category_t timing_;
   category_t cherenkov_;
 
-  Long64_t nspills_ = 0;
-  Long64_t spill_entry_ = -1;
-  int spill_id_ = 0;
-  int nframes_ = 0;
-  int frame_index_ = -1;
   bool has_timing_ = false;
+  bool timing_valid_ = false;
+  Float_t T0_ = 0.;
+  Float_t sigma0_ = 0.;
+  Float_t T1_ = 0.;
+  Float_t sigma1_ = 0.;
+  Float_t T_ = 0.;
+  Float_t sigmaT_ = 0.;
+
   bool has_rings_ = false;
+  UChar_t nring_ = 0;
+  Float_t ring_x0_[maxrings_];
+  Float_t ring_y0_[maxrings_];
+  Float_t ring_r_[maxrings_];
+  Float_t ring_e_[maxrings_];
+  Float_t ring_phi_[maxrings_];
+  Float_t ring_time_[maxrings_];
+  UShort_t ring_ninliers_[maxrings_];
+
+  bool has_meta_ = false;
+  Long64_t meta_entries_ = 0;
+  Long64_t meta_entry_ = 0;
+  int meta_spill_ = 0;
+  int meta_counter_ = 0;
+  int meta_nsources_ = 0;
+  int meta_source_device_[maxsources_];
+  int meta_source_fifo_[maxsources_];
+
+  Long64_t entries_ = 0;
+  Long64_t next_entry_ = 0;
+  Long64_t spill_begin_ = -1;
+  Long64_t spill_end_ = -1;
+  Long64_t current_entry_ = -1;
+  int spill_id_ = 0;
+  int frame_index_ = -1;
+  int nframes_ = 0;
 
   std::vector<source_t> sources_;
   std::vector<hit_t> trigger_hits_;
@@ -151,190 +166,164 @@ private:
 };
 
 inline bool
-trigger_reader_t::has_branch(TTree *tree, const std::string &name)
+trigger_reader_t::has_branch(TTree *tree, const char *name)
 {
-  if (tree && tree->GetBranch(name.c_str()))
-    return true;
+  return tree && tree->GetBranch(name);
+}
 
-  std::cerr << "ERROR: missing branch '" << name << "'" << std::endl;
-  return false;
+inline bool
+trigger_reader_t::bind(TTree *tree, const char *name, void *address)
+{
+  if (!has_branch(tree, name)) {
+    std::cerr << "ERROR: missing branch '" << name << "'" << std::endl;
+    return false;
+  }
+  if (tree->SetBranchAddress(name, address) < 0) {
+    std::cerr << "ERROR: could not bind branch '" << name << "'" << std::endl;
+    return false;
+  }
+  return true;
 }
 
 inline void
 trigger_reader_t::category_t::reset()
 {
-  nhits.reset();
-  frame_start.reset();
-  frame_nhits.reset();
-  device.reset();
-  fifo.reset();
-  type.reset();
-  counter.reset();
-  column.reset();
-  pixel.reset();
-  tdc.reset();
-  rollover.reset();
-  coarse.reset();
-  fine.reset();
-  time.reset();
-  x.reset();
-  y.reset();
+  nhits = 0;
+  device.clear();
+  fifo.clear();
+  column.clear();
+  pixel.clear();
+  tdc.clear();
+  counter.clear();
+  rollover.clear();
+  coarse.clear();
+  fine.clear();
+  time.clear();
+  x.clear();
+  y.clear();
 }
 
 inline bool
-trigger_reader_t::category_t::bind(TTree *tree, TTreeReader &reader,
-                                   const std::string &prefix)
+trigger_reader_t::category_t::bind(TTree *tree, bool is_trigger)
 {
-  auto nname = std::string("n") + prefix + "hits";
+  trigger = is_trigger;
+  const int n = trigger_reader_t::maxhits_;
+  device.resize(n);
+  rollover.resize(n);
+  coarse.resize(n);
+  time.resize(n);
 
-  std::vector<std::string> names = {
-    nname,
-    prefix + "_frame_start",
-    prefix + "_frame_nhits",
-    prefix + "_device",
-    prefix + "_fifo",
-    prefix + "_type",
-    prefix + "_counter",
-    prefix + "_column",
-    prefix + "_pixel",
-    prefix + "_tdc",
-    prefix + "_rollover",
-    prefix + "_coarse",
-    prefix + "_fine",
-    prefix + "_time",
-    prefix + "_x",
-    prefix + "_y"
-  };
+  if (!trigger) {
+    fifo.resize(n);
+    column.resize(n);
+    pixel.resize(n);
+    tdc.resize(n);
+    fine.resize(n);
+    x.resize(n);
+    y.resize(n);
+  }
+  if (!trigger)
+    counter.clear();
+  else
+    counter.resize(n);
 
-  for (auto &name : names) {
-    if (!trigger_reader_t::has_branch(tree, name))
-      return false;
+  if (!trigger_reader_t::bind(tree, "nhits", &nhits) ||
+      !trigger_reader_t::bind(tree, "device", device.data()) ||
+      !trigger_reader_t::bind(tree, "rollover", rollover.data()) ||
+      !trigger_reader_t::bind(tree, "coarse", coarse.data()) ||
+      !trigger_reader_t::bind(tree, "time", time.data()))
+    return false;
+
+  if (trigger) {
+    return trigger_reader_t::bind(tree, "counter", counter.data());
   }
 
-  nhits.reset(new TTreeReaderValue<int>(reader, nname.c_str()));
-  frame_start.reset(new TTreeReaderArray<int>(reader, (prefix + "_frame_start").c_str()));
-  frame_nhits.reset(new TTreeReaderArray<int>(reader, (prefix + "_frame_nhits").c_str()));
-  device.reset(new TTreeReaderArray<int>(reader, (prefix + "_device").c_str()));
-  fifo.reset(new TTreeReaderArray<int>(reader, (prefix + "_fifo").c_str()));
-  type.reset(new TTreeReaderArray<int>(reader, (prefix + "_type").c_str()));
-  counter.reset(new TTreeReaderArray<int>(reader, (prefix + "_counter").c_str()));
-  column.reset(new TTreeReaderArray<int>(reader, (prefix + "_column").c_str()));
-  pixel.reset(new TTreeReaderArray<int>(reader, (prefix + "_pixel").c_str()));
-  tdc.reset(new TTreeReaderArray<int>(reader, (prefix + "_tdc").c_str()));
-  rollover.reset(new TTreeReaderArray<int>(reader, (prefix + "_rollover").c_str()));
-  coarse.reset(new TTreeReaderArray<int>(reader, (prefix + "_coarse").c_str()));
-  fine.reset(new TTreeReaderArray<int>(reader, (prefix + "_fine").c_str()));
-  time.reset(new TTreeReaderArray<double>(reader, (prefix + "_time").c_str()));
-  x.reset(new TTreeReaderArray<double>(reader, (prefix + "_x").c_str()));
-  y.reset(new TTreeReaderArray<double>(reader, (prefix + "_y").c_str()));
-
-  return true;
+  return trigger_reader_t::bind(tree, "fifo", fifo.data()) &&
+         trigger_reader_t::bind(tree, "column", column.data()) &&
+         trigger_reader_t::bind(tree, "pixel", pixel.data()) &&
+         trigger_reader_t::bind(tree, "tdc", tdc.data()) &&
+         trigger_reader_t::bind(tree, "fine", fine.data()) &&
+         trigger_reader_t::bind(tree, "x", x.data()) &&
+         trigger_reader_t::bind(tree, "y", y.data());
 }
 
 inline bool
-trigger_reader_t::category_t::fill(std::vector<hit_t> &out, int iframe,
-                                   int nframes, const std::string &prefix) const
+trigger_reader_t::category_t::load_hits(std::vector<hit_t> &out) const
 {
   out.clear();
-
-  if (iframe < 0 || iframe >= nframes) {
-    std::cerr << "ERROR: invalid frame index " << iframe
-              << " for category '" << prefix << "'" << std::endl;
+  if (nhits > trigger_reader_t::maxhits_) {
+    std::cerr << "ERROR: category contains too many hits: " << nhits << std::endl;
     return false;
   }
 
-  int total = **nhits;
-  int first = (*frame_start)[iframe];
-  int n = (*frame_nhits)[iframe];
-
-  if (total < 0 || first < 0 || n < 0 || first + n > total) {
-    std::cerr << "ERROR: invalid '" << prefix << "' frame indexing"
-              << " frame=" << iframe
-              << " first=" << first
-              << " nhits=" << n
-              << " total=" << total
-              << std::endl;
-    return false;
-  }
-
-  out.reserve(n);
-  for (int i = first; i < first + n; ++i) {
+  out.reserve(nhits);
+  for (unsigned int i = 0; i < nhits; ++i) {
     hit_t hit;
-    hit.device = (*device)[i];
-    hit.fifo = (*fifo)[i];
-    hit.type = (*type)[i];
-    hit.counter = (*counter)[i];
-    hit.column = (*column)[i];
-    hit.pixel = (*pixel)[i];
-    hit.tdc = (*tdc)[i];
-    hit.rollover = (*rollover)[i];
-    hit.coarse = (*coarse)[i];
-    hit.fine = (*fine)[i];
-    hit.time = (*time)[i];
-    hit.x = (*x)[i];
-    hit.y = (*y)[i];
+    hit.device = device[i];
+    hit.type = trigger ? 9 : 1;
+    hit.counter = trigger ? counter[i] : 0;
+    hit.rollover = rollover[i];
+    hit.coarse = coarse[i];
+    hit.time = time[i];
+    if (trigger) {
+      hit.fifo = 0;
+      hit.column = 0;
+      hit.pixel = 0;
+      hit.tdc = 0;
+    } else {
+      hit.fifo = fifo[i];
+      hit.column = column[i];
+      hit.pixel = pixel[i];
+      hit.tdc = tdc[i];
+      hit.fine = fine[i];
+      hit.x = x[i];
+      hit.y = y[i];
+    }
     out.push_back(hit);
   }
-
   return true;
 }
 
 inline void
 trigger_reader_t::reset()
 {
-  sources_.clear();
   trigger_hits_.clear();
   timing_hits_.clear();
   cherenkov_hits_.clear();
+  sources_.clear();
   rings_.clear();
 
+  file_.reset();
+  frames_tree_ = nullptr;
+  trigger_tree_ = nullptr;
+  timing_tree_ = nullptr;
+  cherenkov_tree_ = nullptr;
+  ring_tree_ = nullptr;
+  meta_tree_ = nullptr;
   trigger_.reset();
   timing_.reset();
   cherenkov_.reset();
 
-  id_branch_.reset();
-  nframes_branch_.reset();
-  meta_counter_branch_.reset();
-  meta_nsources_branch_.reset();
-  meta_source_device_branch_.reset();
-  meta_source_fifo_branch_.reset();
-  timing_valid_branch_.reset();
-  T0_branch_.reset();
-  sigma0_branch_.reset();
-  T1_branch_.reset();
-  sigma1_branch_.reset();
-  T_branch_.reset();
-  sigmaT_branch_.reset();
-  nring_branch_.reset();
-  ring_frame_start_branch_.reset();
-  ring_frame_nrings_branch_.reset();
-  ring_x0_branch_.reset();
-  ring_y0_branch_.reset();
-  ring_r_branch_.reset();
-  ring_e_branch_.reset();
-  ring_phi_branch_.reset();
-  ring_time_branch_.reset();
-  ring_ninliers_branch_.reset();
-  meta_reader_.reset();
-  reader_.reset();
-  meta_tree_ = nullptr;
-  tree_ = nullptr;
-  file_.reset();
-
-  nspills_ = 0;
-  spill_entry_ = -1;
-  spill_id_ = 0;
-  nframes_ = 0;
-  frame_index_ = -1;
+  has_frame_time_ = false;
   has_timing_ = false;
   has_rings_ = false;
+  has_meta_ = false;
+  meta_entries_ = 0;
+  meta_entry_ = 0;
+  entries_ = 0;
+  next_entry_ = 0;
+  spill_begin_ = -1;
+  spill_end_ = -1;
+  current_entry_ = -1;
+  spill_id_ = 0;
+  frame_index_ = -1;
+  nframes_ = 0;
 }
 
 inline bool
 trigger_reader_t::open(const std::string &filename)
 {
   reset();
-
   file_.reset(TFile::Open(filename.c_str(), "READ"));
   if (!file_ || file_->IsZombie()) {
     std::cerr << "ERROR: could not open input file '" << filename << "'" << std::endl;
@@ -342,315 +331,258 @@ trigger_reader_t::open(const std::string &filename)
     return false;
   }
 
-  tree_ = (TTree *)file_->Get("frames");
-  if (!tree_) {
-    std::cerr << "ERROR: could not find 'frames' tree in '" << filename << "'" << std::endl;
+  frames_tree_ = (TTree *)file_->Get("frames");
+  trigger_tree_ = (TTree *)file_->Get("trigger");
+  timing_tree_ = (TTree *)file_->Get("timing");
+  cherenkov_tree_ = (TTree *)file_->Get("cherenkov");
+  if (!frames_tree_ || !trigger_tree_ || !timing_tree_ || !cherenkov_tree_) {
+    std::cerr << "ERROR: input must contain frames, trigger, timing, and cherenkov trees"
+              << std::endl;
     reset();
     return false;
   }
 
-  if (!has_branch(tree_, "id") || !has_branch(tree_, "nframes")) {
+  if (!bind(frames_tree_, "spill", &frame_spill_)) {
+    reset();
+    return false;
+  }
+  has_frame_time_ = has_branch(frames_tree_, "time");
+  if (has_frame_time_ && !bind(frames_tree_, "time", &frame_time_)) {
     reset();
     return false;
   }
 
-  reader_.reset(new TTreeReader(tree_));
-  id_branch_.reset(new TTreeReaderValue<int>(*reader_, "id"));
-  nframes_branch_.reset(new TTreeReaderValue<int>(*reader_, "nframes"));
-
-  if (!trigger_.bind(tree_, *reader_, "trigger") ||
-      !timing_.bind(tree_, *reader_, "timing") ||
-      !cherenkov_.bind(tree_, *reader_, "cherenkov")) {
+  if (!trigger_.bind(trigger_tree_, true) ||
+      !timing_.bind(timing_tree_, false) ||
+      !cherenkov_.bind(cherenkov_tree_, false)) {
     reset();
     return false;
   }
 
-  has_timing_ =
-    tree_->GetBranch("timing_valid") &&
-    tree_->GetBranch("T0") &&
-    tree_->GetBranch("sigma0") &&
-    tree_->GetBranch("T1") &&
-    tree_->GetBranch("sigma1") &&
-    tree_->GetBranch("T") &&
-    tree_->GetBranch("sigmaT");
+  entries_ = frames_tree_->GetEntries();
+  if (trigger_tree_->GetEntries() != entries_ ||
+      timing_tree_->GetEntries() != entries_ ||
+      cherenkov_tree_->GetEntries() != entries_) {
+    std::cerr << "ERROR: frame-tree entry-count mismatch" << std::endl;
+    reset();
+    return false;
+  }
 
+  const bool timing_any = timing_tree_->GetBranch("timing_valid") ||
+                          timing_tree_->GetBranch("T0") ||
+                          timing_tree_->GetBranch("sigma0") ||
+                          timing_tree_->GetBranch("T1") ||
+                          timing_tree_->GetBranch("sigma1") ||
+                          timing_tree_->GetBranch("T") ||
+                          timing_tree_->GetBranch("sigmaT");
+  const bool timing_all = timing_tree_->GetBranch("timing_valid") &&
+                          timing_tree_->GetBranch("T0") &&
+                          timing_tree_->GetBranch("sigma0") &&
+                          timing_tree_->GetBranch("T1") &&
+                          timing_tree_->GetBranch("sigma1") &&
+                          timing_tree_->GetBranch("T") &&
+                          timing_tree_->GetBranch("sigmaT");
+  if (timing_any && !timing_all) {
+    std::cerr << "ERROR: timing estimator branches are incomplete" << std::endl;
+    reset();
+    return false;
+  }
+  has_timing_ = timing_all;
   if (has_timing_) {
-    timing_valid_branch_.reset(new TTreeReaderArray<int>(*reader_, "timing_valid"));
-    T0_branch_.reset(new TTreeReaderArray<double>(*reader_, "T0"));
-    sigma0_branch_.reset(new TTreeReaderArray<double>(*reader_, "sigma0"));
-    T1_branch_.reset(new TTreeReaderArray<double>(*reader_, "T1"));
-    sigma1_branch_.reset(new TTreeReaderArray<double>(*reader_, "sigma1"));
-    T_branch_.reset(new TTreeReaderArray<double>(*reader_, "T"));
-    sigmaT_branch_.reset(new TTreeReaderArray<double>(*reader_, "sigmaT"));
+    if (!bind(timing_tree_, "timing_valid", &timing_valid_) ||
+        !bind(timing_tree_, "T0", &T0_) ||
+        !bind(timing_tree_, "sigma0", &sigma0_) ||
+        !bind(timing_tree_, "T1", &T1_) ||
+        !bind(timing_tree_, "sigma1", &sigma1_) ||
+        !bind(timing_tree_, "T", &T_) ||
+        !bind(timing_tree_, "sigmaT", &sigmaT_)) {
+      reset();
+      return false;
+    }
   }
 
-  has_rings_ = tree_->GetBranch("nring") &&
-               tree_->GetBranch("ring_frame_start") &&
-               tree_->GetBranch("ring_frame_nrings") &&
-               tree_->GetBranch("ring_x0") &&
-               tree_->GetBranch("ring_y0") &&
-               tree_->GetBranch("ring_r") &&
-               tree_->GetBranch("ring_e") &&
-               tree_->GetBranch("ring_phi") &&
-               tree_->GetBranch("ring_time") &&
-               tree_->GetBranch("ring_ninliers");
-  if (has_rings_) {
-    nring_branch_.reset(new TTreeReaderValue<int>(*reader_, "nring"));
-    ring_frame_start_branch_.reset(new TTreeReaderArray<int>(*reader_, "ring_frame_start"));
-    ring_frame_nrings_branch_.reset(new TTreeReaderArray<int>(*reader_, "ring_frame_nrings"));
-    ring_x0_branch_.reset(new TTreeReaderArray<double>(*reader_, "ring_x0"));
-    ring_y0_branch_.reset(new TTreeReaderArray<double>(*reader_, "ring_y0"));
-    ring_r_branch_.reset(new TTreeReaderArray<double>(*reader_, "ring_r"));
-    ring_e_branch_.reset(new TTreeReaderArray<double>(*reader_, "ring_e"));
-    ring_phi_branch_.reset(new TTreeReaderArray<double>(*reader_, "ring_phi"));
-    ring_time_branch_.reset(new TTreeReaderArray<double>(*reader_, "ring_time"));
-    ring_ninliers_branch_.reset(new TTreeReaderArray<int>(*reader_, "ring_ninliers"));
+  ring_tree_ = (TTree *)file_->Get("ring");
+  if (ring_tree_) {
+    if (ring_tree_->GetEntries() != entries_ ||
+        !bind(ring_tree_, "nring", &nring_) ||
+        !bind(ring_tree_, "ring_x0", ring_x0_) ||
+        !bind(ring_tree_, "ring_y0", ring_y0_) ||
+        !bind(ring_tree_, "ring_r", ring_r_) ||
+        !bind(ring_tree_, "ring_e", ring_e_) ||
+        !bind(ring_tree_, "ring_phi", ring_phi_) ||
+        !bind(ring_tree_, "ring_time", ring_time_) ||
+        !bind(ring_tree_, "ring_ninliers", ring_ninliers_)) {
+      std::cerr << "ERROR: invalid ring tree" << std::endl;
+      reset();
+      return false;
+    }
+    has_rings_ = true;
   }
 
   meta_tree_ = (TTree *)file_->Get("spill_participation");
   if (meta_tree_) {
-    for (auto name : {"counter", "nsources", "source_device", "source_fifo"}) {
-      if (!has_branch(meta_tree_, name)) {
-        reset();
-        return false;
-      }
-    }
-    if (meta_tree_->GetEntries() != tree_->GetEntries()) {
-      std::cerr << "ERROR: frames/spill_participation entry-count mismatch" << std::endl;
+    if (!bind(meta_tree_, "spill", &meta_spill_) ||
+        !bind(meta_tree_, "counter", &meta_counter_) ||
+        !bind(meta_tree_, "nsources", &meta_nsources_) ||
+        !bind(meta_tree_, "source_device", meta_source_device_) ||
+        !bind(meta_tree_, "source_fifo", meta_source_fifo_)) {
       reset();
       return false;
     }
-    meta_reader_.reset(new TTreeReader(meta_tree_));
-    meta_counter_branch_.reset(new TTreeReaderValue<int>(*meta_reader_, "counter"));
-    meta_nsources_branch_.reset(new TTreeReaderValue<int>(*meta_reader_, "nsources"));
-    meta_source_device_branch_.reset(new TTreeReaderArray<int>(*meta_reader_, "source_device"));
-    meta_source_fifo_branch_.reset(new TTreeReaderArray<int>(*meta_reader_, "source_fifo"));
+    meta_entries_ = meta_tree_->GetEntries();
+    has_meta_ = true;
   }
 
-  nspills_ = tree_->GetEntries();
-  spill_entry_ = -1;
-  frame_index_ = -1;
+  return true;
+}
+
+inline bool
+trigger_reader_t::load_spill_sources()
+{
+  sources_.clear();
+  if (!has_meta_)
+    return true;
+  if (meta_entry_ >= meta_entries_) {
+    std::cerr << "ERROR: missing spill_participation entry for spill " << spill_id_ << std::endl;
+    return false;
+  }
+  if (meta_tree_->GetEntry(meta_entry_++) <= 0) {
+    std::cerr << "ERROR: failed to read spill_participation entry" << std::endl;
+    return false;
+  }
+  if (meta_counter_ != spill_id_) {
+    std::cerr << "ERROR: spill_participation counter mismatch: frame spill="
+              << spill_id_ << " metadata counter=" << meta_counter_ << std::endl;
+    return false;
+  }
+  if (meta_nsources_ < 0 || meta_nsources_ > maxsources_) {
+    std::cerr << "ERROR: invalid spill_participation nsources=" << meta_nsources_ << std::endl;
+    return false;
+  }
+  sources_.reserve(meta_nsources_);
+  for (int i = 0; i < meta_nsources_; ++i)
+    sources_.push_back({meta_source_device_[i], meta_source_fifo_[i]});
+  return true;
+}
+
+inline bool
+trigger_reader_t::load_frame(Long64_t entry)
+{
+  if (frames_tree_->GetEntry(entry) <= 0 ||
+      trigger_tree_->GetEntry(entry) <= 0 ||
+      timing_tree_->GetEntry(entry) <= 0 ||
+      cherenkov_tree_->GetEntry(entry) <= 0) {
+    std::cerr << "ERROR: failed to read frame entry " << entry << std::endl;
+    return false;
+  }
+  if (has_rings_ && ring_tree_->GetEntry(entry) <= 0) {
+    std::cerr << "ERROR: failed to read ring entry " << entry << std::endl;
+    return false;
+  }
+  if (!trigger_.load_hits(trigger_hits_) ||
+      !timing_.load_hits(timing_hits_) ||
+      !cherenkov_.load_hits(cherenkov_hits_))
+    return false;
+
+  rings_.clear();
+  if (has_rings_) {
+    if (nring_ > maxrings_) {
+      std::cerr << "ERROR: invalid nring=" << static_cast<int>(nring_) << std::endl;
+      return false;
+    }
+    rings_.reserve(nring_);
+    for (unsigned int i = 0; i < nring_; ++i)
+      rings_.push_back({ring_x0_[i], ring_y0_[i], ring_r_[i], ring_e_[i],
+                        ring_phi_[i], ring_time_[i], ring_ninliers_[i]});
+  }
+  current_entry_ = entry;
   return true;
 }
 
 inline bool
 trigger_reader_t::next_spill()
 {
-  sources_.clear();
   trigger_hits_.clear();
   timing_hits_.clear();
   cherenkov_hits_.clear();
   rings_.clear();
   frame_index_ = -1;
 
-  if (!reader_)
+  if (!frames_tree_ || next_entry_ >= entries_)
     return false;
 
-  if (spill_entry_ + 1 >= nspills_)
-    return false;
-
-  if (!reader_->Next()) {
-    std::cerr << "ERROR: failed to read spill entry " << (spill_entry_ + 1) << std::endl;
+  if (frames_tree_->GetEntry(next_entry_) <= 0) {
+    std::cerr << "ERROR: failed to read frame entry " << next_entry_ << std::endl;
     return false;
   }
-
-  ++spill_entry_;
-  spill_id_ = **id_branch_;
-  nframes_ = **nframes_branch_;
-
-  if (meta_reader_) {
-    if (!meta_reader_->Next()) {
-      std::cerr << "ERROR: failed to read spill_participation entry " << spill_entry_ << std::endl;
+  spill_begin_ = next_entry_;
+  spill_id_ = static_cast<int>(frame_spill_);
+  spill_end_ = spill_begin_ + 1;
+  while (spill_end_ < entries_) {
+    if (frames_tree_->GetEntry(spill_end_) <= 0) {
+      std::cerr << "ERROR: failed to read frame entry " << spill_end_ << std::endl;
       return false;
     }
-    if (**meta_counter_branch_ != spill_id_) {
-      std::cerr << "ERROR: spill_participation counter mismatch"
-                << " frame_id=" << spill_id_
-                << " meta_counter=" << **meta_counter_branch_ << std::endl;
-      return false;
-    }
-    int nsrc = **meta_nsources_branch_;
-    if (nsrc < 0 || meta_source_device_branch_->GetSize() < nsrc ||
-        meta_source_fifo_branch_->GetSize() < nsrc) {
-      std::cerr << "ERROR: invalid spill_participation source arrays" << std::endl;
-      return false;
-    }
-    sources_.reserve(nsrc);
-    for (int i = 0; i < nsrc; ++i) {
-      source_t source;
-      source.device = (*meta_source_device_branch_)[i];
-      source.fifo = (*meta_source_fifo_branch_)[i];
-      sources_.push_back(source);
-    }
+    if (frame_spill_ != static_cast<UInt_t>(spill_id_))
+      break;
+    ++spill_end_;
   }
-
-  if (nframes_ < 0) {
-    std::cerr << "ERROR: negative nframes in spill entry " << spill_entry_ << std::endl;
-    return false;
-  }
-
-  return true;
+  next_entry_ = spill_end_;
+  current_entry_ = spill_begin_ - 1;
+  nframes_ = static_cast<int>(spill_end_ - spill_begin_);
+  return load_spill_sources();
 }
 
 inline bool
 trigger_reader_t::next_frame()
 {
-  if (!reader_ || spill_entry_ < 0)
+  if (!frames_tree_ || spill_begin_ < 0 || current_entry_ + 1 >= spill_end_)
     return false;
-
-  if (frame_index_ + 1 >= nframes_)
-    return false;
-
-  rings_.clear();
+  ++current_entry_;
   ++frame_index_;
-
-  if (!trigger_.fill(trigger_hits_, frame_index_, nframes_, "trigger"))
-    return false;
-  if (!timing_.fill(timing_hits_, frame_index_, nframes_, "timing"))
-    return false;
-  if (!cherenkov_.fill(cherenkov_hits_, frame_index_, nframes_, "cherenkov"))
-    return false;
-
-  if (has_rings_) {
-    int total = **nring_branch_;
-    int first = (*ring_frame_start_branch_)[frame_index_];
-    int n = (*ring_frame_nrings_branch_)[frame_index_];
-    if (total < 0 || first < 0 || n < 0 || first + n > total) {
-      std::cerr << "ERROR: invalid ring frame indexing"
-                << " frame=" << frame_index_
-                << " first=" << first << " nrings=" << n
-                << " total=" << total << std::endl;
-      return false;
-    }
-    rings_.reserve(n);
-    for (int i = first; i < first + n; ++i)
-      rings_.push_back({(*ring_x0_branch_)[i], (*ring_y0_branch_)[i],
-                        (*ring_r_branch_)[i], (*ring_e_branch_)[i],
-                        (*ring_phi_branch_)[i], (*ring_time_branch_)[i],
-                        (*ring_ninliers_branch_)[i]});
-  }
-
-  return true;
+  return load_frame(current_entry_);
 }
 
-inline int
-trigger_reader_t::spill_id() const
-{
-  return spill_id_;
-}
-
-inline int
-trigger_reader_t::frame_index() const
-{
-  return frame_index_;
-}
-
-inline int
-trigger_reader_t::nframes() const
-{
-  return nframes_;
-}
-
-inline int
-trigger_reader_t::nsources() const
-{
-  return (int)sources_.size();
-}
-
-inline bool
-trigger_reader_t::has_timing() const
-{
-  return has_timing_;
-}
-
-inline bool
-trigger_reader_t::has_rings() const
-{
-  return has_rings_;
-}
+inline int trigger_reader_t::spill_id() const { return spill_id_; }
+inline int trigger_reader_t::frame_index() const { return frame_index_; }
+inline int trigger_reader_t::nframes() const { return nframes_; }
+inline int trigger_reader_t::nsources() const { return static_cast<int>(sources_.size()); }
+inline bool trigger_reader_t::has_timing() const { return has_timing_; }
+inline bool trigger_reader_t::has_rings() const { return has_rings_; }
 
 inline int
 trigger_reader_t::timing_valid() const
 {
-  if (!has_timing_ || frame_index_ < 0)
-    return 0;
-  return (*timing_valid_branch_)[frame_index_];
+  return has_timing_ && frame_index_ >= 0 && timing_valid_ ? 1 : 0;
 }
 
-inline double
-trigger_reader_t::T0() const
+inline double trigger_reader_t::T0() const
 {
-  if (!has_timing_ || frame_index_ < 0)
-    return std::numeric_limits<double>::quiet_NaN();
-  return (*T0_branch_)[frame_index_];
+  return has_timing_ && frame_index_ >= 0 ? T0_ : std::numeric_limits<double>::quiet_NaN();
+}
+inline double trigger_reader_t::sigma0() const
+{
+  return has_timing_ && frame_index_ >= 0 ? sigma0_ : std::numeric_limits<double>::quiet_NaN();
+}
+inline double trigger_reader_t::T1() const
+{
+  return has_timing_ && frame_index_ >= 0 ? T1_ : std::numeric_limits<double>::quiet_NaN();
+}
+inline double trigger_reader_t::sigma1() const
+{
+  return has_timing_ && frame_index_ >= 0 ? sigma1_ : std::numeric_limits<double>::quiet_NaN();
+}
+inline double trigger_reader_t::T() const
+{
+  return has_timing_ && frame_index_ >= 0 ? T_ : std::numeric_limits<double>::quiet_NaN();
+}
+inline double trigger_reader_t::sigmaT() const
+{
+  return has_timing_ && frame_index_ >= 0 ? sigmaT_ : std::numeric_limits<double>::quiet_NaN();
 }
 
-inline double
-trigger_reader_t::sigma0() const
-{
-  if (!has_timing_ || frame_index_ < 0)
-    return std::numeric_limits<double>::quiet_NaN();
-  return (*sigma0_branch_)[frame_index_];
-}
-
-inline double
-trigger_reader_t::T1() const
-{
-  if (!has_timing_ || frame_index_ < 0)
-    return std::numeric_limits<double>::quiet_NaN();
-  return (*T1_branch_)[frame_index_];
-}
-
-inline double
-trigger_reader_t::sigma1() const
-{
-  if (!has_timing_ || frame_index_ < 0)
-    return std::numeric_limits<double>::quiet_NaN();
-  return (*sigma1_branch_)[frame_index_];
-}
-
-inline double
-trigger_reader_t::T() const
-{
-  if (!has_timing_ || frame_index_ < 0)
-    return std::numeric_limits<double>::quiet_NaN();
-  return (*T_branch_)[frame_index_];
-}
-
-inline double
-trigger_reader_t::sigmaT() const
-{
-  if (!has_timing_ || frame_index_ < 0)
-    return std::numeric_limits<double>::quiet_NaN();
-  return (*sigmaT_branch_)[frame_index_];
-}
-
-inline const std::vector<ring_t> &
-trigger_reader_t::rings() const
-{
-  return rings_;
-}
-
-inline const std::vector<source_t> &
-trigger_reader_t::sources() const
-{
-  return sources_;
-}
-
-inline const std::vector<hit_t> &
-trigger_reader_t::trigger_hits() const
-{
-  return trigger_hits_;
-}
-
-inline const std::vector<hit_t> &
-trigger_reader_t::timing_hits() const
-{
-  return timing_hits_;
-}
-
-inline const std::vector<hit_t> &
-trigger_reader_t::cherenkov_hits() const
-{
-  return cherenkov_hits_;
-}
+inline const std::vector<source_t> &trigger_reader_t::sources() const { return sources_; }
+inline const std::vector<hit_t> &trigger_reader_t::trigger_hits() const { return trigger_hits_; }
+inline const std::vector<hit_t> &trigger_reader_t::timing_hits() const { return timing_hits_; }
+inline const std::vector<hit_t> &trigger_reader_t::cherenkov_hits() const { return cherenkov_hits_; }
+inline const std::vector<ring_t> &trigger_reader_t::rings() const { return rings_; }

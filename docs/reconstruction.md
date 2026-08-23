@@ -288,7 +288,7 @@ and writes:
 /data/2026-testbeam/process/<run>/trigger/triggered.<tag>.timing.root
 ```
 
-This stage adds per-frame `timing_valid`, `T0`, `sigma0`, `T1`, `sigma1`, `T`, and `sigmaT` branches. It preserves the existing triggered-frame tree and the `spill_participation` metadata.
+This stage reads the per-frame `timing` tree and adds scalar `timing_valid`, `T0`, `sigma0`, `T1`, `sigma1`, `T`, and `sigmaT` branches to it. The `frames`, `trigger`, `timing`, and `cherenkov` trees remain synchronized one entry per accepted frame, and the `spill_participation` metadata is preserved.
 
 For large triggered files, `timing.sh --parallel-spills` can instead run on the per-spill triggered files left by `trigger.sh`, then combine the timing-augmented spill files with `hadd`.
 

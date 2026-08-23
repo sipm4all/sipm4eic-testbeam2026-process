@@ -6,10 +6,12 @@
 #include "data_word.h"
 
 #include <cstdlib>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <map>
 #include <memory>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <algorithm>
@@ -20,8 +22,8 @@
 
 
 constexpr int maxframes = 65536;
-constexpr int maxhits = 1024;
-constexpr int maxspillhits = maxframes * maxhits;
+// nhits is persisted as uint16_t, whose largest representable value is 65535.
+constexpr int maxhits = std::numeric_limits<uint16_t>::max();
 constexpr int maxsources = 4096;
 
 struct spill_participation_t {
@@ -41,7 +43,7 @@ struct spill_participation_t {
   bool add(int device, int fifo)
   {
     if (nsources >= maxsources)
-      return false;
+    return false;
     source_device[nsources] = device;
     source_fifo[nsources] = fifo;
     ++nsources;
@@ -565,6 +567,7 @@ struct config_parser_t {
 
 struct frame_t {
   int nhits;
+  double reference_time = 0.;
 
   int device[maxhits];
   int fifo[maxhits];
@@ -582,106 +585,74 @@ struct frame_t {
 
   bool add(const data_t &data)
   {
-    if (nhits >= maxhits)
-      return false;
-
-    device[nhits] = data.device;
-    fifo[nhits] = data.fifo;
-    type[nhits] = data.type;
-    counter[nhits] = data.counter;
-    column[nhits] = data.column;
-    pixel[nhits] = data.pixel;
-    tdc[nhits] = data.tdc;
-    rollover[nhits] = data.rollover;
-    coarse[nhits] = data.coarse;
-    fine[nhits] = data.fine;
-    time[nhits] = data.time;
-    x[nhits] = data.x;
-    y[nhits] = data.y;
-    ++nhits;
-    return true;
+    if (nhits < maxhits) {
+      device[nhits] = data.device;
+      fifo[nhits] = data.fifo;
+      type[nhits] = data.type;
+      counter[nhits] = data.counter;
+      column[nhits] = data.column;
+      pixel[nhits] = data.pixel;
+      tdc[nhits] = data.tdc;
+      rollover[nhits] = data.rollover;
+      coarse[nhits] = data.coarse;
+      fine[nhits] = data.fine;
+      time[nhits] = data.time;
+      x[nhits] = data.x;
+      y[nhits] = data.y;
+      ++nhits;
+      return true;
+    }
+    return false;
   }
 };
 
-struct hit_store_t {
-  int nhits;
-  std::unique_ptr<int[]> frame_start;
-  std::unique_ptr<int[]> frame_nhits;
-  std::unique_ptr<int[]> device;
-  std::unique_ptr<int[]> fifo;
-  std::unique_ptr<int[]> type;
-  std::unique_ptr<int[]> counter;
-  std::unique_ptr<int[]> column;
-  std::unique_ptr<int[]> pixel;
-  std::unique_ptr<int[]> tdc;
-  std::unique_ptr<int[]> rollover;
-  std::unique_ptr<int[]> coarse;
-  std::unique_ptr<int[]> fine;
-  std::unique_ptr<double[]> time;
-  std::unique_ptr<double[]> x;
-  std::unique_ptr<double[]> y;
-
-  hit_store_t()
-    : frame_start(new int[maxframes]),
-      frame_nhits(new int[maxframes]),
-      device(new int[maxspillhits]),
-      fifo(new int[maxspillhits]),
-      type(new int[maxspillhits]),
-      counter(new int[maxspillhits]),
-      column(new int[maxspillhits]),
-      pixel(new int[maxspillhits]),
-      tdc(new int[maxspillhits]),
-      rollover(new int[maxspillhits]),
-      coarse(new int[maxspillhits]),
-      fine(new int[maxspillhits]),
-      time(new double[maxspillhits]),
-      x(new double[maxspillhits]),
-      y(new double[maxspillhits])
-  {
-    reset();
-  }
+struct frame_tree_store_t {
+  uint16_t nhits = 0;
+  uint8_t device[maxhits];
+  uint8_t fifo[maxhits];
+  uint8_t type[maxhits];
+  uint16_t counter[maxhits];
+  uint8_t column[maxhits];
+  uint8_t pixel[maxhits];
+  uint8_t tdc[maxhits];
+  uint16_t rollover[maxhits];
+  uint16_t coarse[maxhits];
+  uint16_t fine[maxhits];
+  float time[maxhits];
+  float x[maxhits];
+  float y[maxhits];
 
   void reset()
   {
     nhits = 0;
   }
 
-  void start_frame(int iframe)
+  bool add(const frame_t &frame, int ihit, double reference_time)
   {
-    frame_start[iframe] = nhits;
-    frame_nhits[iframe] = 0;
-  }
-
-  bool add(const frame_t &frame, int ihit, int iframe)
-  {
-    if (nhits >= maxspillhits)
-      return false;
-
-    int j = nhits++;
-    device[j] = frame.device[ihit];
-    fifo[j] = frame.fifo[ihit];
-    type[j] = frame.type[ihit];
-    counter[j] = frame.counter[ihit];
-    column[j] = frame.column[ihit];
-    pixel[j] = frame.pixel[ihit];
-    tdc[j] = frame.tdc[ihit];
-    rollover[j] = frame.rollover[ihit];
-    coarse[j] = frame.coarse[ihit];
-    fine[j] = frame.fine[ihit];
-    time[j] = frame.time[ihit];
-    x[j] = frame.x[ihit];
-    y[j] = frame.y[ihit];
-    ++frame_nhits[iframe];
-    return true;
+    if (nhits < maxhits) {
+      const int i = nhits++;
+      device[i] = static_cast<uint8_t>(frame.device[ihit]);
+      fifo[i] = static_cast<uint8_t>(frame.fifo[ihit]);
+      type[i] = static_cast<uint8_t>(frame.type[ihit]);
+      counter[i] = static_cast<uint16_t>(frame.counter[ihit]);
+      column[i] = static_cast<uint8_t>(frame.column[ihit]);
+      pixel[i] = static_cast<uint8_t>(frame.pixel[ihit]);
+      tdc[i] = static_cast<uint8_t>(frame.tdc[ihit]);
+      rollover[i] = static_cast<uint16_t>(frame.rollover[ihit]);
+      coarse[i] = static_cast<uint16_t>(frame.coarse[ihit]);
+      fine[i] = static_cast<uint16_t>(frame.fine[ihit]);
+      time[i] = static_cast<float>(frame.time[ihit] - reference_time);
+      x[i] = static_cast<float>(frame.x[ihit]);
+      y[i] = static_cast<float>(frame.y[ihit]);
+      return true;
+    }
+    return false;
   }
 };
 
 struct spill_t {
   int id;
   int nframes;
-  hit_store_t trigger;
-  hit_store_t timing;
-  hit_store_t cherenkov;
   long long nunexpected_words;
 
   spill_t()
@@ -693,61 +664,7 @@ struct spill_t {
   {
     id = _id;
     nframes = 0;
-    trigger.reset();
-    timing.reset();
-    cherenkov.reset();
     nunexpected_words = 0;
-  }
-
-  bool add(const frame_t &frame)
-  {
-    if (nframes >= maxframes)
-      return false;
-
-    int ntrigger = 0;
-    int ntiming = 0;
-    int ncherenkov = 0;
-    for (int i = 0; i < frame.nhits; ++i) {
-      if (frame.type[i] == 9) ++ntrigger;
-      else if (frame.type[i] == 1 && frame.device[i] == 200) ++ntiming;
-      else if (frame.type[i] == 1) ++ncherenkov;
-    }
-
-    if (trigger.nhits + ntrigger > maxspillhits)
-      return false;
-    if (timing.nhits + ntiming > maxspillhits)
-      return false;
-    if (cherenkov.nhits + ncherenkov > maxspillhits)
-      return false;
-
-    int iframe = nframes;
-    trigger.start_frame(iframe);
-    timing.start_frame(iframe);
-    cherenkov.start_frame(iframe);
-
-    for (int i = 0; i < frame.nhits; ++i) {
-      if (frame.type[i] == 9) {
-        trigger.add(frame, i, iframe);
-      } else if (frame.type[i] == 1 && frame.device[i] == 200) {
-        timing.add(frame, i, iframe);
-      } else if (frame.type[i] == 1) {
-        cherenkov.add(frame, i, iframe);
-      } else {
-        ++nunexpected_words;
-        std::cerr << "WARNING: unexpected word in accepted frame"
-                  << " spill=" << id
-                  << " frame=" << iframe
-                  << " type=" << frame.type[i]
-                  << " device=" << frame.device[i]
-                  << " fifo=" << frame.fifo[i]
-                  << " column=" << frame.column[i]
-                  << " pixel=" << frame.pixel[i]
-                  << " -- discarded" << std::endl;
-      }
-    }
-
-    ++nframes;
-    return true;
   }
 };
 
@@ -923,35 +840,47 @@ trigger(const std::string filename,
   }
 
   static spill_t spill;
-  auto tout = new TTree("frames", "triggered frames");
-  tout->Branch("id", &spill.id, "id/I");
-  tout->Branch("nframes", &spill.nframes, "nframes/I");
+  uint32_t output_spill = 0;
+  double output_time = 0.;
+  frame_tree_store_t output_trigger;
+  frame_tree_store_t output_timing;
+  frame_tree_store_t output_cherenkov;
 
-  auto branch_store = [&](const std::string &prefix, hit_store_t &store) {
-    auto nname = std::string("n") + prefix + "hits";
-    auto nleaf = nname + "/I";
-    auto count = nname;
-    tout->Branch(nname.c_str(), &store.nhits, nleaf.c_str());
-    tout->Branch((prefix + "_frame_start").c_str(), store.frame_start.get(), (prefix + "_frame_start[nframes]/I").c_str());
-    tout->Branch((prefix + "_frame_nhits").c_str(), store.frame_nhits.get(), (prefix + "_frame_nhits[nframes]/I").c_str());
-    tout->Branch((prefix + "_device").c_str(), store.device.get(), (prefix + "_device[" + count + "]/I").c_str());
-    tout->Branch((prefix + "_fifo").c_str(), store.fifo.get(), (prefix + "_fifo[" + count + "]/I").c_str());
-    tout->Branch((prefix + "_type").c_str(), store.type.get(), (prefix + "_type[" + count + "]/I").c_str());
-    tout->Branch((prefix + "_counter").c_str(), store.counter.get(), (prefix + "_counter[" + count + "]/I").c_str());
-    tout->Branch((prefix + "_column").c_str(), store.column.get(), (prefix + "_column[" + count + "]/I").c_str());
-    tout->Branch((prefix + "_pixel").c_str(), store.pixel.get(), (prefix + "_pixel[" + count + "]/I").c_str());
-    tout->Branch((prefix + "_tdc").c_str(), store.tdc.get(), (prefix + "_tdc[" + count + "]/I").c_str());
-    tout->Branch((prefix + "_rollover").c_str(), store.rollover.get(), (prefix + "_rollover[" + count + "]/I").c_str());
-    tout->Branch((prefix + "_coarse").c_str(), store.coarse.get(), (prefix + "_coarse[" + count + "]/I").c_str());
-    tout->Branch((prefix + "_fine").c_str(), store.fine.get(), (prefix + "_fine[" + count + "]/I").c_str());
-    tout->Branch((prefix + "_time").c_str(), store.time.get(), (prefix + "_time[" + count + "]/D").c_str());
-    tout->Branch((prefix + "_x").c_str(), store.x.get(), (prefix + "_x[" + count + "]/D").c_str());
-    tout->Branch((prefix + "_y").c_str(), store.y.get(), (prefix + "_y[" + count + "]/D").c_str());
+  auto tout = new TTree("frames", "one entry per accepted frame");
+  tout->Branch("spill", &output_spill, "spill/i");
+  tout->Branch("time", &output_time, "time/D");
+
+  auto make_hit_tree = [&](const std::string &name, frame_tree_store_t &store,
+                           bool omit_type_counter = false) {
+    auto tree = new TTree(name.c_str(), (name + " hits, one entry per frame").c_str());
+    tree->Branch("nhits", &store.nhits, "nhits/s");
+    tree->Branch("device", store.device, "device[nhits]/b");
+    tree->Branch("fifo", store.fifo, "fifo[nhits]/b");
+    if (!omit_type_counter) {
+      tree->Branch("type", store.type, "type[nhits]/b");
+      tree->Branch("counter", store.counter, "counter[nhits]/s");
+    }
+    tree->Branch("column", store.column, "column[nhits]/b");
+    tree->Branch("pixel", store.pixel, "pixel[nhits]/b");
+    tree->Branch("tdc", store.tdc, "tdc[nhits]/b");
+    tree->Branch("rollover", store.rollover, "rollover[nhits]/s");
+    tree->Branch("coarse", store.coarse, "coarse[nhits]/s");
+    tree->Branch("fine", store.fine, "fine[nhits]/s");
+    tree->Branch("time", store.time, "time[nhits]/F");
+    tree->Branch("x", store.x, "x[nhits]/F");
+    tree->Branch("y", store.y, "y[nhits]/F");
+    return tree;
   };
 
-  branch_store("trigger", spill.trigger);
-  branch_store("timing", spill.timing);
-  branch_store("cherenkov", spill.cherenkov);
+  auto ttrigger = new TTree("trigger", "trigger hits, one entry per frame");
+  ttrigger->Branch("nhits", &output_trigger.nhits, "nhits/s");
+  ttrigger->Branch("device", output_trigger.device, "device[nhits]/b");
+  ttrigger->Branch("counter", output_trigger.counter, "counter[nhits]/s");
+  ttrigger->Branch("rollover", output_trigger.rollover, "rollover[nhits]/s");
+  ttrigger->Branch("coarse", output_trigger.coarse, "coarse[nhits]/s");
+  ttrigger->Branch("time", output_trigger.time, "time[nhits]/F");
+  auto ttiming = make_hit_tree("timing", output_timing, true);
+  auto tcherenkov = make_hit_tree("cherenkov", output_cherenkov, true);
 
   spill_participation_t spill_meta;
   auto tmeta_out = new TTree("spill_participation", "spill_participation");
@@ -1011,16 +940,56 @@ trigger(const std::string filename,
   double history_window = definition.history_window(window);
 
   auto append_frame = [&](active_frame_t &active) {
-    auto before = spill.nunexpected_words;
-    if (!spill.add(active.frame)) {
-      nunexpected_words += spill.nunexpected_words - before;
+    if (spill.nframes >= maxframes) {
       std::cerr << " --- spill exceeds maxframes=" << maxframes
-                << " or category maxspillhits=" << maxspillhits
                 << ", dropping frame" << std::endl;
       ++ndropped;
       return;
     }
-    nunexpected_words += spill.nunexpected_words - before;
+
+    output_trigger.reset();
+    output_timing.reset();
+    output_cherenkov.reset();
+
+    for (int ihit = 0; ihit < active.frame.nhits; ++ihit) {
+      frame_tree_store_t *store = nullptr;
+      if (active.frame.type[ihit] == 9) {
+        store = &output_trigger;
+      } else if (active.frame.type[ihit] == 1 &&
+                 active.frame.device[ihit] == 200) {
+        store = &output_timing;
+      } else if (active.frame.type[ihit] == 1) {
+        store = &output_cherenkov;
+      } else {
+        ++nunexpected_words;
+        ++spill.nunexpected_words;
+        std::cerr << "WARNING: unexpected word in accepted frame"
+                  << " spill=" << spill.id
+                  << " frame=" << spill.nframes
+                  << " type=" << active.frame.type[ihit]
+                  << " device=" << active.frame.device[ihit]
+                  << " fifo=" << active.frame.fifo[ihit]
+                  << " column=" << active.frame.column[ihit]
+                  << " pixel=" << active.frame.pixel[ihit]
+                  << " -- discarded" << std::endl;
+        continue;
+      }
+
+      if (!store->add(active.frame, ihit, active.frame.reference_time)) {
+        std::cerr << " --- frame exceeds maxhits=" << maxhits
+                  << ", dropping frame" << std::endl;
+        ++ndropped;
+        return;
+      }
+    }
+
+    output_spill = static_cast<uint32_t>(spill.id);
+    output_time = active.frame.reference_time;
+    tout->Fill();
+    ttrigger->Fill();
+    ttiming->Fill();
+    tcherenkov->Fill();
+    ++spill.nframes;
     ++nwritten;
   };
 
@@ -1040,7 +1009,6 @@ trigger(const std::string filename,
     if (!in_spill)
       return;
     flush_frames();
-    tout->Fill();
     tmeta_out->Fill();
   };
 
@@ -1068,6 +1036,7 @@ trigger(const std::string filename,
     active.decision_time = definition.decision_latest_raw_time(event_time);
     active.seed_entry = seed_entry;
     active.frame.nhits = 0;
+    active.frame.reference_time = seed ? seed->time : event_time;
     active.counts.assign(definition.conditions.size(), 0);
 
     if (seed) {
@@ -1188,8 +1157,8 @@ trigger(const std::string filename,
   }
 
   auto nmeta_out = tmeta_out->GetEntries();
-  if (nmeta_out != tout->GetEntries()) {
-    std::cerr << "ERROR: frames/spill_participation entry-count mismatch" << std::endl;
+  if (nmeta_out != nspills) {
+    std::cerr << "ERROR: spill/spill_participation entry-count mismatch" << std::endl;
     fout->Close();
     fin->Close();
     return false;

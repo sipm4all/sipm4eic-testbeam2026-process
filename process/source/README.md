@@ -267,16 +267,16 @@ process/bin/timing \
   --output triggered.timing.root
 ```
 
-The input must be a `frames` tree produced by `trigger`, with calibrated `timing_time` values. The program preserves the original tree contents and adds one array element per accepted frame:
+The input must be the synchronized multi-tree output produced by `trigger`, with one entry per accepted frame in `frames`, `trigger`, `timing`, and `cherenkov`. The calibrated timing values are read from the `time[nhits]` branch of the `timing` tree. The program preserves all input trees and adds these scalar branches to the `timing` tree:
 
 ```text
-timing_valid[nframes]
-T0[nframes]
-sigma0[nframes]
-T1[nframes]
-sigma1[nframes]
-T[nframes]
-sigmaT[nframes]
+timing_valid
+T0
+sigma0
+T1
+sigma1
+T
+sigmaT
 ```
 
 `T0` and `sigma0` refer to TIMING0, `T1` and `sigma1` refer to TIMING1, and `T = (T0 + T1) / 2`. Values are in the estimator native time unit, `3.125 ns`. `timing_valid` is `1` only when the frame contains one usable time for every TIMING DO channel in both scintillators. If one or more channels are missing, the timing values are written as `NaN` and `timing_valid` is `0`.
@@ -284,7 +284,7 @@ sigmaT[nframes]
 ### ring-finder
 
 Finds zero or more Cherenkov ring candidates in each frame using calibrated
-Cherenkov `x`, `y`, and `time` values:
+Cherenkov `x`, `y`, and trigger-relative `time` values:
 
 ```bash
 process/bin/ring-finder \
@@ -299,22 +299,22 @@ hits passing both the radial tolerance and ring time window. Accepted inliers
 are removed and the search repeats, allowing multiple separated rings per
 frame.
 
-The output adds flattened per-frame branches:
+The output preserves the synchronized input trees and adds a `ring` tree with
+one entry per frame:
 
 ```text
 nring
-ring_frame_start[nframes]
-ring_frame_nrings[nframes]
 ring_x0[nring]
 ring_y0[nring]
 ring_r[nring]
 ring_e[nring]
 ring_phi[nring]
+ring_time[nring]
 ring_ninliers[nring]
 ```
 
-For frame `i`, use `ring_frame_start[i]` and `ring_frame_nrings[i]` to access
-its rings in the flattened arrays. `ring_r` is the semi-major axis,
+The `ring` entry at index `i` corresponds to the `frames`, `trigger`,
+`timing`, and `cherenkov` entries at index `i`. `ring_r` is the semi-major axis,
 `ring_e` is the eccentricity, `ring_phi` is the rotation angle in radians,
 and `ring_time` is the fitted ring time in native time units.
 Setting `ring_e=0` gives a circle. Defaults are a radial tolerance of `3.5`,
