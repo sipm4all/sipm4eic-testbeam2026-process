@@ -14,7 +14,7 @@ It iterates over spills and frames and prints the number of trigger, timing, and
 
 ## display.C
 
-Interactive Cherenkov event display for triggered frames. It draws one frame at a time using the stored hit `x/y` positions and one square per channel, rather than a regular `TH2D` bin grid. This is important because the channel centres are not assumed to lie on a perfectly regular ROOT histogram grid.
+Interactive Cherenkov event display for triggered frames. It draws one frame at a time using the stored hit `x/y` positions and one square per channel, rather than a regular `TH2D` bin grid. This is important because the channel centres are not assumed to lie on a perfectly regular ROOT histogram grid. The complete selection and display API is documented in [DISPLAY.md](DISPLAY.md).
 
 Run:
 
@@ -22,17 +22,19 @@ Run:
 root -l 'macros/example/display.C("triggered.root")'
 ```
 
-It displays only Cherenkov hits. The drawn square size defaults to 3.2 mm and can be changed with the optional `pixel_size` argument. The display axes are fixed to:
+It displays only Cherenkov hits. The drawn square size is controlled by the
+top-level `pixel_size` constant in `display.C` (currently 3.0 mm). The display
+axes are fixed to:
 
 ```text
 x = [-100, 100] mm
 y = [-100, 100] mm
 ```
 
-If the input file contains the flattened ring branches produced by
-`process/bin/ring-finder`, `display.C` overlays the found circles in red and
-labels them per frame. Files without ring branches remain supported and show
-only the Cherenkov hit display.
+If the input file contains the `ring` tree produced by `process/bin/ring-finder`,
+`display.C` overlays the found circles or ellipses and can mark the associated
+hits. Files without a ring tree remain supported and show only the Cherenkov
+hit display.
 
 The colour of each square is:
 
@@ -40,12 +42,20 @@ The colour of each square is:
 hit.time - minimum hit.time in the displayed frame
 ```
 
-so very large absolute calibrated times do not dominate the colour scale. Press Enter to advance to the next frame, or `q` then Enter to quit.
+so very large absolute calibrated times do not dominate the colour scale. In
+the interactive loop, press Enter to advance, `s` to save a PNG, or `q` then
+Enter to quit. See [DISPLAY.md](DISPLAY.md) for reference selectors, ring
+cuts, and the optional trigger-hit requirement.
 
-The colour reference can also be selected explicitly, using the same selector style as `deltat.C`. For example, subtract the trigger tag time from device 200:
+The colour reference can also be selected explicitly. References and filters
+are polymorphic objects; there is at most one reference and all filters are
+combined with logical AND. For example, subtract the trigger tag time from
+device 200:
 
 ```cpp
-display("triggered.root", channel_selector_t(9, 200));
+display("triggered.root",
+        std::make_shared<channel_reference_t>(
+            channel_selector_t(9, 200)));
 ```
 
 For hit selectors, the first matching hit in the current frame is used as the reference, scanning trigger, then timing, then Cherenkov hits.
@@ -53,24 +63,48 @@ For hit selectors, the first matching hit in the current frame is used as the re
 or subtract a fully specified hit:
 
 ```cpp
-display("triggered.root", field_selector_t(9, 200, 32, -1, -1));
+display("triggered.root",
+        std::make_shared<field_reference_t>(
+            field_selector_t(9, 200, 32, -1, -1)));
 ```
 
 For files augmented by `process/bin/timing`, the display can subtract the trained TIMING estimator:
 
 ```cpp
-display("triggered.timing.root", timing_selection_t("T"));
+display("triggered.timing.root",
+        std::make_shared<timing_reference_t>("T"));
 ```
 
 Valid timing selections are `"T"`, `"T0"`, and `"T1"`.
 
-A specific frame can be drawn directly:
+To require a trigger from a specific device, pass a `trigger_selection_t`:
 
 ```cpp
-display("triggered.root", spill_id, frame_index);
-display("triggered.root", spill_id, frame_index, channel_selector_t(9, 200));
-display("triggered.timing.root", spill_id, frame_index, timing_selection_t("T"));
+display("triggered.timing.root",
+        std::make_shared<timing_reference_t>("T"),
+        {std::make_shared<trigger_selection_t>(200)});
 ```
+
+Use `trigger_selection_t(-1)` to require a trigger from any device. The
+trigger selector is optional and omitted by default.
+
+A specific frame can be drawn directly by setting the final two arguments to
+the target spill and frame. The first four optional arguments are the
+reference, filter vector, starting spill, and starting frame:
+
+```cpp
+display("triggered.root", nullptr, {},
+        std::numeric_limits<int>::min(), 0,
+        spill_id, frame_index);
+display("triggered.timing.root",
+        std::make_shared<timing_reference_t>("T"),
+        {std::make_shared<trigger_selection_t>(200)},
+        std::numeric_limits<int>::min(), 0,
+        spill_id, frame_index);
+```
+
+To display every frame without a reference or filters, use either
+`display("ring.root")` or `display("ring.root", {})`.
 
 ## xymap.C
 

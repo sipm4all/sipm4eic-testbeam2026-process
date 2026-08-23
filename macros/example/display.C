@@ -14,11 +14,17 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <memory>
 #include <string>
 #include <vector>
 
-constexpr double time_min = -5.;
-constexpr double time_max = 5.;
+constexpr double time_min = -100.;
+constexpr double time_max = 100.;
+constexpr double pixel_size = 3.0;
+// These must match the ring-finder settings used to produce the ring tree.
+constexpr double ring_match_tolerance = 3.5;
+constexpr double ring_match_time_window = 2.;
+constexpr bool draw_matched_ring_hits = true;
 
 struct field_selector_t {
   int type;
@@ -43,25 +49,93 @@ struct channel_selector_t {
   }
 };
 
-struct timing_selection_t {
-  std::string branch;
+class reference_t {
+public:
+  virtual ~reference_t() = default;
 
-  timing_selection_t(const std::string &branch_ = "T")
+  virtual bool process(const trigger_reader_t &reader) = 0;
+  virtual double reference_time() const = 0;
+};
+
+class selection_t {
+public:
+  virtual ~selection_t() = default;
+
+  virtual bool is_selected(const trigger_reader_t &reader) const = 0;
+};
+
+struct field_reference_t : reference_t {
+  field_selector_t selector;
+  double value = std::numeric_limits<double>::quiet_NaN();
+
+  explicit field_reference_t(field_selector_t selector_)
+    : selector(selector_)
+  {
+  }
+
+  bool process(const trigger_reader_t &reader) override;
+  double reference_time() const override { return value; }
+};
+
+struct channel_reference_t : reference_t {
+  channel_selector_t selector;
+  double value = std::numeric_limits<double>::quiet_NaN();
+
+  explicit channel_reference_t(channel_selector_t selector_)
+    : selector(selector_)
+  {
+  }
+
+  bool process(const trigger_reader_t &reader) override;
+  double reference_time() const override { return value; }
+};
+
+struct timing_reference_t : reference_t {
+  std::string branch;
+  double value = std::numeric_limits<double>::quiet_NaN();
+
+  explicit timing_reference_t(const std::string &branch_ = "T")
     : branch(branch_)
   {
   }
+
+  bool process(const trigger_reader_t &reader) override;
+  double reference_time() const override { return value; }
 };
 
-struct reference_time_t {
-  std::string branch;
+struct trigger_reference_t : reference_t {
+  int device = -1;
+  double value = std::numeric_limits<double>::quiet_NaN();
 
-  reference_time_t(const std::string &branch_ = "T")
-    : branch(branch_)
+  explicit trigger_reference_t(int device_ = -1)
+    : device(device_)
   {
   }
+
+  bool process(const trigger_reader_t &reader) override;
+  double reference_time() const override { return value; }
 };
 
-struct ring_selection_t {
+// Compatibility aliases for the former reference names. New code should use
+// the explicit *_reference_t names above.
+using timing_selection_t = timing_reference_t;
+using reference_time_t = timing_reference_t;
+
+struct trigger_selection_t : selection_t {
+  bool enabled = false;
+  int device = -1;
+
+  trigger_selection_t() = default;
+
+  explicit trigger_selection_t(int device_)
+    : enabled(true), device(device_)
+  {
+  }
+
+  bool is_selected(const trigger_reader_t &reader) const override;
+};
+
+struct ring_selection_t : selection_t {
   double min_x0 = -std::numeric_limits<double>::infinity();
   double max_x0 =  std::numeric_limits<double>::infinity();
   double min_y0 = -std::numeric_limits<double>::infinity();
@@ -84,7 +158,12 @@ struct ring_selection_t {
       max_n_rings(max_n_rings_)
   {
   }
+
+  bool is_selected(const trigger_reader_t &reader) const override;
 };
+
+using reference_ptr_t = std::shared_ptr<reference_t>;
+using selection_ptr_t = std::shared_ptr<selection_t>;
 
 namespace {
 
@@ -92,6 +171,53 @@ bool
 finite_xy(const hit_t &hit)
 {
   return std::isfinite(hit.x) && std::isfinite(hit.y);
+}
+
+double
+ring_residual(const ring_t &ring, const hit_t &hit)
+{
+  const double dx = hit.x - ring.x0;
+  const double dy = hit.y - ring.y0;
+  const double c = std::cos(ring.phi);
+  const double s = std::sin(ring.phi);
+  const double xp = c * dx + s * dy;
+  const double yp = -s * dx + c * dy;
+  const double minor = ring.radius * std::sqrt(std::max(
+    1.e-12, 1. - ring.eccentricity * ring.eccentricity));
+  if (ring.radius <= 0. || minor <= 0.)
+    return std::numeric_limits<double>::infinity();
+  return std::abs(std::hypot(xp / ring.radius, yp / minor) - 1.) * ring.radius;
+}
+
+bool
+is_ring_hit(const hit_t &hit, const ring_t &ring)
+{
+  return finite_xy(hit) && std::isfinite(hit.time) &&
+         ring_residual(ring, hit) <= ring_match_tolerance &&
+         std::abs(hit.time - ring.time) <= ring_match_time_window;
+}
+
+bool
+passes_trigger_requirement(const trigger_reader_t &reader,
+                           const trigger_selection_t &selection)
+{
+  if (!selection.enabled)
+    return true;
+
+  for (const auto &hit : reader.trigger_hits()) {
+    if (selection.device < 0 || hit.device == selection.device)
+      return true;
+  }
+  return false;
+}
+
+void
+save_frame_png(TCanvas *canvas, const trigger_reader_t &reader)
+{
+  const std::string filename = Form("spill_%d_frame_%d.png",
+                                    reader.spill_id(), reader.frame_index());
+  canvas->SaveAs(filename.c_str());
+  std::cout << "saved " << filename << std::endl;
 }
 
 bool
@@ -188,7 +314,7 @@ find_reference_time(const trigger_reader_t &reader,
 
 bool
 find_reference_time(const trigger_reader_t &reader,
-                    timing_selection_t selection,
+                    timing_reference_t selection,
                     double &reference_time)
 {
   if (!reader.has_timing()) {
@@ -212,15 +338,6 @@ find_reference_time(const trigger_reader_t &reader,
   }
 
   return std::isfinite(reference_time);
-}
-
-bool
-find_reference_time(const trigger_reader_t &reader,
-                    reference_time_t selection,
-                    double &reference_time)
-{
-  return find_reference_time(reader, timing_selection_t(selection.branch),
-                             reference_time);
 }
 
 void
@@ -269,8 +386,7 @@ draw_frame_delta(const trigger_reader_t &reader,
 void
 draw_frame_map(trigger_reader_t &reader,
                bool use_reference,
-               double reference_time,
-               double pixel_size)
+               double reference_time)
 {
   constexpr double time_to_ns = 3.125;
   auto hits = reader.cherenkov_hits();
@@ -365,12 +481,29 @@ draw_frame_map(trigger_reader_t &reader,
 
   for (const auto &hit : drawable) {
     auto dt = (use_reference ? hit.time - reference_time : hit.time - vmin) * time_to_ns;
+    const int hit_color = color_index(dt, color_min, color_max);
     auto box = new TBox(hit.x - 0.5 * pixel_size, hit.y - 0.5 * pixel_size,
                         hit.x + 0.5 * pixel_size, hit.y + 0.5 * pixel_size);
-    box->SetFillColor(color_index(dt, color_min, color_max));
+    box->SetFillColor(hit_color);
+    bool ring_hit = false;
+    for (const auto &ring : reader.rings()) {
+      if (is_ring_hit(hit, ring)) {
+        ring_hit = true;
+        break;
+      }
+    }
     box->SetLineColor(kBlack);
     box->SetLineWidth(1);
     box->Draw("same");
+
+    if (draw_matched_ring_hits && ring_hit) {
+      // Empty circle is slightly larger than the square and retains its time color.
+      auto marker = new TEllipse(hit.x, hit.y, 1.0 * pixel_size, 1.0 * pixel_size);
+      marker->SetFillStyle(0);
+      marker->SetLineColor(hit_color);
+      marker->SetLineWidth(2);
+      marker->Draw("same");
+    }
   }
 
   if (reader.has_rings()) {
@@ -409,294 +542,165 @@ draw_frame_map(trigger_reader_t &reader,
 
 } // namespace
 
-void
-display(const char *filename = "triggered.root",
-        double pixel_size = 3.2)
+bool
+field_reference_t::process(const trigger_reader_t &reader)
 {
-  trigger_reader_t reader;
-  if (!reader.open(filename))
-    return;
+  value = std::numeric_limits<double>::quiet_NaN();
+  return find_reference_time(reader, selector, value);
+}
 
+bool
+channel_reference_t::process(const trigger_reader_t &reader)
+{
+  value = std::numeric_limits<double>::quiet_NaN();
+  return find_reference_time(reader, selector, value);
+}
+
+bool
+timing_reference_t::process(const trigger_reader_t &reader)
+{
+  value = std::numeric_limits<double>::quiet_NaN();
+  return find_reference_time(reader, *this, value);
+}
+
+bool
+trigger_reference_t::process(const trigger_reader_t &reader)
+{
+  value = std::numeric_limits<double>::quiet_NaN();
+  return find_reference_time(reader,
+                             field_selector_t{9, device, -1, -1, -1}, value);
+}
+
+bool
+trigger_selection_t::is_selected(const trigger_reader_t &reader) const
+{
+  return passes_trigger_requirement(reader, *this);
+}
+
+bool
+ring_selection_t::is_selected(const trigger_reader_t &reader) const
+{
+  return reader.has_rings() && passes_ring_selection(reader, *this);
+}
+
+namespace {
+
+TCanvas *
+make_display_canvas()
+{
   auto canvas = new TCanvas("cDisplay", "Cherenkov frame display", 800, 800);
   canvas->SetMargin(0.15, 0.15, 0.15, 0.15);
   canvas->SetFillColor(kWhite);
   canvas->SetFrameFillColor(kWhite);
   canvas->cd();
   gPad->SetFillColor(kWhite);
+  return canvas;
+}
 
-  while (reader.next_spill()) {
-    while (reader.next_frame()) {
-      canvas->cd();
-      draw_frame_map(reader, false, 0., pixel_size);
-
-      std::cout << "spill " << reader.spill_id()
-                << " frame " << reader.frame_index()
-                << " trigger=" << reader.trigger_hits().size()
-                << " timing=" << reader.timing_hits().size()
-                << " cherenkov=" << reader.cherenkov_hits().size()
-                << " -- press Enter for next frame, q then Enter to quit"
-                << std::endl;
-
-      std::string line;
-      std::getline(std::cin, line);
-      if (line == "q" || line == "Q")
-        return;
+bool
+passes_selections(const trigger_reader_t &reader,
+                  const std::vector<selection_ptr_t> &selections)
+{
+  for (const auto &selection : selections) {
+    if (!selection) {
+      std::cerr << "ERROR: null display selection" << std::endl;
+      return false;
     }
+    if (!selection->is_selected(reader))
+      return false;
   }
+  return true;
 }
 
 void
-display(const char *filename,
-        int target_spill,
-        int target_frame,
-        double pixel_size = 3.2)
+display_frames(const char *filename,
+               const reference_ptr_t &reference,
+               const std::vector<selection_ptr_t> &selections,
+               int start_spill,
+               int start_frame,
+               int target_spill,
+               int target_frame)
 {
   trigger_reader_t reader;
   if (!reader.open(filename))
     return;
 
-  auto canvas = new TCanvas("cDisplay", "Cherenkov frame display", 800, 800);
-  canvas->SetMargin(0.15, 0.15, 0.15, 0.15);
-  canvas->SetFillColor(kWhite);
-  canvas->SetFrameFillColor(kWhite);
-  canvas->cd();
-  gPad->SetFillColor(kWhite);
-
-  while (reader.next_spill()) {
-    if (reader.spill_id() != target_spill)
-      continue;
-
-    while (reader.next_frame()) {
-      if (reader.frame_index() != target_frame)
-        continue;
-
-      canvas->cd();
-      draw_frame_map(reader, false, 0., pixel_size);
-      return;
-    }
-  }
-
-  std::cerr << "ERROR: frame not found"
-            << " spill=" << target_spill
-            << " frame=" << target_frame
-            << std::endl;
-}
-
-template <typename selector_t>
-void
-display_reference_loop(const char *filename,
-                       selector_t reference,
-                       double pixel_size,
-                       int start_spill = std::numeric_limits<int>::min(),
-                       int start_frame = 0,
-                       const ring_selection_t *ring_selection = nullptr)
-{
-  trigger_reader_t reader;
-  if (!reader.open(filename))
-    return;
-
-  auto canvas = new TCanvas("cDisplay", "Cherenkov frame display", 800, 800);
-  canvas->SetMargin(0.15, 0.15, 0.15, 0.15);
-  canvas->SetFillColor(kWhite);
-  canvas->SetFrameFillColor(kWhite);
-  canvas->cd();
-  gPad->SetFillColor(kWhite);
+  auto canvas = make_display_canvas();
+  const bool fixed_frame = target_spill != std::numeric_limits<int>::min();
 
   while (reader.next_spill()) {
     if (reader.spill_id() < start_spill)
       continue;
+    if (fixed_frame && reader.spill_id() != target_spill)
+      continue;
+
     while (reader.next_frame()) {
       if (reader.spill_id() == start_spill &&
           reader.frame_index() < start_frame)
         continue;
-      if (ring_selection &&
-          (!reader.has_rings() ||
-           !passes_ring_selection(reader, *ring_selection)))
+      if (fixed_frame && reader.frame_index() != target_frame)
         continue;
+      if (!passes_selections(reader, selections))
+        continue;
+
+      bool use_reference = false;
       double reference_time = 0.;
-      if (!find_reference_time(reader, reference, reference_time)) {
-        std::cerr << "spill " << reader.spill_id()
-                  << " frame " << reader.frame_index()
-                  << " -- no matching reference hit, skipping"
-                  << std::endl;
-        continue;
+      if (reference) {
+        if (!reference->process(reader)) {
+          std::cerr << "spill " << reader.spill_id()
+                    << " frame " << reader.frame_index()
+                    << " -- no matching reference, skipping"
+                    << std::endl;
+          continue;
+        }
+        use_reference = true;
+        reference_time = reference->reference_time();
       }
 
       canvas->cd();
-      draw_frame_map(reader, true, reference_time, pixel_size);
+      draw_frame_map(reader, use_reference, reference_time);
+
+      if (fixed_frame)
+        return;
 
       std::cout << "spill " << reader.spill_id()
-                << " frame " << reader.frame_index()
-                << " reference_time=" << reference_time
-                << " trigger=" << reader.trigger_hits().size()
+                << " frame " << reader.frame_index();
+      if (use_reference)
+        std::cout << " reference_time=" << reference_time;
+      std::cout << " trigger=" << reader.trigger_hits().size()
                 << " timing=" << reader.timing_hits().size()
                 << " cherenkov=" << reader.cherenkov_hits().size()
-                << " -- press Enter for next frame, q then Enter to quit"
+                << " -- Enter: next, s: save PNG, q: quit"
                 << std::endl;
 
       std::string line;
       std::getline(std::cin, line);
       if (line == "q" || line == "Q")
         return;
-    }
-  }
-}
-
-template <typename selector_t>
-void
-display_reference_frame(const char *filename,
-                        int target_spill,
-                        int target_frame,
-                        selector_t reference,
-                        double pixel_size)
-{
-  trigger_reader_t reader;
-  if (!reader.open(filename))
-    return;
-
-  auto canvas = new TCanvas("cDisplay", "Cherenkov frame display", 800, 800);
-  canvas->SetMargin(0.15, 0.15, 0.15, 0.15);
-  canvas->SetFillColor(kWhite);
-  canvas->SetFrameFillColor(kWhite);
-  canvas->cd();
-  gPad->SetFillColor(kWhite);
-
-  while (reader.next_spill()) {
-    if (reader.spill_id() != target_spill)
-      continue;
-
-    while (reader.next_frame()) {
-      if (reader.frame_index() != target_frame)
-        continue;
-
-      double reference_time = 0.;
-      if (!find_reference_time(reader, reference, reference_time)) {
-        std::cerr << "ERROR: no matching reference hit"
-                  << " spill=" << target_spill
-                  << " frame=" << target_frame
-                  << std::endl;
-        return;
-      }
-
-      canvas->cd();
-      draw_frame_map(reader, true, reference_time, pixel_size);
-      return;
+      if (line == "s" || line == "S")
+        save_frame_png(canvas, reader);
     }
   }
 
-  std::cerr << "ERROR: frame not found"
-            << " spill=" << target_spill
-            << " frame=" << target_frame
-            << std::endl;
-}
-
-void
-display(const char *filename,
-        field_selector_t reference,
-        double pixel_size = 3.2)
-{
-  display_reference_loop(filename, reference, pixel_size);
-}
-
-void
-display(const char *filename,
-        channel_selector_t reference,
-        double pixel_size = 3.2)
-{
-  display_reference_loop(filename, reference, pixel_size);
-}
-
-void
-display(const char *filename,
-        timing_selection_t reference,
-        double pixel_size = 3.2)
-{
-  display_reference_loop(filename, reference, pixel_size);
-}
-
-void
-display(const char *filename,
-        reference_time_t reference,
-        int start_spill,
-        int start_frame,
-        double pixel_size = 3.2)
-{
-  display_reference_loop(filename, reference, pixel_size,
-                         start_spill, start_frame);
-}
-
-void
-display(const char *filename,
-        reference_time_t reference,
-        ring_selection_t ring_selection,
-        double pixel_size = 3.2)
-{
-  display_reference_loop(filename, reference, pixel_size,
-                         std::numeric_limits<int>::min(), 0,
-                         &ring_selection);
-}
-
-void
-display(const char *filename,
-        ring_selection_t ring_selection,
-        double pixel_size = 3.2)
-{
-  trigger_reader_t reader;
-  if (!reader.open(filename))
-    return;
-
-  auto canvas = new TCanvas("cDisplay", "Cherenkov frame display", 800, 800);
-  canvas->SetMargin(0.15, 0.15, 0.15, 0.15);
-  canvas->SetFillColor(kWhite);
-  canvas->SetFrameFillColor(kWhite);
-  canvas->cd();
-  gPad->SetFillColor(kWhite);
-
-  while (reader.next_spill()) {
-    while (reader.next_frame()) {
-      if (!reader.has_rings() ||
-          !passes_ring_selection(reader, ring_selection))
-        continue;
-      canvas->cd();
-      draw_frame_map(reader, false, 0., pixel_size);
-      std::cout << "spill " << reader.spill_id()
-                << " frame " << reader.frame_index()
-                << " -- press Enter for next frame, q then Enter to quit"
-                << std::endl;
-      std::string line;
-      std::getline(std::cin, line);
-      if (line == "q" || line == "Q")
-        return;
-    }
+  if (fixed_frame) {
+    std::cerr << "ERROR: frame not found"
+              << " spill=" << target_spill
+              << " frame=" << target_frame
+              << std::endl;
   }
 }
 
-void
-display(const char *filename,
-        int target_spill,
-        int target_frame,
-        field_selector_t reference,
-        double pixel_size = 3.2)
-{
-  display_reference_frame(filename, target_spill, target_frame, reference, pixel_size);
-}
+} // namespace
 
 void
-display(const char *filename,
-        int target_spill,
-        int target_frame,
-        timing_selection_t reference,
-        double pixel_size = 3.2)
+display(const char *filename = "triggered.root",
+        reference_ptr_t reference = nullptr,
+        const std::vector<selection_ptr_t> &selections = {},
+        int start_spill = std::numeric_limits<int>::min(),
+        int start_frame = 0,
+        int target_spill = std::numeric_limits<int>::min(),
+        int target_frame = -1)
 {
-  display_reference_frame(filename, target_spill, target_frame, reference, pixel_size);
-}
-
-void
-display(const char *filename,
-        int target_spill,
-        int target_frame,
-        channel_selector_t reference,
-        double pixel_size = 3.2)
-{
-  display_reference_frame(filename, target_spill, target_frame, reference, pixel_size);
+  display_frames(filename, reference, selections, start_spill, start_frame,
+                 target_spill, target_frame);
 }
