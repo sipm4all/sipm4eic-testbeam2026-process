@@ -569,36 +569,38 @@ struct frame_t {
   int nhits;
   double reference_time = 0.;
 
-  int device[maxhits];
-  int fifo[maxhits];
-  int type[maxhits];
-  int counter[maxhits];
-  int column[maxhits];
-  int pixel[maxhits];
-  int tdc[maxhits];
-  int rollover[maxhits];
-  int coarse[maxhits];
-  int fine[maxhits];
-  double time[maxhits];
-  double x[maxhits];
-  double y[maxhits];
+  std::vector<int> device;
+  std::vector<int> fifo;
+  std::vector<int> type;
+  std::vector<int> counter;
+  std::vector<int> column;
+  std::vector<int> pixel;
+  std::vector<int> tdc;
+  std::vector<int> rollover;
+  std::vector<int> coarse;
+  std::vector<int> fine;
+  std::vector<double> time;
+  std::vector<double> x;
+  std::vector<double> y;
+
+  frame_t() : nhits(0) {}
 
   bool add(const data_t &data)
   {
     if (nhits < maxhits) {
-      device[nhits] = data.device;
-      fifo[nhits] = data.fifo;
-      type[nhits] = data.type;
-      counter[nhits] = data.counter;
-      column[nhits] = data.column;
-      pixel[nhits] = data.pixel;
-      tdc[nhits] = data.tdc;
-      rollover[nhits] = data.rollover;
-      coarse[nhits] = data.coarse;
-      fine[nhits] = data.fine;
-      time[nhits] = data.time;
-      x[nhits] = data.x;
-      y[nhits] = data.y;
+      device.push_back(data.device);
+      fifo.push_back(data.fifo);
+      type.push_back(data.type);
+      counter.push_back(data.counter);
+      column.push_back(data.column);
+      pixel.push_back(data.pixel);
+      tdc.push_back(data.tdc);
+      rollover.push_back(data.rollover);
+      coarse.push_back(data.coarse);
+      fine.push_back(data.fine);
+      time.push_back(data.time);
+      x.push_back(data.x);
+      y.push_back(data.y);
       ++nhits;
       return true;
     }
@@ -608,19 +610,25 @@ struct frame_t {
 
 struct frame_tree_store_t {
   uint16_t nhits = 0;
-  uint8_t device[maxhits];
-  uint8_t fifo[maxhits];
-  uint8_t type[maxhits];
-  uint16_t counter[maxhits];
-  uint8_t column[maxhits];
-  uint8_t pixel[maxhits];
-  uint8_t tdc[maxhits];
-  uint16_t rollover[maxhits];
-  uint16_t coarse[maxhits];
-  uint16_t fine[maxhits];
-  float time[maxhits];
-  float x[maxhits];
-  float y[maxhits];
+  std::vector<uint8_t> device;
+  std::vector<uint8_t> fifo;
+  std::vector<uint8_t> type;
+  std::vector<uint16_t> counter;
+  std::vector<uint8_t> column;
+  std::vector<uint8_t> pixel;
+  std::vector<uint8_t> tdc;
+  std::vector<uint16_t> rollover;
+  std::vector<uint16_t> coarse;
+  std::vector<uint16_t> fine;
+  std::vector<float> time;
+  std::vector<float> x;
+  std::vector<float> y;
+
+  frame_tree_store_t()
+    : device(maxhits), fifo(maxhits), type(maxhits), counter(maxhits),
+      column(maxhits), pixel(maxhits), tdc(maxhits), rollover(maxhits),
+      coarse(maxhits), fine(maxhits), time(maxhits), x(maxhits), y(maxhits)
+  {}
 
   void reset()
   {
@@ -854,31 +862,31 @@ trigger(const std::string filename,
                            bool omit_type_counter = false) {
     auto tree = new TTree(name.c_str(), (name + " hits, one entry per frame").c_str());
     tree->Branch("nhits", &store.nhits, "nhits/s");
-    tree->Branch("device", store.device, "device[nhits]/b");
-    tree->Branch("fifo", store.fifo, "fifo[nhits]/b");
+    tree->Branch("device", store.device.data(), "device[nhits]/b");
+    tree->Branch("fifo", store.fifo.data(), "fifo[nhits]/b");
     if (!omit_type_counter) {
-      tree->Branch("type", store.type, "type[nhits]/b");
-      tree->Branch("counter", store.counter, "counter[nhits]/s");
+      tree->Branch("type", store.type.data(), "type[nhits]/b");
+      tree->Branch("counter", store.counter.data(), "counter[nhits]/s");
     }
-    tree->Branch("column", store.column, "column[nhits]/b");
-    tree->Branch("pixel", store.pixel, "pixel[nhits]/b");
-    tree->Branch("tdc", store.tdc, "tdc[nhits]/b");
-    tree->Branch("rollover", store.rollover, "rollover[nhits]/s");
-    tree->Branch("coarse", store.coarse, "coarse[nhits]/s");
-    tree->Branch("fine", store.fine, "fine[nhits]/s");
-    tree->Branch("time", store.time, "time[nhits]/F");
-    tree->Branch("x", store.x, "x[nhits]/F");
-    tree->Branch("y", store.y, "y[nhits]/F");
+    tree->Branch("column", store.column.data(), "column[nhits]/b");
+    tree->Branch("pixel", store.pixel.data(), "pixel[nhits]/b");
+    tree->Branch("tdc", store.tdc.data(), "tdc[nhits]/b");
+    tree->Branch("rollover", store.rollover.data(), "rollover[nhits]/s");
+    tree->Branch("coarse", store.coarse.data(), "coarse[nhits]/s");
+    tree->Branch("fine", store.fine.data(), "fine[nhits]/s");
+    tree->Branch("time", store.time.data(), "time[nhits]/F");
+    tree->Branch("x", store.x.data(), "x[nhits]/F");
+    tree->Branch("y", store.y.data(), "y[nhits]/F");
     return tree;
   };
 
   auto ttrigger = new TTree("trigger", "trigger hits, one entry per frame");
   ttrigger->Branch("nhits", &output_trigger.nhits, "nhits/s");
-  ttrigger->Branch("device", output_trigger.device, "device[nhits]/b");
-  ttrigger->Branch("counter", output_trigger.counter, "counter[nhits]/s");
-  ttrigger->Branch("rollover", output_trigger.rollover, "rollover[nhits]/s");
-  ttrigger->Branch("coarse", output_trigger.coarse, "coarse[nhits]/s");
-  ttrigger->Branch("time", output_trigger.time, "time[nhits]/F");
+  ttrigger->Branch("device", output_trigger.device.data(), "device[nhits]/b");
+  ttrigger->Branch("counter", output_trigger.counter.data(), "counter[nhits]/s");
+  ttrigger->Branch("rollover", output_trigger.rollover.data(), "rollover[nhits]/s");
+  ttrigger->Branch("coarse", output_trigger.coarse.data(), "coarse[nhits]/s");
+  ttrigger->Branch("time", output_trigger.time.data(), "time[nhits]/F");
   auto ttiming = make_hit_tree("timing", output_timing, true);
   auto tcherenkov = make_hit_tree("cherenkov", output_cherenkov, true);
 
