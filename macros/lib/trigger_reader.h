@@ -442,17 +442,36 @@ trigger_reader_t::load_spill_sources()
   sources_.clear();
   if (!has_meta_)
     return true;
-  if (meta_entry_ >= meta_entries_) {
-    std::cerr << "ERROR: missing spill_participation entry for spill " << spill_id_ << std::endl;
-    return false;
+
+  // The metadata tree contains one entry for every input spill, whereas the
+  // frames tree contains entries only for spills with accepted frames. Find
+  // the metadata entry by raw spill counter so empty trigger spills do not
+  // shift the metadata/frame association.
+  bool found = false;
+  while (meta_entry_ < meta_entries_) {
+    const Long64_t entry = meta_entry_;
+    if (meta_tree_->GetEntry(entry) <= 0) {
+      std::cerr << "ERROR: failed to read spill_participation entry "
+                << entry << std::endl;
+      return false;
+    }
+    ++meta_entry_;
+
+    if (meta_counter_ < spill_id_)
+      continue;
+    if (meta_counter_ > spill_id_) {
+      std::cerr << "ERROR: missing spill_participation entry for spill "
+                << spill_id_ << "; next metadata counter=" << meta_counter_
+                << std::endl;
+      return false;
+    }
+    found = true;
+    break;
   }
-  if (meta_tree_->GetEntry(meta_entry_++) <= 0) {
-    std::cerr << "ERROR: failed to read spill_participation entry" << std::endl;
-    return false;
-  }
-  if (meta_counter_ != spill_id_) {
-    std::cerr << "ERROR: spill_participation counter mismatch: frame spill="
-              << spill_id_ << " metadata counter=" << meta_counter_ << std::endl;
+
+  if (!found) {
+    std::cerr << "ERROR: missing spill_participation entry for spill "
+              << spill_id_ << std::endl;
     return false;
   }
   if (meta_nsources_ < 0 || meta_nsources_ > maxsources_) {
