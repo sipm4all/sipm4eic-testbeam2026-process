@@ -449,6 +449,27 @@ deltat_timing_reference_impl(const std::string filename,
 
 void
 deltat(const std::string filename,
+       channel_selector_t target_selector,
+       timing_reference_t timing_reference,
+       const std::string outfilename = "deltat.root")
+{
+  deltat_timing_reference_impl(filename, target_selector, timing_reference,
+                                nullptr, outfilename);
+}
+
+void
+deltat(const std::string filename,
+       channel_selector_t target_selector,
+       timing_reference_t timing_reference,
+       ring_selection_t ring_selection,
+       const std::string outfilename = "deltat.root")
+{
+  deltat_timing_reference_impl(filename, target_selector, timing_reference,
+                                &ring_selection, outfilename);
+}
+
+void
+deltat(const std::string filename,
        field_selector_t target_selector,
        field_selector_t reference_selector,
        const std::string outfilename = "deltat.root")
