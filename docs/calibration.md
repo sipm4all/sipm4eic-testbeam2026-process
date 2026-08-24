@@ -667,25 +667,32 @@ lane_in_chip = lane_number % 4
 
 Each lane corresponds to one electronics FIFO in the analysis channel mapping.
 Several lanes show a second lane-wide population displaced by approximately one
-native time unit from the main peak. The suspected lanes are:
+native time unit from the main peak. The current suspected set is the following
+11 `(device,fifo)` pairs. The global lane number is included because the
+diagnostic histograms use that index:
 
 ```text
-lane   chip   lane-in-chip   displacement
-----   ----   ------------   ------------
-90     22     2              +1
-102    25     2              +1
-117    29     1              -1
-120    30     0              +1
-137    34     1              +1
-142    35     2              -1
-173    43     1              -1
-178    44     2              -1
-191    47     3              -1
+lane   device   fifo   chip   lane-in-chip   displacement
+----   ------   ----   ----   ------------   ------------
+58     193      26     14     2              not recorded here
+85     194      21     21     1              not recorded here
+90     194      26     22     2              +1
+102    195      6      25     2              +1
+117    195      21     29     1              -1
+120    195      24     30     0              +1
+137    196      9      34     1              +1
+142    196      14     35     2              -1
+173    197      13     43     1              -1
+178    197      18     44     2              -1
+191    197      31     47     3              -1
 ```
 
-There are nine suspected lanes in total. They all belong to different chips:
-no chip has more than one suspicious lane. These are suspected clock
-instabilities or one-clock phase ambiguities, not final calibration corrections.
+There are eleven suspected lanes in total. They all belong to different
+chips: no chip has more than one suspicious lane. The two pairs `(193,26)`
+and `(194,21)` are included in the complete pair list above even though their
+historical displacement was not recorded in the original lane table. These are
+suspected clock instabilities or one-clock phase ambiguities, not final
+calibration corrections.
 The effect is common to the eight channels in a lane and should therefore not
 be treated as eight unrelated channel offsets without further validation.
 

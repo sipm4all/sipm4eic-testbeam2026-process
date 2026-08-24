@@ -112,7 +112,9 @@ clock_transition(const std::string &infilename,
       double content = hin->GetBinContent(ix, iy);
       if (content == 0.)
         continue;
-      double y = hin->GetYaxis()->GetBinCenter(iy) + shift;
+      // The calibrator applies corrected_time = calibrated_time - correction.
+      // Keep the diagnostic histogram in the same corrected convention.
+      double y = hin->GetYaxis()->GetBinCenter(iy) - shift;
       int aligned_bin = hout->GetYaxis()->FindBin(y);
       if (aligned_bin < 1 || aligned_bin > hout->GetNbinsY())
         continue;
