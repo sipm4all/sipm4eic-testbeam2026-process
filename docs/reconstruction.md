@@ -335,6 +335,17 @@ hDeltaT_tdc2   delta_t versus fine for target TDC 2
 hDeltaT_tdc3   delta_t versus fine for target TDC 3
 ```
 
+In addition, `deltat.C` writes one narrow `[-2,2]` spill diagnostic for every
+encountered type-1 source:
+
+```text
+hDeltaT_spill_device<device>_fifo<fifo>
+```
+
+These histograms are filled by default for frames with a valid reference and
+are intended for discovering spill-dependent clock transitions across all
+FIFOs. They are created only for sources that are present in the input.
+
 The target selector `channel_selector_t(1, -1)` means all type-1 ALCOR hits, with `-1` used as the wildcard channel index. The reference `trigger_reference_t(200)` means trigger tags from device `200`.
 
 If the triggered file has first been augmented with the trained TIMING estimator, `deltat.C` can also use the reconstructed TIMING as the reference:

@@ -134,7 +134,8 @@ The output ROOT file contains the canvas `cMap` and axis object `hMapAxis`.
 ## deltat.C
 
 Reads synchronized triggered frames and fills fixed-range delta-t histograms.
-All delta-t histograms use 2048 bins over `[-32,32]`.
+`hDeltaT` uses 2048 bins over `[-32,32]`. The spill and TDC diagnostics use
+128 bins over `[-2,2]`, preserving the same `0.03125` native-unit bin width.
 
 The macro uses the shared polymorphic API from
 `macros/lib/frame_selection.h`:
@@ -279,12 +280,23 @@ The output contains:
 
 ```text
 hDeltaT       delta_t versus target global channel
-hDeltaT_spill delta_t versus spill id, with 100 bins over [0,100]
-hDeltaT_tdc0  delta_t versus target fine for TDC 0
-hDeltaT_tdc1  delta_t versus target fine for TDC 1
-hDeltaT_tdc2  delta_t versus target fine for TDC 2
-hDeltaT_tdc3  delta_t versus target fine for TDC 3
+hDeltaT_spill delta_t versus spill id, with 100 bins over [0,100] and
+              delta-t range [-2,2]
+hDeltaT_tdc0  delta_t versus target fine for TDC 0, range [-2,2]
+hDeltaT_tdc1  delta_t versus target fine for TDC 1, range [-2,2]
+hDeltaT_tdc2  delta_t versus target fine for TDC 2, range [-2,2]
+hDeltaT_tdc3  delta_t versus target fine for TDC 3, range [-2,2]
+hDeltaT_spill_deviceX_fifoY
+              delta_t versus spill for every encountered type-1
+              `(device,fifo)` source
 ```
+
+The per-FIFO spill histograms are filled by default for all type-1 hits in
+frames with a valid reference time. They are created lazily, so absent sources
+do not produce empty histograms. Their normalization is independent of the
+target histogram and uses the number of frames with a valid reference. This
+is useful for scanning clock transitions without first selecting suspicious
+FIFOs manually.
 
 When a `ring_target_t` is present, ring diagnostics are also written:
 `hRingRadius`, `hRingInliers`, `hRingResidual`, and `hRingCenter`.
