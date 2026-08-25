@@ -332,9 +332,11 @@ the original circle is used as a fallback if ellipse refinement loses inliers.
 
 Finds time-aware circular rings with a two-stage search. A time-aware RANSAC
 pre-pass, following the circle/refit logic of `ring-finder-ransac`, supplies
-several approximate ring regions. The fine weighted Hough search then uses all
-finite Cherenkov hits in the union of those local `(x0,y0,R,t)` regions. The
-RANSAC values are only used to bound the search; the strongest Hough maxima are
+several approximate ring regions. For each RANSAC seed, the fine weighted Hough
+search scans its own local `(x0,y0,R,t)` region. The candidates from the
+independent scans are then combined, sorted, and deduplicated before validation.
+This prevents separated seeds from expanding one accumulator into a large union
+volume. The RANSAC values are only used to bound the search; the strongest Hough maxima are
 the stored ring parameters directly, followed by an optional local 4D
 sub-grid interpolation around each maximum. The interpolation uses the 81
 neighboring `(x0,y0,R,t)` accumulator values and is accepted only for a
@@ -352,10 +354,10 @@ process/bin/ring-finder-hough \
   --input triggered.timing.root \
   --output triggered.rings.hough.root \
   --min-inliers 8 --max-shared-hits 2 \
-  --min-x0 -100 --max-x0 100 --x0-step 0.25 \
-  --min-y0 -100 --max-y0 100 --y0-step 0.25 \
-  --min-radius 1 --max-radius 200 --radius-step 0.25 \
-  --min-t -32 --max-t 32 --t-step 0.25
+  --min-x0 -100 --max-x0 100 --x0-step 1 \
+  --min-y0 -100 --max-y0 100 --y0-step 1 \
+  --min-radius 1 --max-radius 200 --radius-step 1 \
+  --min-t -32 --max-t 32 --t-step 1
 ```
 
 The `x0`, `y0`, and radius steps are in mm. The time range and `t-step` are
@@ -373,7 +375,7 @@ Gaussian is evaluated over four standard deviations; this finite truncation
 keeps the accumulator practical. The `x0-step`, `y0-step`, `radius-step`, and
 `t-step` options independently control the Hough grid sampling. Smaller grid
 steps improve the initial Hough resolution but increase CPU/GPU work. The
-default steps are 0.25 mm for x, y, and radius, and 0.25 native time units.
+default steps are 1 mm for x, y, and radius, and 1 native time unit.
 The candidate is accepted only if at least `--min-inliers` hits lie within four
 spatial standard deviations and four time standard deviations of the Hough
 maximum. Hit sets are not removed between candidates: the same hit may be an
@@ -397,7 +399,7 @@ approximation is poor, at the cost of a larger fine Hough accumulator. The
 RANSAC tolerance is independent of `--spatial-resolution`; the latter controls
 the Hough Gaussian width and final Hough validation. Set
 `--ransac-iterations 0` to disable localization and scan the global bounds,
-which is useful as a reference but is much slower for 0.25 mm steps.
+which is useful as a reference but is much slower for 1 mm steps.
 Without `--gpu`
 the executable always uses the CPU reference implementation. A CUDA build
 uses architecture `75` by default and can be configured with

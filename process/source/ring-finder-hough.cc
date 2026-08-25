@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -865,6 +866,11 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
 
   Long64_t frames = 0;
   Long64_t accepted = 0;
+  Long64_t total_seeds = 0;
+  Long64_t frames_with_seeds = 0;
+  double ransac_seconds = 0.;
+  double hough_seconds = 0.;
+  double validation_seconds = 0.;
   // Keep several maxima available for validation without making the CUDA
   // reduction scan the full accumulator an excessive number of times.
   const int candidate_limit = std::max(8, max_rings * 4);
@@ -899,102 +905,141 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
       }
     }
 
+    const auto ransac_start = std::chrono::steady_clock::now();
     const std::vector<circle_t> seeds = ransac_seeds(
         points, indices, max_rings, ransac_iterations, min_inliers,
         min_x0, max_x0, min_y0, max_y0, min_radius, max_radius,
         ransac_tolerance, ransac_time_window, generator);
-
-    double scan_min_x0 = min_x0;
-    double scan_max_x0 = max_x0;
-    double scan_min_y0 = min_y0;
-    double scan_max_y0 = max_y0;
-    double scan_min_radius = min_radius;
-    double scan_max_radius = max_radius;
-    double scan_min_t = min_t;
-    double scan_max_t = max_t;
-    if (!seeds.empty()) {
-      scan_min_x0 = max_x0;
-      scan_max_x0 = min_x0;
-      scan_min_y0 = max_y0;
-      scan_max_y0 = min_y0;
-      scan_min_radius = max_radius;
-      scan_max_radius = min_radius;
-      scan_min_t = max_t;
-      scan_max_t = min_t;
-      for (const circle_t &seed : seeds) {
-        scan_min_x0 = std::min(scan_min_x0, seed.x - ransac_center_window);
-        scan_max_x0 = std::max(scan_max_x0, seed.x + ransac_center_window);
-        scan_min_y0 = std::min(scan_min_y0, seed.y - ransac_center_window);
-        scan_max_y0 = std::max(scan_max_y0, seed.y + ransac_center_window);
-        scan_min_radius = std::min(scan_min_radius,
-                                   seed.radius - ransac_radius_window);
-        scan_max_radius = std::max(scan_max_radius,
-                                   seed.radius + ransac_radius_window);
-        scan_min_t = std::min(scan_min_t, seed.ring_time - ransac_time_window);
-        scan_max_t = std::max(scan_max_t, seed.ring_time + ransac_time_window);
-      }
-      scan_min_x0 = std::max(min_x0, scan_min_x0);
-      scan_max_x0 = std::min(max_x0, scan_max_x0);
-      scan_min_y0 = std::max(min_y0, scan_min_y0);
-      scan_max_y0 = std::min(max_y0, scan_max_y0);
-      scan_min_radius = std::max(min_radius, scan_min_radius);
-      scan_max_radius = std::min(max_radius, scan_max_radius);
-      scan_min_t = std::max(min_t, scan_min_t);
-      scan_max_t = std::min(max_t, scan_max_t);
-      align_grid_bounds(min_x0, max_x0, x0_step, scan_min_x0, scan_max_x0);
-      align_grid_bounds(min_y0, max_y0, y0_step, scan_min_y0, scan_max_y0);
-      align_grid_bounds(min_radius, max_radius, radius_step,
-                        scan_min_radius, scan_max_radius);
-      align_grid_bounds(min_t, max_t, t_step, scan_min_t, scan_max_t);
-    }
+    ransac_seconds += std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - ransac_start).count();
+    total_seeds += seeds.size();
+    if (!seeds.empty())
+      ++frames_with_seeds;
 
     std::vector<std::vector<int>> accepted_inliers;
     std::vector<circle_t> candidates;
-    // The fine scan is intentionally seed-local in the default mode. With
-    // quarter-unit grid steps, falling back to the full global volume for a
-    // seedless frame would require an impractical accumulator. A global scan
-    // remains available explicitly with --ransac-iterations 0.
+    const auto hough_start = std::chrono::steady_clock::now();
+    // Scan each RANSAC seed independently. This keeps unrelated seeds from
+    // expanding one accumulator into a large union volume. Candidates from
+    // the separate scans are combined only after local interpolation.
+    std::string scan_error;
+    auto scan_region = [&](double requested_min_x0, double requested_max_x0,
+                           double requested_min_y0, double requested_max_y0,
+                           double requested_min_radius,
+                           double requested_max_radius,
+                           double requested_min_t, double requested_max_t,
+                           std::vector<circle_t> &region_candidates) {
+      double local_min_x0 = std::max(min_x0, requested_min_x0);
+      double local_max_x0 = std::min(max_x0, requested_max_x0);
+      double local_min_y0 = std::max(min_y0, requested_min_y0);
+      double local_max_y0 = std::min(max_y0, requested_max_y0);
+      double local_min_radius = std::max(min_radius, requested_min_radius);
+      double local_max_radius = std::min(max_radius, requested_max_radius);
+      double local_min_t = std::max(min_t, requested_min_t);
+      double local_max_t = std::min(max_t, requested_max_t);
+      if (local_min_x0 > local_max_x0 || local_min_y0 > local_max_y0 ||
+          local_min_radius > local_max_radius || local_min_t > local_max_t)
+        return true;
+
+      align_grid_bounds(min_x0, max_x0, x0_step,
+                        local_min_x0, local_max_x0);
+      align_grid_bounds(min_y0, max_y0, y0_step,
+                        local_min_y0, local_max_y0);
+      align_grid_bounds(min_radius, max_radius, radius_step,
+                        local_min_radius, local_max_radius);
+      align_grid_bounds(min_t, max_t, t_step, local_min_t, local_max_t);
+
+      if (gpu) {
+        const auto local_grid = make_cuda_grid(
+            local_min_x0, local_max_x0, x0_step,
+            local_min_y0, local_max_y0, y0_step,
+            local_min_radius, local_max_radius, radius_step,
+            local_min_t, local_max_t, t_step,
+            spatial_resolution, time_resolution);
+        if (!gpu->initialize(local_grid, scan_error))
+          return false;
+        if (!hough_candidates_cuda(points, indices, candidate_limit, *gpu,
+                                   local_grid, region_candidates,
+                                   scan_error))
+          return false;
+      } else {
+        region_candidates = hough_candidates(
+            points, indices, candidate_limit,
+            local_min_x0, local_max_x0, x0_step,
+            local_min_y0, local_max_y0, y0_step,
+            local_min_radius, local_max_radius, radius_step,
+            local_min_t, local_max_t, t_step,
+            spatial_resolution, time_resolution);
+      }
+
+      for (circle_t &candidate : region_candidates)
+        interpolate_peak(points, indices,
+                         local_min_x0, local_max_x0, x0_step,
+                         local_min_y0, local_max_y0, y0_step,
+                         local_min_radius, local_max_radius, radius_step,
+                         local_min_t, local_max_t, t_step,
+                         spatial_resolution, time_resolution, candidate);
+      return true;
+    };
+
     const bool scan_allowed = !seeds.empty() || ransac_iterations == 0;
-    if (indices.size() >= 3 && scan_allowed && gpu) {
-      const auto local_grid = make_cuda_grid(
-          scan_min_x0, scan_max_x0, x0_step,
-          scan_min_y0, scan_max_y0, y0_step,
-          scan_min_radius, scan_max_radius, radius_step,
-          scan_min_t, scan_max_t, t_step,
-          spatial_resolution, time_resolution);
-      std::string error;
-      if (!gpu->initialize(local_grid, error)) {
-        std::cerr << "ERROR: could not initialize CUDA Hough backend: "
-                  << error << std::endl;
-        fout->Close();
-        fin->Close();
-        return false;
+    if (indices.size() >= 3 && scan_allowed) {
+      if (seeds.empty()) {
+        if (!scan_region(min_x0, max_x0, min_y0, max_y0,
+                         min_radius, max_radius, min_t, max_t, candidates))
+          scan_error = scan_error.empty() ? "Hough scan failed" : scan_error;
+      } else {
+        for (const circle_t &seed : seeds) {
+          std::vector<circle_t> region_candidates;
+          if (!scan_region(seed.x - ransac_center_window,
+                           seed.x + ransac_center_window,
+                           seed.y - ransac_center_window,
+                           seed.y + ransac_center_window,
+                           seed.radius - ransac_radius_window,
+                           seed.radius + ransac_radius_window,
+                           seed.ring_time - ransac_time_window,
+                           seed.ring_time + ransac_time_window,
+                           region_candidates))
+            break;
+          candidates.insert(candidates.end(), region_candidates.begin(),
+                            region_candidates.end());
+        }
       }
-      if (!hough_candidates_cuda(points, indices, candidate_limit, *gpu,
-                                 local_grid, candidates, error)) {
-        std::cerr << "ERROR: CUDA Hough scan failed: " << error << std::endl;
-        fout->Close();
-        fin->Close();
-        return false;
-      }
-    } else if (indices.size() >= 3 && scan_allowed) {
-      candidates = hough_candidates(
-          points, indices, candidate_limit,
-          scan_min_x0, scan_max_x0, x0_step,
-          scan_min_y0, scan_max_y0, y0_step,
-          scan_min_radius, scan_max_radius, radius_step,
-          scan_min_t, scan_max_t, t_step,
-          spatial_resolution, time_resolution);
     }
 
-    for (circle_t &candidate : candidates)
-      interpolate_peak(points, indices,
-                       scan_min_x0, scan_max_x0, x0_step,
-                       scan_min_y0, scan_max_y0, y0_step,
-                       scan_min_radius, scan_max_radius, radius_step,
-                       scan_min_t, scan_max_t, t_step,
-                       spatial_resolution, time_resolution, candidate);
+    if (!scan_error.empty()) {
+      std::cerr << "ERROR: Hough scan failed: " << scan_error << std::endl;
+      fout->Close();
+      fin->Close();
+      return false;
+    }
 
+    hough_seconds += std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - hough_start).count();
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const circle_t &first, const circle_t &second) {
+                return first.score > second.score;
+              });
+    std::vector<circle_t> unique_candidates;
+    unique_candidates.reserve(candidates.size());
+    for (const circle_t &candidate : candidates) {
+      bool duplicate = false;
+      for (const circle_t &kept : unique_candidates) {
+        if (std::abs(candidate.x - kept.x) <= x0_step &&
+            std::abs(candidate.y - kept.y) <= y0_step &&
+            std::abs(candidate.radius - kept.radius) <= radius_step &&
+            std::abs(candidate.ring_time - kept.ring_time) <= t_step) {
+          duplicate = true;
+          break;
+        }
+      }
+      if (!duplicate)
+        unique_candidates.push_back(candidate);
+    }
+    candidates.swap(unique_candidates);
+
+    const auto validation_start = std::chrono::steady_clock::now();
     for (circle_t ring : candidates) {
       std::vector<int> inlier_indices;
       evaluate_candidate(points, indices, min_inliers,
@@ -1027,6 +1072,8 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
       if (nring == max_rings)
         break;
     }
+    validation_seconds += std::chrono::duration<double>(
+        std::chrono::steady_clock::now() - validation_start).count();
 
     if (trigger_in)
       trigger_in->GetEntry(iframe);
@@ -1067,6 +1114,13 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
   fout->Close();
   fin->Close();
   std::cout << "frames processed: " << frames << std::endl
+            << "RANSAC seeds:     " << total_seeds << " ("
+            << frames_with_seeds << " frames, average "
+            << (frames ? static_cast<double>(total_seeds) / frames : 0.)
+            << ")" << std::endl
+            << "stage seconds:    RANSAC=" << ransac_seconds
+            << " Hough=" << hough_seconds
+            << " validation=" << validation_seconds << std::endl
             << "rings found:      " << accepted << std::endl
             << "output:            " << outfilename << std::endl;
   return true;
@@ -1081,10 +1135,10 @@ main(int argc, char **argv)
   std::string input, output;
   int min_inliers = 8, max_rings = maxrings;
   int max_shared_hits = 2;
-  double min_x0 = -100., max_x0 = 100., x0_step = 0.25;
-  double min_y0 = -100., max_y0 = 100., y0_step = 0.25;
-  double min_radius = 1., max_radius = 200., radius_step = 0.25;
-  double min_t = -32., max_t = 32., t_step = 0.25;
+  double min_x0 = -100., max_x0 = 100., x0_step = 1.;
+  double min_y0 = -100., max_y0 = 100., y0_step = 1.;
+  double min_radius = 1., max_radius = 200., radius_step = 1.;
+  double min_t = -32., max_t = 32., t_step = 1.;
   double spatial_resolution = 1.5;
   double time_resolution = 1.;
   int ransac_iterations = 128;

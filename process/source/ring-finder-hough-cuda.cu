@@ -171,11 +171,7 @@ bool
 same_grid(const ring_hough_cuda::grid_t &first,
           const ring_hough_cuda::grid_t &second)
 {
-  return first.min_x0 == second.min_x0 &&
-         first.min_y0 == second.min_y0 &&
-         first.min_radius == second.min_radius &&
-         first.min_t == second.min_t &&
-         first.x0_step == second.x0_step &&
+  return first.x0_step == second.x0_step &&
          first.y0_step == second.y0_step &&
          first.radius_step == second.radius_step &&
          first.t_step == second.t_step &&
@@ -205,8 +201,13 @@ engine_t::initialize(const grid_t &grid, std::string &error)
 {
   auto *old_state = static_cast<device_state_t *>(impl_);
   if (old_state) {
-    if (same_grid(old_state->grid, grid))
+    if (same_grid(old_state->grid, grid)) {
+      // Independent RANSAC seeds can have different local origins while
+      // sharing the same accumulator shape. Keep the allocations and update
+      // only the coordinate origin used by the kernels and result decoding.
+      old_state->grid = grid;
       return true;
+    }
     release(*old_state);
     delete old_state;
     impl_ = nullptr;
