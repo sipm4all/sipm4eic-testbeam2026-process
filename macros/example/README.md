@@ -31,7 +31,8 @@ x = [-100, 100] mm
 y = [-100, 100] mm
 ```
 
-If the input file contains the `ring` tree produced by `process/bin/ring-finder`,
+If the input file contains the `ring` tree produced by
+`process/bin/ring-finder-ransac` or `process/bin/ring-finder-hough`,
 `display.C` overlays the found circles or ellipses and can mark the associated
 hits. Files without a ring tree remain supported and show only the Cherenkov
 hit display.
@@ -117,6 +118,7 @@ time and geometry, filling:
 ```text
 hDeltaTRing             hit time - ring time, in ns
 hRingDistance           signed ellipse radial residual, in mm
+hRingDistanceTimeCut    signed residual for hits within the +/-2 native-unit timing cut
 hDeltaTRingVsDistance   two-dimensional time/signed-residual correlation
 hDeltaTRingMatched      same time distribution for display-style matched hits
 hRingDistanceMatched    same signed residual distribution for matched hits
@@ -287,7 +289,7 @@ deltat("triggered.timing.rings.root",
        "deltat.ring.root");
 ```
 
-The ring target reads the `ring` tree produced by `ring-finder`. It does
+The ring target reads the `ring` tree produced by `ring-finder-ransac`. It does
 not run RANSAC or any other ring reconstruction. Its arguments are:
 
 ```text

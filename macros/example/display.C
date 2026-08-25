@@ -21,7 +21,7 @@
 constexpr double time_min = -100.;
 constexpr double time_max = 100.;
 constexpr double pixel_size = 3.0;
-// These must match the ring-finder settings used to produce the ring tree.
+// These must match the ring-finder-ransac settings used to produce the ring tree.
 constexpr double ring_match_tolerance = 5.;
 constexpr double ring_match_time_window = 2.;
 constexpr bool draw_matched_ring_hits = true;
