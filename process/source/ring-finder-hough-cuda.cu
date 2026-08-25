@@ -3,6 +3,7 @@
 
 #include <cuda_runtime.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <limits>
@@ -19,16 +20,28 @@ constexpr float gaussian_cut = 4.f;
 
 struct device_state_t {
   ring_hough_cuda::grid_t grid{};
+  float *x0_map = nullptr;
+  float *y0_map = nullptr;
+  float *radius_map = nullptr;
+  float *time_map = nullptr;
   float *x = nullptr;
   float *y = nullptr;
   float *time = nullptr;
   float *accumulator = nullptr;
-  int *block_best_index = nullptr;
-  float *block_best_score = nullptr;
   int hit_capacity = 0;
-  int block_capacity = 0;
-  int reduction_blocks = 0;
   std::size_t accumulator_entries = 0;
+  std::vector<float> host_accumulator;
+};
+
+struct ranked_entry_t {
+  float score;
+  int index;
+
+  bool operator<(const ranked_entry_t &other) const
+  {
+    return score < other.score ||
+           (score == other.score && index < other.index);
+  }
 };
 
 std::string
@@ -40,8 +53,9 @@ cuda_error(const char *operation, cudaError_t error)
 }
 
 __global__ void
-score_kernel(const float *x, const float *y, const float *time, int nhits,
-             ring_hough_cuda::grid_t grid, float *accumulator)
+coordinate_map_kernel(ring_hough_cuda::grid_t grid,
+                      float *x0_map, float *y0_map,
+                      float *radius_map, float *time_map)
 {
   const std::size_t index = static_cast<std::size_t>(blockIdx.x) *
                             blockDim.x + threadIdx.x;
@@ -57,11 +71,31 @@ score_kernel(const float *x, const float *y, const float *time, int nhits,
   const int iy = center % grid.ny;
   const int ir = remainder / grid.nt;
   const int it = remainder % grid.nt;
-  const float x0 = static_cast<float>(grid.min_x0 + ix * grid.x0_step);
-  const float y0 = static_cast<float>(grid.min_y0 + iy * grid.y0_step);
-  const float radius = static_cast<float>(grid.min_radius +
-                                          ir * grid.radius_step);
-  const float ring_time = static_cast<float>(grid.min_t + it * grid.t_step);
+
+  x0_map[index] = static_cast<float>(grid.min_x0 + ix * grid.x0_step);
+  y0_map[index] = static_cast<float>(grid.min_y0 + iy * grid.y0_step);
+  radius_map[index] = static_cast<float>(grid.min_radius +
+                                         ir * grid.radius_step);
+  time_map[index] = static_cast<float>(grid.min_t + it * grid.t_step);
+}
+
+__global__ void
+score_kernel(const float *x0_map, const float *y0_map,
+             const float *radius_map, const float *time_map,
+             const float *x, const float *y, const float *time, int nhits,
+             ring_hough_cuda::grid_t grid, float *accumulator)
+{
+  const std::size_t index = static_cast<std::size_t>(blockIdx.x) *
+                            blockDim.x + threadIdx.x;
+  const std::size_t entries = static_cast<std::size_t>(grid.nx) * grid.ny *
+                              grid.nr * grid.nt;
+  if (index >= entries)
+    return;
+
+  const float x0 = x0_map[index];
+  const float y0 = y0_map[index];
+  const float radius = radius_map[index];
+  const float ring_time = time_map[index];
   const float spatial_sigma = static_cast<float>(grid.spatial_resolution);
   const float time_sigma = static_cast<float>(grid.time_resolution);
 
@@ -82,89 +116,29 @@ score_kernel(const float *x, const float *y, const float *time, int nhits,
   accumulator[index] = score;
 }
 
-__global__ void
-reduce_blocks_kernel(const float *accumulator, std::size_t entries,
-                     int *block_best_index, float *block_best_score)
-{
-  extern __shared__ unsigned char storage[];
-  auto *scores = reinterpret_cast<float *>(storage);
-  auto *indices = reinterpret_cast<int *>(scores + blockDim.x);
-
-  float local_score = -1.f;
-  int local_index = -1;
-  for (std::size_t index = static_cast<std::size_t>(blockIdx.x) *
-                            blockDim.x + threadIdx.x;
-       index < entries; index += static_cast<std::size_t>(gridDim.x) *
-                                blockDim.x) {
-    const float score = accumulator[index];
-    if (score > local_score) {
-      local_score = score;
-      local_index = index;
-    }
-  }
-  scores[threadIdx.x] = local_score;
-  indices[threadIdx.x] = local_index;
-  __syncthreads();
-
-  for (int stride = blockDim.x / 2; stride > 0; stride /= 2) {
-    if (threadIdx.x < stride && scores[threadIdx.x + stride] > scores[threadIdx.x]) {
-      scores[threadIdx.x] = scores[threadIdx.x + stride];
-      indices[threadIdx.x] = indices[threadIdx.x + stride];
-    }
-    __syncthreads();
-  }
-  if (threadIdx.x == 0) {
-    block_best_index[blockIdx.x] = indices[0];
-    block_best_score[blockIdx.x] = scores[0];
-  }
-}
-
-__global__ void
-suppress_neighborhood_kernel(float *accumulator,
-                             ring_hough_cuda::grid_t grid,
-                             int center, int radius_bin, int time_bin)
-{
-  if (threadIdx.x != 0 || blockIdx.x != 0)
-    return;
-  const int center_x = center / grid.ny;
-  const int center_y = center % grid.ny;
-  for (int dx = -1; dx <= 1; ++dx) {
-    const int ix = center_x + dx;
-    if (ix < 0 || ix >= grid.nx)
-      continue;
-    for (int dy = -1; dy <= 1; ++dy) {
-      const int iy = center_y + dy;
-      if (iy < 0 || iy >= grid.ny)
-        continue;
-      const int suppressed_center = ix * grid.ny + iy;
-      for (int dr = -1; dr <= 1; ++dr) {
-        const int ir = radius_bin + dr;
-        if (ir < 0 || ir >= grid.nr)
-          continue;
-        for (int dt = -1; dt <= 1; ++dt) {
-          const int it = time_bin + dt;
-          if (it < 0 || it >= grid.nt)
-            continue;
-          const std::size_t index =
-              static_cast<std::size_t>(suppressed_center) * grid.nr * grid.nt +
-              static_cast<std::size_t>(ir) * grid.nt + it;
-          accumulator[index] = -1.f;
-        }
-      }
-    }
-  }
-}
-
 void
 release(device_state_t &state)
 {
+  cudaFree(state.x0_map);
+  cudaFree(state.y0_map);
+  cudaFree(state.radius_map);
+  cudaFree(state.time_map);
   cudaFree(state.x);
   cudaFree(state.y);
   cudaFree(state.time);
   cudaFree(state.accumulator);
-  cudaFree(state.block_best_index);
-  cudaFree(state.block_best_score);
-  state = {};
+  state.grid = {};
+  state.x0_map = nullptr;
+  state.y0_map = nullptr;
+  state.radius_map = nullptr;
+  state.time_map = nullptr;
+  state.x = nullptr;
+  state.y = nullptr;
+  state.time = nullptr;
+  state.accumulator = nullptr;
+  state.hit_capacity = 0;
+  state.accumulator_entries = 0;
+  state.host_accumulator.clear();
 }
 
 bool
@@ -206,6 +180,17 @@ engine_t::initialize(const grid_t &grid, std::string &error)
       // sharing the same accumulator shape. Keep the allocations and update
       // only the coordinate origin used by the kernels and result decoding.
       old_state->grid = grid;
+      const std::size_t entries = old_state->accumulator_entries;
+      const int blocks = static_cast<int>(
+          (entries + threads_per_block - 1) / threads_per_block);
+      coordinate_map_kernel<<<blocks, threads_per_block>>>(
+          old_state->grid, old_state->x0_map, old_state->y0_map,
+          old_state->radius_map, old_state->time_map);
+      cudaError_t status = cudaGetLastError();
+      if (status != cudaSuccess) {
+        error = cuda_error("coordinate map kernel", status);
+        return false;
+      }
       return true;
     }
     release(*old_state);
@@ -232,25 +217,41 @@ engine_t::initialize(const grid_t &grid, std::string &error)
   auto *state = new device_state_t;
   state->grid = grid;
   state->accumulator_entries = entries;
+  state->host_accumulator.resize(entries);
+  status = cudaMalloc(&state->x0_map, entries * sizeof(float));
+  if (status != cudaSuccess) {
+    error = cuda_error("cudaMalloc x0 map", status);
+    release(*state); delete state; return false;
+  }
+  status = cudaMalloc(&state->y0_map, entries * sizeof(float));
+  if (status != cudaSuccess) {
+    error = cuda_error("cudaMalloc y0 map", status);
+    release(*state); delete state; return false;
+  }
+  status = cudaMalloc(&state->radius_map, entries * sizeof(float));
+  if (status != cudaSuccess) {
+    error = cuda_error("cudaMalloc radius map", status);
+    release(*state); delete state; return false;
+  }
+  status = cudaMalloc(&state->time_map, entries * sizeof(float));
+  if (status != cudaSuccess) {
+    error = cuda_error("cudaMalloc time map", status);
+    release(*state); delete state; return false;
+  }
   status = cudaMalloc(&state->accumulator, entries * sizeof(float));
   if (status != cudaSuccess) {
     error = cuda_error("cudaMalloc accumulator", status);
     delete state;
     return false;
   }
-  state->reduction_blocks = static_cast<int>(
+  const int map_blocks = static_cast<int>(
       (entries + threads_per_block - 1) / threads_per_block);
-  state->block_capacity = state->reduction_blocks;
-  status = cudaMalloc(&state->block_best_index,
-                      state->block_capacity * sizeof(int));
+  coordinate_map_kernel<<<map_blocks, threads_per_block>>>(
+      state->grid, state->x0_map, state->y0_map,
+      state->radius_map, state->time_map);
+  status = cudaGetLastError();
   if (status != cudaSuccess) {
-    error = cuda_error("cudaMalloc reduction indices", status);
-    release(*state); delete state; return false;
-  }
-  status = cudaMalloc(&state->block_best_score,
-                      state->block_capacity * sizeof(float));
-  if (status != cudaSuccess) {
-    error = cuda_error("cudaMalloc reduction scores", status);
+    error = cuda_error("coordinate map kernel", status);
     release(*state); delete state; return false;
   }
   impl_ = state;
@@ -309,6 +310,7 @@ engine_t::find(const float *x, const float *y, const float *time,
       (state->accumulator_entries + threads_per_block - 1) /
       threads_per_block);
   score_kernel<<<blocks, threads_per_block>>>(
+      state->x0_map, state->y0_map, state->radius_map, state->time_map,
       state->x, state->y, state->time, nhits, state->grid,
       state->accumulator);
   status = cudaGetLastError();
@@ -319,42 +321,47 @@ engine_t::find(const float *x, const float *y, const float *time,
     return false;
   }
 
-  for (int icandidate = 0; icandidate < max_candidates; ++icandidate) {
-    reduce_blocks_kernel<<<state->reduction_blocks, threads_per_block,
-                           threads_per_block * (sizeof(float) + sizeof(int))>>>(
-        state->accumulator, state->accumulator_entries,
-        state->block_best_index, state->block_best_score);
-    status = cudaGetLastError();
-    if (status == cudaSuccess)
-      status = cudaDeviceSynchronize();
-    if (status != cudaSuccess) {
-      error = cuda_error("Hough reduction kernel", status);
-      return false;
-    }
+  status = cudaMemcpy(state->host_accumulator.data(), state->accumulator,
+                      state->accumulator_entries * sizeof(float),
+                      cudaMemcpyDeviceToHost);
+  if (status != cudaSuccess) {
+    error = cuda_error("cudaMemcpy Hough accumulator", status);
+    return false;
+  }
 
-    std::vector<int> block_indices(state->reduction_blocks);
-    std::vector<float> block_scores(state->reduction_blocks);
-    status = cudaMemcpy(block_indices.data(), state->block_best_index,
-                        state->reduction_blocks * sizeof(int),
-                        cudaMemcpyDeviceToHost);
-    if (status == cudaSuccess)
-      status = cudaMemcpy(block_scores.data(), state->block_best_score,
-                          state->reduction_blocks * sizeof(float),
-                          cudaMemcpyDeviceToHost);
-    if (status != cudaSuccess) {
-      error = cuda_error("cudaMemcpy Hough result", status);
-      return false;
-    }
-    int best_index = -1;
-    float best_score = 0.f;
-    for (int iblock = 0; iblock < state->reduction_blocks; ++iblock) {
-      if (block_scores[iblock] > best_score) {
-        best_score = block_scores[iblock];
-        best_index = block_indices[iblock];
-      }
-    }
-    if (best_index < 0 || !(best_score > 0.f))
+  std::vector<ranked_entry_t> ranked(state->host_accumulator.size());
+  for (std::size_t index = 0; index < state->host_accumulator.size();
+       ++index) {
+    ranked[index].score = state->host_accumulator[index];
+    ranked[index].index = static_cast<int>(index);
+  }
+  const std::size_t pool_limit = std::min(
+      ranked.size(), static_cast<std::size_t>(max_candidates) * 64);
+  if (pool_limit < ranked.size()) {
+    std::nth_element(
+        ranked.begin(), ranked.begin() + pool_limit, ranked.end(),
+        [](const ranked_entry_t &first, const ranked_entry_t &second) {
+          return second < first;
+        });
+    ranked.resize(pool_limit);
+  }
+  std::sort(ranked.begin(), ranked.end(),
+            [](const ranked_entry_t &first, const ranked_entry_t &second) {
+              return second < first;
+            });
+
+  // Find and suppress all requested maxima on the host after one accumulator
+  // transfer. Repeating GPU reduction, host copies, and suppression kernels
+  // for every candidate made peak extraction latency-dominated.
+  for (const auto &entry : ranked) {
+    if (candidate_count == max_candidates)
       break;
+    const float best_score = state->host_accumulator[entry.index];
+    if (best_score != entry.score)
+      continue;
+    if (!(best_score > 0.f))
+      break;
+    const int best_index = entry.index;
 
     const int plane = state->grid.nr * state->grid.nt;
     const int center = best_index / plane;
@@ -367,19 +374,34 @@ engine_t::find(const float *x, const float *y, const float *time,
     candidate.score = best_score;
     candidates[candidate_count++] = candidate;
 
-    suppress_neighborhood_kernel<<<1, 1>>>(
-        state->accumulator, state->grid, center,
-        candidate.radius_bin, candidate.t_bin);
-    status = cudaGetLastError();
-    if (status != cudaSuccess) {
-      error = cuda_error("Hough peak suppression kernel", status);
-      return false;
+    const int center_x = center / state->grid.ny;
+    const int center_y = center % state->grid.ny;
+    for (int dx = -1; dx <= 1; ++dx) {
+      const int ix = center_x + dx;
+      if (ix < 0 || ix >= state->grid.nx)
+        continue;
+      for (int dy = -1; dy <= 1; ++dy) {
+        const int iy = center_y + dy;
+        if (iy < 0 || iy >= state->grid.ny)
+          continue;
+        const int suppressed_center = ix * state->grid.ny + iy;
+        for (int dr = -1; dr <= 1; ++dr) {
+          const int ir = candidate.radius_bin + dr;
+          if (ir < 0 || ir >= state->grid.nr)
+            continue;
+          for (int dt = -1; dt <= 1; ++dt) {
+            const int it = candidate.t_bin + dt;
+            if (it < 0 || it >= state->grid.nt)
+              continue;
+            const std::size_t index =
+                static_cast<std::size_t>(suppressed_center) *
+                    state->grid.nr * state->grid.nt +
+                static_cast<std::size_t>(ir) * state->grid.nt + it;
+            state->host_accumulator[index] = -1.f;
+          }
+        }
+      }
     }
-  }
-  status = cudaDeviceSynchronize();
-  if (status != cudaSuccess) {
-    error = cuda_error("Hough peak suppression", status);
-    return false;
   }
   return true;
 }
