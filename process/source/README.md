@@ -293,11 +293,12 @@ process/bin/ring-finder \
   --time-window 5
 ```
 
-The finder obtains spatial circle candidates with RANSAC, estimates each
-candidate time from its spatial inliers using the median, and retains only
-hits passing both the radial tolerance and ring time window. Accepted inliers
-are removed and the search repeats, allowing multiple separated rings per
-frame.
+The finder obtains spatial circle candidates with RANSAC. RANSAC is used only
+to identify candidate inliers; the circle is then refit in the least-squares
+sense using all accepted inliers. The candidate time is their arithmetic mean,
+and only hits passing both the radial tolerance and ring time window are kept.
+Accepted inliers are removed and the search repeats, allowing multiple
+separated rings per frame.
 
 The output preserves the synchronized input trees and adds a `ring` tree with
 one entry per frame:
@@ -317,12 +318,13 @@ The `ring` entry at index `i` corresponds to the `frames`, `trigger`,
 `timing`, and `cherenkov` entries at index `i`. `ring_r` is the semi-major axis,
 `ring_e` is the eccentricity, `ring_phi` is the rotation angle in radians,
 and `ring_time` is the fitted ring time in native time units.
-Setting `ring_e=0` gives a circle. Defaults are a radial tolerance of `3.5`,
+Setting `ring_e=0` gives a circle. Defaults are a radial tolerance of `5`,
 a time window of `5` native units, and `8` rings maximum. Use
 `--tolerance`, `--time-window`, `--min-inliers`, `--iterations`, and
 `--max-rings` to change them. Candidate centers and radii are constrained by
 `--min-x0`, `--max-x0`, `--min-y0`, `--max-y0`, `--min-radius`, and
-`--max-radius` (defaults: center in `[-100,100]` and radius in `[1,200]`).
+`--max-radius` (defaults: tolerance `5` mm, center in `[-100,100]`, and
+radius in `[1,200]`).
 There is no eccentricity cut: valid ellipse candidates are retained, while
 the original circle is used as a fallback if ellipse refinement loses inliers.
 

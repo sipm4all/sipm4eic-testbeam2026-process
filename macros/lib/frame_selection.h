@@ -115,7 +115,7 @@ find_reference_time(const trigger_reader_t &reader,
 }
 
 inline double
-ring_residual(const ring_t &ring, const hit_t &hit)
+signed_ring_residual(const ring_t &ring, const hit_t &hit)
 {
   const double dx = hit.x - ring.x0;
   const double dy = hit.y - ring.y0;
@@ -127,7 +127,13 @@ ring_residual(const ring_t &ring, const hit_t &hit)
     1.e-12, 1. - ring.eccentricity * ring.eccentricity));
   if (ring.radius <= 0. || minor <= 0.)
     return std::numeric_limits<double>::infinity();
-  return std::abs(std::hypot(xp / ring.radius, yp / minor) - 1.) * ring.radius;
+  return (std::hypot(xp / ring.radius, yp / minor) - 1.) * ring.radius;
+}
+
+inline double
+ring_residual(const ring_t &ring, const hit_t &hit)
+{
+  return std::abs(signed_ring_residual(ring, hit));
 }
 
 inline bool

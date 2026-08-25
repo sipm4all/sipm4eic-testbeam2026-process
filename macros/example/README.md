@@ -106,6 +106,49 @@ display("triggered.timing.root",
 To display every frame without a reference or filters, use either
 `display("ring.root")` or `display("ring.root", {})`.
 
+## ring_analysis.C
+
+`ring_analysis.C` performs a non-interactive analysis of the stored rings. It
+uses the same polymorphic `reference_ptr_t` and `selection_ptr_t` arguments as
+`display.C`; all supplied selections are combined with logical AND. For every
+ring in a selected frame it compares every finite Cherenkov hit with the ring
+time and geometry, filling:
+
+```text
+hDeltaTRing             hit time - ring time, in ns
+hRingDistance           signed ellipse radial residual, in mm
+hDeltaTRingVsDistance   two-dimensional time/signed-residual correlation
+hDeltaTRingMatched      same time distribution for display-style matched hits
+hRingDistanceMatched    same signed residual distribution for matched hits
+hDeltaTRingUnmatched    time distribution for hits not matched to the ring
+hRingDistanceUnmatched  signed residual distribution for hits not matched to the ring
+hDeltaTRingVsDistanceUnmatched  two-dimensional unmatched-hit correlation
+```
+
+The matched-hit definitions use a spatial tolerance of 5 mm and a time
+window of +/-2 native time units, matching the ring overlay in `display.C`.
+The event-level ring selection can be combined with a timing reference or a
+trigger requirement:
+
+```cpp
+ring_analysis("triggered.timing.rings.root",
+              std::make_shared<timing_reference_t>("T"),
+              {std::make_shared<trigger_selection_t>(200),
+               std::make_shared<ring_selection_t>(-100, 100, -100, 100,
+                                                  20, 45, 1, 2)},
+              "ring_analysis.root");
+```
+
+The reference is used as an additional frame requirement; `#Delta t` itself
+is always measured relative to each stored `ring_time`.
+
+The residual is signed: positive values are outside the fitted ellipse and
+negative values are inside it. The matching decision still uses its absolute
+value. The unmatched histograms are the useful independent diagnostic: the ring
+finder uses the matched hits to fit the ring, so a peak at zero in the matched
+residual is expected by construction. Unmatched hits are not accepted by the
+same spatial-and-time association (`5` mm and `+/-2` native units).
+
 ## xymap.C
 
 Integrated Cherenkov occupancy map for triggered frames. It loops over all available frames, counts entries per physical channel using the stored `x/y` positions, and draws one square per channel. The drawn square size defaults to 3.2 mm and can be changed with the optional `pixel_size` argument. The display axes are fixed to:

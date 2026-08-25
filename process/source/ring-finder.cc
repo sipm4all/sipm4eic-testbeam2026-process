@@ -107,17 +107,80 @@ bool circle_from_three(const point_t &a, const point_t &b, const point_t &c,
          std::isfinite(circle.radius);
 }
 
-double median(std::vector<double> values)
+bool fit_circle(const std::vector<point_t> &points,
+                const std::vector<int> &indices,
+                circle_t &circle)
+{
+  if (indices.size() < 3)
+    return false;
+
+  // Solve x^2 + y^2 = D*x + E*y + F in the least-squares sense.
+  double normal[3][3] = {};
+  double rhs[3] = {};
+  for (int index : indices) {
+    const double x = points[index].x;
+    const double y = points[index].y;
+    const double row[3] = {x, y, 1.};
+    const double value = x * x + y * y;
+    for (int i = 0; i < 3; ++i) {
+      rhs[i] += row[i] * value;
+      for (int j = 0; j < 3; ++j)
+        normal[i][j] += row[i] * row[j];
+    }
+  }
+
+  // Gaussian elimination with partial pivoting keeps this helper
+  // self-contained and avoids introducing a matrix-library dependency.
+  for (int column = 0; column < 3; ++column) {
+    int pivot = column;
+    for (int row = column + 1; row < 3; ++row)
+      if (std::abs(normal[row][column]) >
+          std::abs(normal[pivot][column]))
+        pivot = row;
+    if (std::abs(normal[pivot][column]) < 1.e-12)
+      return false;
+    if (pivot != column) {
+      for (int j = column; j < 3; ++j)
+        std::swap(normal[column][j], normal[pivot][j]);
+      std::swap(rhs[column], rhs[pivot]);
+    }
+    for (int row = column + 1; row < 3; ++row) {
+      const double factor = normal[row][column] / normal[column][column];
+      for (int j = column; j < 3; ++j)
+        normal[row][j] -= factor * normal[column][j];
+      rhs[row] -= factor * rhs[column];
+    }
+  }
+
+  double solution[3] = {};
+  for (int row = 2; row >= 0; --row) {
+    double value = rhs[row];
+    for (int column = row + 1; column < 3; ++column)
+      value -= normal[row][column] * solution[column];
+    solution[row] = value / normal[row][row];
+  }
+
+  circle.x = 0.5 * solution[0];
+  circle.y = 0.5 * solution[1];
+  const double radius_squared = solution[2] + circle.x * circle.x +
+                                circle.y * circle.y;
+  if (radius_squared <= 0.)
+    return false;
+  circle.radius = std::sqrt(radius_squared);
+  circle.eccentricity = 0.;
+  circle.phi = 0.;
+  return std::isfinite(circle.x) && std::isfinite(circle.y) &&
+         std::isfinite(circle.radius);
+}
+
+double mean(const std::vector<double> &values)
 {
   if (values.empty())
     return std::numeric_limits<double>::quiet_NaN();
-  auto middle = values.begin() + values.size() / 2;
-  std::nth_element(values.begin(), middle, values.end());
-  if (values.size() % 2)
-    return *middle;
-  const double upper = *middle;
-  std::nth_element(values.begin(), middle - 1, values.end());
-  return 0.5 * (upper + *(middle - 1));
+  double sum = 0.;
+  for (double value : values)
+    sum += value;
+  return sum / values.size();
 }
 
 circle_t find_one_ring(const std::vector<point_t> &points,
@@ -167,13 +230,6 @@ circle_t find_one_ring(const std::vector<point_t> &points,
         candidate.radius < min_radius || candidate.radius > max_radius)
       continue;
 
-    std::vector<int> spatial_indices;
-    for (int index : indices) {
-      const double residual = std::abs(std::hypot(points[index].x - candidate.x,
-                                                  points[index].y - candidate.y) -
-                                       candidate.radius);
-      if (residual <= tolerance) spatial_indices.push_back(index);
-    }
     const circle_t circle_candidate = candidate;
     auto collect_inliers = [&](const circle_t &model, double ring_time,
                                std::vector<int> &accepted) {
@@ -196,8 +252,37 @@ circle_t find_one_ring(const std::vector<point_t> &points,
     times.clear();
     for (int index : accepted_indices)
       times.push_back(points[index].time);
-    circle_model.ring_time = median(times);
+    circle_model.ring_time = mean(times);
     collect_inliers(circle_model, circle_model.ring_time, accepted_indices);
+
+    // RANSAC only supplies a minimal geometric hypothesis. Refit the circle
+    // using all current inliers so the stored circle is not guaranteed to
+    // pass exactly through the three sampled points.
+    bool refit_ok = fit_circle(points, accepted_indices, circle_model);
+    if (!refit_ok)
+      continue;
+    for (int iteration = 0; iteration < 2; ++iteration) {
+      times.clear();
+      for (int index : accepted_indices)
+        times.push_back(points[index].time);
+      circle_model.ring_time = mean(times);
+      collect_inliers(circle_model, circle_model.ring_time, accepted_indices);
+      if (!fit_circle(points, accepted_indices, circle_model)) {
+        refit_ok = false;
+        break;
+      }
+    }
+    if (!refit_ok || accepted_indices.size() < 3 ||
+        !std::isfinite(circle_model.ring_time))
+      continue;
+    if (circle_model.x < min_x0 || circle_model.x > max_x0 ||
+        circle_model.y < min_y0 || circle_model.y > max_y0 ||
+        circle_model.radius < min_radius || circle_model.radius > max_radius)
+      continue;
+    times.clear();
+    for (int index : accepted_indices)
+      times.push_back(points[index].time);
+    circle_model.ring_time = mean(times);
     const int circle_inliers = static_cast<int>(accepted_indices.size());
     const std::vector<int> circle_indices = accepted_indices;
     std::vector<double> circle_times;
@@ -210,13 +295,13 @@ circle_t find_one_ring(const std::vector<point_t> &points,
     times.clear();
     for (int index : accepted_indices)
       times.push_back(points[index].time);
-    candidate.ring_time = median(times);
+    candidate.ring_time = mean(times);
     collect_inliers(candidate, candidate.ring_time, accepted_indices);
     const int ellipse_inliers = static_cast<int>(accepted_indices.size());
     if (force_circle ||
         ellipse_inliers < min_inliers || ellipse_inliers <= circle_inliers) {
       candidate = circle_model;
-      candidate.ring_time = median(circle_times);
+      candidate.ring_time = mean(circle_times);
       candidate.inliers = circle_inliers;
       times = circle_times;
     } else {
@@ -437,7 +522,7 @@ int main(int argc, char **argv)
   namespace po = boost::program_options;
   std::string input, output;
   int iterations = 512, min_inliers = 8, max_rings = maxrings;
-  double tolerance = 3.5, time_window = 5.;
+  double tolerance = 5., time_window = 5.;
   double min_x0 = -100., max_x0 = 100.;
   double min_y0 = -100., max_y0 = 100.;
   double min_radius = 1., max_radius = 200.;
