@@ -62,6 +62,10 @@ ring_analysis(const char *filename = "ring.root",
   auto hDistance = new TH1D(
       "hRingDistance", "signed radial residual from ring;residual [mm];hits",
       1024, -100., 100.);
+  auto hDistanceTimeCut = new TH1D(
+      "hRingDistanceTimeCut",
+      "signed radial residual for hits within the timing cut;residual [mm];hits",
+      1024, -100., 100.);
   auto hDeltaTVsDistance = new TH2D(
       "hDeltaTRingVsDistance",
       "hit time relative to ring time vs signed radial residual;residual [mm];#Deltat [ns]",
@@ -124,11 +128,14 @@ ring_analysis(const char *filename = "ring.root",
           hDeltaT->Fill(delta_t_ns);
           hDistance->Fill(signed_distance);
           hDeltaTVsDistance->Fill(signed_distance, delta_t_ns);
+          const bool within_time_cut =
+              std::abs(delta_t_native) <= ring_analysis_match_time_window;
+          if (within_time_cut)
+            hDistanceTimeCut->Fill(signed_distance);
           ++nhits;
 
           const bool matched =
-              distance <= ring_analysis_match_tolerance &&
-              std::abs(delta_t_native) <= ring_analysis_match_time_window;
+              distance <= ring_analysis_match_tolerance && within_time_cut;
           if (matched) {
             hDeltaTMatched->Fill(delta_t_ns);
             hDistanceMatched->Fill(signed_distance);
@@ -147,6 +154,7 @@ ring_analysis(const char *filename = "ring.root",
   fout->cd();
   hDeltaT->Write();
   hDistance->Write();
+  hDistanceTimeCut->Write();
   hDeltaTVsDistance->Write();
   hDeltaTMatched->Write();
   hDistanceMatched->Write();
