@@ -1,157 +1,315 @@
 #include <TFile.h>
 #include <TH2.h>
+#include <TKey.h>
 
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <string>
-#include <algorithm>
 #include <utility>
 #include <vector>
 
+namespace {
+
+constexpr double spill_min_weight_fraction = 0.25;
+// Same effective-statistics criterion used by fit_calib.C: 1/0.15^2 ~= 44.
+constexpr double default_max_relative_integral_error = 0.15;
+constexpr double correction_threshold = 0.5;
+constexpr double one_clock_tolerance = 0.35;
+
+struct spill_stat_t {
+  double mean = 0.;
+  double rms = 0.;
+  double weight = 0.;
+  double integral_error = 0.;
+};
+
+struct transition_result_t {
+  int device = -1;
+  int fifo = -1;
+  std::vector<int> positive_spills;
+  std::vector<int> negative_spills;
+  int rejected_low_statistics = 0;
+  int rejected_non_clock = 0;
+};
+
+bool
+analyze_histogram(const TH2 *hin,
+                  TH2 *hout,
+                  transition_result_t &result,
+                  double max_relative_integral_error)
+{
+  if (!hin || !hout)
+    return false;
+
+  std::vector<spill_stat_t> spills(hin->GetNbinsX());
+  const int ybin_min = hin->GetYaxis()->FindBin(-2. + 1.e-9);
+  const int ybin_max = hin->GetYaxis()->FindBin(2. - 1.e-9);
+
+  for (int ix = 1; ix <= hin->GetNbinsX(); ++ix) {
+    double sum = 0.;
+    double sum2 = 0.;
+    for (int iy = ybin_min; iy <= ybin_max; ++iy) {
+      const double y = hin->GetYaxis()->GetBinCenter(iy);
+      if (y < -2. || y > 2.)
+        continue;
+      const double weight = hin->GetBinContent(ix, iy);
+      sum += weight * y;
+      sum2 += weight * y * y;
+    }
+
+    spills[ix - 1].weight = hin->IntegralAndError(
+        ix, ix, ybin_min, ybin_max, spills[ix - 1].integral_error);
+    if (spills[ix - 1].weight > 0.) {
+      spills[ix - 1].mean = sum / spills[ix - 1].weight;
+      spills[ix - 1].rms = std::sqrt(std::max(
+          0., sum2 / spills[ix - 1].weight -
+              spills[ix - 1].mean * spills[ix - 1].mean));
+    }
+  }
+
+  std::vector<double> nonzero_weights;
+  for (const auto &spill : spills)
+    if (spill.weight > 0.)
+      nonzero_weights.push_back(spill.weight);
+  std::sort(nonzero_weights.begin(), nonzero_weights.end());
+  const double median_weight = nonzero_weights.empty()
+                                  ? 0.
+                                  : nonzero_weights[nonzero_weights.size() / 2];
+  const double minimum_weight = spill_min_weight_fraction * median_weight;
+
+  for (int ix = 1; ix <= hin->GetNbinsX(); ++ix) {
+    const auto &spill = spills[ix - 1];
+    const double relative_integral_error =
+        spill.weight > 0. ? spill.integral_error / spill.weight : 1.;
+    int correction = 0;
+
+    if (spill.weight > 0. &&
+        (spill.weight < minimum_weight ||
+         relative_integral_error > max_relative_integral_error)) {
+      ++result.rejected_low_statistics;
+    } else if (spill.weight >= minimum_weight &&
+               relative_integral_error <= max_relative_integral_error &&
+               std::abs(spill.mean) >= correction_threshold &&
+               std::abs(std::abs(spill.mean) - 1.) <= one_clock_tolerance) {
+      correction = spill.mean > 0. ? 1 : -1;
+      if (correction > 0)
+        result.positive_spills.push_back(ix - 1);
+      else
+        result.negative_spills.push_back(ix - 1);
+    } else if (spill.weight >= minimum_weight &&
+               relative_integral_error <= max_relative_integral_error &&
+               std::abs(spill.mean) >= correction_threshold) {
+      ++result.rejected_non_clock;
+    }
+
+    for (int iy = 1; iy <= hin->GetNbinsY(); ++iy) {
+      const double content = hin->GetBinContent(ix, iy);
+      if (content == 0.)
+        continue;
+
+      // The calibrator applies corrected_time = calibrated_time - correction.
+      const double aligned_y = hin->GetYaxis()->GetBinCenter(iy) - correction;
+      const int aligned_bin = hout->GetYaxis()->FindBin(aligned_y);
+      if (aligned_bin < 1 || aligned_bin > hout->GetNbinsY())
+        continue;
+
+      hout->AddBinContent(ix, aligned_bin, content);
+      const double old_error = hout->GetBinError(ix, aligned_bin);
+      const double error = hin->GetBinError(ix, iy);
+      hout->SetBinError(ix, aligned_bin,
+                        std::sqrt(old_error * old_error + error * error));
+    }
+  }
+
+  hout->SetEntries(hin->GetEntries());
+  return true;
+}
+
+void
+write_correction_row(std::ofstream &conf,
+                     const std::string &run,
+                     int device,
+                     int fifo,
+                     int correction,
+                     const std::vector<int> &spills)
+{
+  if (spills.empty())
+    return;
+  conf << run << ' ' << device << ' ' << fifo << ' ' << correction;
+  for (const int spill : spills)
+    conf << ' ' << spill;
+  conf << '\n';
+}
+
+void
+write_conf_header(std::ofstream &conf)
+{
+  conf << "# Spill-specific clock corrections generated by clock_transition.C\n"
+       << "# correction convention: corrected_time = calibrated_time - correction\n"
+       << "[CLOCK]\n"
+       << "# run device fifo correction spill...\n";
+}
+
+void
+print_result(const transition_result_t &result)
+{
+  const std::size_t ncorrected = result.positive_spills.size() +
+                                 result.negative_spills.size();
+  std::cout << "device=" << result.device
+            << " fifo=" << result.fifo
+            << " positive corrections=" << result.positive_spills.size()
+            << " negative corrections=" << result.negative_spills.size()
+            << " rejected low-statistics=" << result.rejected_low_statistics
+            << " rejected non-clock=" << result.rejected_non_clock
+            << " corrected spills=" << ncorrected << std::endl;
+}
+
+}
+
+// Process every hDeltaT_spill_deviceX_fifoY histogram in one deltat output.
+void
+clock_transition(const std::string &infilename,
+                 const std::string &run,
+                 const std::string &outfilename = "clock_transition.root",
+                 const std::string &conffilename = "clock-corrections.conf",
+                 double max_relative_integral_error =
+                     default_max_relative_integral_error)
+{
+  auto fin = TFile::Open(infilename.c_str(), "READ");
+  if (!fin || fin->IsZombie()) {
+    std::cerr << "ERROR: could not open " << infilename << std::endl;
+    return;
+  }
+
+  std::map<std::pair<int, int>, TH2 *> input_hists;
+  TIter keys(fin->GetListOfKeys());
+  TKey *key = nullptr;
+  while ((key = static_cast<TKey *>(keys()))) {
+    int device = -1;
+    int fifo = -1;
+    char extra = '\0';
+    const std::string name = key->GetName();
+    if (std::sscanf(name.c_str(), "hDeltaT_spill_device%d_fifo%d%c",
+                    &device, &fifo, &extra) != 2)
+      continue;
+    auto hist = dynamic_cast<TH2 *>(fin->Get(name.c_str()));
+    if (hist)
+      input_hists[std::make_pair(device, fifo)] = hist;
+  }
+
+  if (input_hists.empty()) {
+    std::cerr << "ERROR: no hDeltaT_spill_deviceX_fifoY histograms found in "
+              << infilename << std::endl;
+    fin->Close();
+    return;
+  }
+
+  auto fout = TFile::Open(outfilename.c_str(), "RECREATE");
+  if (!fout || fout->IsZombie()) {
+    std::cerr << "ERROR: could not create " << outfilename << std::endl;
+    fin->Close();
+    return;
+  }
+  std::ofstream conf(conffilename);
+  if (!conf) {
+    std::cerr << "ERROR: could not create " << conffilename << std::endl;
+    fout->Close();
+    fin->Close();
+    return;
+  }
+  write_conf_header(conf);
+
+  int positive_corrections = 0;
+  int negative_corrections = 0;
+  int corrected_spills = 0;
+  for (const auto &entry : input_hists) {
+    const int device = entry.first.first;
+    const int fifo = entry.first.second;
+    TH2 *hin = entry.second;
+    const std::string input_name = hin->GetName();
+    const std::string aligned_name =
+        "hDeltaT_spill_aligned_device" + std::to_string(device) +
+        "_fifo" + std::to_string(fifo);
+
+    fout->cd();
+    hin->Write(input_name.c_str());
+    auto hout = dynamic_cast<TH2 *>(hin->Clone(aligned_name.c_str()));
+    hout->SetTitle("spill-aligned delta-t;spill;delta-t");
+    hout->Reset("ICES");
+
+    transition_result_t result;
+    result.device = device;
+    result.fifo = fifo;
+    analyze_histogram(hin, hout, result, max_relative_integral_error);
+    hout->Write(aligned_name.c_str());
+    delete hout;
+
+    write_correction_row(conf, run, device, fifo, -1, result.negative_spills);
+    write_correction_row(conf, run, device, fifo, +1, result.positive_spills);
+    positive_corrections += static_cast<int>(result.positive_spills.size());
+    negative_corrections += static_cast<int>(result.negative_spills.size());
+    corrected_spills += static_cast<int>(result.positive_spills.size() +
+                                         result.negative_spills.size());
+    print_result(result);
+  }
+
+  conf.close();
+  fout->Close();
+  fin->Close();
+
+  std::cout << "histograms scanned: " << input_hists.size() << std::endl;
+  std::cout << "positive corrections: " << positive_corrections << std::endl;
+  std::cout << "negative corrections: " << negative_corrections << std::endl;
+  std::cout << "corrected spills: " << corrected_spills << std::endl;
+  std::cout << "maximum relative integral error: "
+            << max_relative_integral_error << std::endl;
+  std::cout << "output: " << outfilename << std::endl;
+  std::cout << "clock config: " << conffilename << std::endl;
+}
+
+// Backward-compatible single-FIFO helper. New analyses should use the
+// all-FIFO overload above.
 void
 clock_transition(const std::string &infilename,
                  const std::string &run,
                  int device,
                  int fifo,
                  const std::string &outfilename = "clock_transition.root",
-                 const std::string &conffilename = "clock-corrections.conf")
+                 const std::string &conffilename = "clock-corrections.conf",
+                 double max_relative_integral_error =
+                     default_max_relative_integral_error)
 {
   auto fin = TFile::Open(infilename.c_str(), "READ");
-  auto hin = fin ? (TH2 *)fin->Get("hDeltaT_spill") : nullptr;
+  auto hin = fin ? dynamic_cast<TH2 *>(fin->Get("hDeltaT_spill")) : nullptr;
   if (!hin) {
-    std::cerr << "ERROR: could not open hDeltaT_spill in " << infilename << std::endl;
+    std::cerr << "ERROR: could not open hDeltaT_spill in " << infilename
+              << std::endl;
     return;
   }
 
-  std::vector<double> means(hin->GetNbinsX(), 0.);
-  std::vector<double> weights(hin->GetNbinsX(), 0.);
-  for (int ix = 1; ix <= hin->GetNbinsX(); ++ix) {
-    for (int iy = 1; iy <= hin->GetNbinsY(); ++iy) {
-      double y = hin->GetYaxis()->GetBinCenter(iy);
-      if (y < -2. || y > 2.)
-        continue;
-      double w = hin->GetBinContent(ix, iy);
-      means[ix - 1] += w * y;
-      weights[ix - 1] += w;
-    }
-    if (weights[ix - 1] > 0.)
-      means[ix - 1] /= weights[ix - 1];
-  }
-
-  std::vector<std::pair<double, double>> valid_means;
-  for (int i = 0; i < hin->GetNbinsX(); ++i)
-    if (weights[i] > 0.)
-      valid_means.emplace_back(means[i], weights[i]);
-  double low_mean = 0., high_mean = 0.;
-  if (!valid_means.empty()) {
-    low_mean = valid_means.front().first;
-    high_mean = valid_means.front().first;
-    for (const auto &entry : valid_means) {
-      low_mean = std::min(low_mean, entry.first);
-      high_mean = std::max(high_mean, entry.first);
-    }
-    for (int iteration = 0; iteration < 32; ++iteration) {
-      double low_sum = 0., low_weight = 0.;
-      double high_sum = 0., high_weight = 0.;
-      double threshold = 0.5 * (low_mean + high_mean);
-      for (const auto &entry : valid_means) {
-        if (entry.first < threshold) {
-          low_sum += entry.first * entry.second;
-          low_weight += entry.second;
-        } else {
-          high_sum += entry.first * entry.second;
-          high_weight += entry.second;
-        }
-      }
-      if (low_weight == 0. || high_weight == 0.)
-        break;
-      double new_low = low_sum / low_weight;
-      double new_high = high_sum / high_weight;
-      if (std::abs(new_low - low_mean) + std::abs(new_high - high_mean) < 1.e-9)
-        break;
-      low_mean = new_low;
-      high_mean = new_high;
-    }
-  }
-  if (low_mean > high_mean)
-    std::swap(low_mean, high_mean);
-  double separation = high_mean - low_mean;
-  double threshold = (low_mean + high_mean) / 2.;
-  double low_weight = 0., high_weight = 0.;
-  int low_count = 0, high_count = 0;
-  for (const auto &entry : valid_means) {
-    if (entry.first < threshold) {
-      low_weight += entry.second;
-      ++low_count;
-    } else {
-      high_weight += entry.second;
-      ++high_count;
-    }
-  }
-
   auto fout = TFile::Open(outfilename.c_str(), "RECREATE");
-  auto hout = (TH2 *)hin->Clone("hDeltaT_spill_aligned");
+  auto hout = dynamic_cast<TH2 *>(hin->Clone("hDeltaT_spill_aligned"));
   hout->SetTitle("spill-aligned delta-t;spill;delta-t");
   hout->Reset("ICES");
-
-  std::vector<int> corrected_spills;
-  for (int ix = 1; ix <= hin->GetNbinsX(); ++ix) {
-    if (weights[ix - 1] <= 0.)
-      continue;
-    bool separated = separation >= 0.5 && low_weight > 0. && high_weight > 0.;
-    bool low_state = means[ix - 1] < threshold;
-    int shift = 0;
-    if (separated && !low_state) {
-      // The low state is the canonical state. Every emitted correction is +1.
-      // The high state is shifted down by one clock unit.
-      shift = 1;
-      corrected_spills.push_back(ix - 1);
-    }
-
-    for (int iy = 1; iy <= hin->GetNbinsY(); ++iy) {
-      double content = hin->GetBinContent(ix, iy);
-      if (content == 0.)
-        continue;
-      // The calibrator applies corrected_time = calibrated_time - correction.
-      // Keep the diagnostic histogram in the same corrected convention.
-      double y = hin->GetYaxis()->GetBinCenter(iy) - shift;
-      int aligned_bin = hout->GetYaxis()->FindBin(y);
-      if (aligned_bin < 1 || aligned_bin > hout->GetNbinsY())
-        continue;
-      hout->AddBinContent(ix, aligned_bin, content);
-      double old_error = hout->GetBinError(ix, aligned_bin);
-      double error = hin->GetBinError(ix, iy);
-      hout->SetBinError(ix, aligned_bin,
-                        TMath::Sqrt(old_error * old_error + error * error));
-    }
-  }
-
+  transition_result_t result;
+  result.device = device;
+  result.fifo = fifo;
+  analyze_histogram(hin, hout, result, max_relative_integral_error);
   hin->Write("hDeltaT_spill");
-  hout->Write();
+  hout->Write("hDeltaT_spill_aligned");
   fout->Close();
+  fin->Close();
 
   std::ofstream conf(conffilename);
-  conf << "# Spill-specific clock corrections generated by clock_transition.C\n"
-       << "# correction convention: corrected_time = calibrated_time - correction\n"
-       << "[CLOCK]\n"
-       << "# run device fifo correction spill...\n";
-  if (!corrected_spills.empty()) {
-    const int correction = 1;
-    conf << run << ' ' << device << ' ' << fifo << ' ' << correction;
-    for (int spill : corrected_spills)
-      conf << ' ' << spill;
-    conf << '\n';
-  }
+  write_conf_header(conf);
+  write_correction_row(conf, run, device, fifo, -1, result.negative_spills);
+  write_correction_row(conf, run, device, fifo, +1, result.positive_spills);
   conf.close();
-
-  std::cout << "state separation: " << separation << std::endl;
-  std::cout << "low-state mean:  " << low_mean << std::endl;
-  std::cout << "high-state mean: " << high_mean << std::endl;
-  std::cout << "threshold:       " << threshold << std::endl;
-  std::cout << "state counts:     low=" << low_count << " high=" << high_count << std::endl;
-  std::cout << "reference state:  low (fixed convention)" << std::endl;
-  std::cout << "clock correction: +1" << std::endl;
-  std::cout << "corrected spills: " << corrected_spills.size() << std::endl;
-  std::cout << "output:           " << outfilename << std::endl;
-  std::cout << "clock config:     " << conffilename << std::endl;
+  print_result(result);
+  std::cout << "output: " << outfilename << std::endl;
+  std::cout << "clock config: " << conffilename << std::endl;
 }

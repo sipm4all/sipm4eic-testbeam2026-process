@@ -798,25 +798,30 @@ Potential future corrections will need either a spill-state indicator or a
 spill-local timing adjustment.
 
 The temporary diagnostic macro
-`macros/example/clock_transition.C` detects the two spill states using only the
-central `delta_t` interval `[-2,2]`. It performs a two-cluster fit of the
-per-spill means, uses the midpoint of the two cluster means as the
-classification threshold, keeps the majority state as reference, shifts only
-the minority state by one native unit, and writes both a corrected spill
-histogram and a run-specific `[CLOCK]` file. For lane 173 in the example run:
+`macros/example/clock_transition.C` uses only the central `delta_t` interval
+`[-2,2]`. It scans every
+`hDeltaT_spill_device<device>_fifo<fifo>` histogram in one `deltat.root` file,
+treats the existing calibration as approximately zero-centered, estimates the
+mean of each spill independently, and applies a correction only when that spill
+is a well-populated, one-clock excursion from zero. It does not choose the most
+populous spill state as a run-wide baseline: doing that can shift every
+otherwise good spill when only a few spills are displaced. Very low-statistics
+spills are rejected. The macro writes one inspection ROOT file containing the
+original and aligned histogram for every scanned `(device,fifo)`, plus one
+run-specific `[CLOCK]` file. For the example run:
 
 ```bash
 root -l -b -q \
   -e '.L macros/example/clock_transition.C' \
-  -e 'clock_transition("20260623-185238.deltat.fifo173.root", \
-                       "20260623-185238", 197, 13, \
-                       "clock_transition.fifo173.root", \
-                       "clock-corrections.fifo173.conf")'
+  -e 'clock_transition("deltat.root", "20260623-185238", \
+                       "clock_transition.20260623-185238.root", \
+                       "clock-corrections.20260623-185238.conf")'
 ```
 
-The ROOT output contains `hDeltaT_spill` and
-`hDeltaT_spill_aligned`. The generated correction file contains one compact
-row of the form:
+The ROOT output contains, for every scanned FIFO,
+`hDeltaT_spill_device<device>_fifo<fifo>` and
+`hDeltaT_spill_aligned_device<device>_fifo<fifo>`. The generated correction
+file contains compact rows of the form:
 
 ```text
 [CLOCK]
@@ -824,12 +829,19 @@ row of the form:
 20260623-185238 197 13 -1 4 6 9 ...
 ```
 
-The correction sign is derived from the direction of the minority-state shift:
-the calibrator applies `corrected_time = calibrated_time - correction`. Thus a
-minority state one unit above the majority state receives `+1`, while a
-minority state one unit below it receives `-1`. This macro is a diagnostic
-starting point; the spill-state classification should be validated for each
-run and lane before using the generated corrections in production processing.
+The correction sign is chosen to move the spill mean toward zero. Since the
+calibrator applies `corrected_time = calibrated_time - correction`, a spill
+around `+1` receives `+1`, while a spill around `-1` receives `-1`. The current
+selection requires an absolute mean of at least `0.5`, consistency with a
+one-clock displacement within `0.35`, at least 25% of the median populated
+spill weight, and a sufficiently precise integral in the inspected `[-2,2]`
+range. The latter uses `IntegralAndError` as in `fit_calib.C`, with a maximum
+relative integral error of `0.15` (about 44 effective entries). The integral is
+calculated from regular y bins only; underflow and overflow entries are
+excluded. The relative-error threshold can be passed as the final
+`clock_transition` argument when a different statistics requirement is needed.
+This is still a diagnostic starting point; generated corrections must be
+checked with `hDeltaT_spill_aligned` before production processing.
 
 For physics timing studies, after a triggered file has been augmented with:
 
@@ -892,20 +904,19 @@ process/bin/calibrator \
     --run 20260623-185238
 ```
 
-The format stores one fixed correction sign and an explicit list of affected
-spills for each `(run, device, fifo)`:
+The format stores a signed one-clock correction and an explicit list of
+affected spills for each `(run, device, fifo)`:
 
 ```text
 [CLOCK]
 # run device fifo correction spill...
-20260623-185238 197 13 +1 4 7 12 18
+20260623-185238 197 13 -1 4 7 12 18
 20260623-185238 194 26 +1 3 9 15
 ```
 
-Clock-transition correction files use a fixed `+1` convention. The lower-time
-state is the canonical state and only higher-time spills are listed for
-correction. A missing row means no correction; unaffected spills are not
-listed. The calibrator applies:
+Clock-transition correction files use `+1` or `-1`. The correction is applied
+only to the listed spills; a missing row means no correction, and unaffected
+spills are not listed. The calibrator applies:
 
 ```text
 corrected_time = calibrated_time - clock_correction
