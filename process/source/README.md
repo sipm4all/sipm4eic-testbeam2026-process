@@ -281,19 +281,19 @@ sigmaT
 
 `T0` and `sigma0` refer to TIMING0, `T1` and `sigma1` refer to TIMING1, and `T = (T0 + T1) / 2`. Values are in the estimator native time unit, `3.125 ns`. `timing_valid` is `1` only when the frame contains one usable time for every TIMING DO channel in both scintillators. If one or more channels are missing, the timing values are written as `NaN` and `timing_valid` is `0`.
 
-### ring-finder
+### ring-finder-ransac
 
 Finds zero or more Cherenkov ring candidates in each frame using calibrated
 Cherenkov `x`, `y`, and trigger-relative `time` values:
 
 ```bash
-process/bin/ring-finder \
+process/bin/ring-finder-ransac \
   --input triggered.timing.root \
   --output triggered.rings.root \
   --time-window 5
 ```
 
-The finder obtains spatial circle candidates with RANSAC. RANSAC is used only
+The RANSAC finder obtains spatial circle candidates with RANSAC. RANSAC is used only
 to identify candidate inliers; the circle is then refit in the least-squares
 sense using all accepted inliers. The candidate time is their arithmetic mean,
 and only hits passing both the radial tolerance and ring time window are kept.
@@ -327,6 +327,82 @@ a time window of `5` native units, and `8` rings maximum. Use
 radius in `[1,200]`).
 There is no eccentricity cut: valid ellipse candidates are retained, while
 the original circle is used as a fallback if ellipse refinement loses inliers.
+
+### ring-finder-hough
+
+Finds time-aware circular rings with a two-stage search. A time-aware RANSAC
+pre-pass, following the circle/refit logic of `ring-finder-ransac`, supplies
+several approximate ring regions. The fine weighted Hough search then uses all
+finite Cherenkov hits in the union of those local `(x0,y0,R,t)` regions. The
+RANSAC values are only used to bound the search; the strongest Hough maxima are
+the stored ring parameters directly, followed by an optional local 4D
+sub-grid interpolation around each maximum. The interpolation uses the 81
+neighboring `(x0,y0,R,t)` accumulator values and is accepted only for a
+well-formed concave peak within one grid step; otherwise the discrete maximum
+is retained.
+When RANSAC localization is enabled, a frame without a valid seed produces no
+Hough candidates. This avoids falling back to an impractically large global
+accumulator with the fine default grid. Several separated maxima are extracted
+from the same local accumulator, so a frame can
+contain multiple rings. The output uses the same `ring` tree as
+`ring-finder-ransac`, with `ring_e=0`.
+
+```bash
+process/bin/ring-finder-hough \
+  --input triggered.timing.root \
+  --output triggered.rings.hough.root \
+  --min-inliers 8 --max-shared-hits 2 \
+  --min-x0 -100 --max-x0 100 --x0-step 0.25 \
+  --min-y0 -100 --max-y0 100 --y0-step 0.25 \
+  --min-radius 1 --max-radius 200 --radius-step 0.25 \
+  --min-t -32 --max-t 32 --t-step 0.25
+```
+
+The `x0`, `y0`, and radius steps are in mm. The time range and `t-step` are
+in native timing units. The accumulator uses Gaussian hit weights. For a
+candidate `(x0,y0,R,t)` and hit `(x,y,hit_time)`, the weight is proportional to:
+
+```text
+ exp(-0.5 * ((hypot(x-x0,y-y0)-R) / spatial_resolution)^2)
+ * exp(-0.5 * ((hit_time-t) / time_resolution)^2)
+```
+
+`--spatial-resolution` and `--time-resolution` are the Gaussian widths, not
+the Hough-grid steps. They default to `1.5` mm and `1` native time unit. The
+Gaussian is evaluated over four standard deviations; this finite truncation
+keeps the accumulator practical. The `x0-step`, `y0-step`, `radius-step`, and
+`t-step` options independently control the Hough grid sampling. Smaller grid
+steps improve the initial Hough resolution but increase CPU/GPU work. The
+default steps are 0.25 mm for x, y, and radius, and 0.25 native time units.
+The candidate is accepted only if at least `--min-inliers` hits lie within four
+spatial standard deviations and four time standard deviations of the Hough
+maximum. Hit sets are not removed between candidates: the same hit may be an
+inlier of more than one accepted ring, but no more than
+`--max-shared-hits` hits may be shared by any pair of accepted rings. The
+default is two shared hits. If the project was configured with
+CUDA, pass `--gpu` to run
+the accumulator scan on the CUDA device; the final weighted
+candidate extraction and validation remain in the common C++ implementation.
+The CUDA backend assigns one thread to each complete Hough cell. Each thread
+loops over the event hits and writes one score, avoiding accumulator atomics.
+Block-level reductions find candidate maxima, and device allocations are reused
+when consecutive frames have the same local grid.
+The RANSAC localization defaults are `--ransac-iterations 128`,
+`--ransac-tolerance 5`,
+`--ransac-center-window 10`, `--ransac-radius-window 10`, and
+`--ransac-time-window 5`. The center and radius options are half-widths in mm;
+the tolerance is a spatial inlier cut in mm, and the time option is a
+half-width in native time units. Increase the windows when the RANSAC
+approximation is poor, at the cost of a larger fine Hough accumulator. The
+RANSAC tolerance is independent of `--spatial-resolution`; the latter controls
+the Hough Gaussian width and final Hough validation. Set
+`--ransac-iterations 0` to disable localization and scan the global bounds,
+which is useful as a reference but is much slower for 0.25 mm steps.
+Without `--gpu`
+the executable always uses the CPU reference implementation. A CUDA build
+uses architecture `75` by default and can be configured with
+`CMAKE_CUDA_ARCHITECTURES` for a different GPU. A frame with no accumulator
+votes is simply treated as having no ring; CUDA runtime failures are fatal.
 
 ### offset_calibrator
 

@@ -330,13 +330,14 @@ circle_t find_one_ring(const std::vector<point_t> &points,
   return best;
 }
 
-bool ring_finder(const std::string &filename, const std::string &outfilename,
-                 int iterations, int min_inliers, int max_rings,
-                 double tolerance, double time_window,
-                 double min_x0, double max_x0,
-                 double min_y0, double max_y0,
-                 double min_radius, double max_radius,
-                 bool force_circle)
+bool ring_finder_ransac(const std::string &filename,
+                        const std::string &outfilename,
+                        int iterations, int min_inliers, int max_rings,
+                        double tolerance, double time_window,
+                        double min_x0, double max_x0,
+                        double min_y0, double max_y0,
+                        double min_radius, double max_radius,
+                        bool force_circle)
 {
   auto fin = TFile::Open(filename.c_str(), "READ");
   if (!fin || fin->IsZombie()) {
@@ -554,12 +555,12 @@ int main(int argc, char **argv)
         max_rings > maxrings ||
         tolerance <= 0. || time_window < 0. || min_x0 > max_x0 ||
         min_y0 > max_y0 || min_radius <= 0. || min_radius > max_radius)
-      throw std::runtime_error("invalid ring-finder parameter");
+      throw std::runtime_error("invalid ring-finder-ransac parameter");
   } catch (const std::exception &error) {
     std::cerr << "ERROR: " << error.what() << std::endl << options << std::endl;
     return 1;
   }
-  return ring_finder(input, output, iterations, min_inliers, max_rings,
-                     tolerance, time_window, min_x0, max_x0, min_y0, max_y0,
-                     min_radius, max_radius, force_circle) ? 0 : 1;
+  return ring_finder_ransac(input, output, iterations, min_inliers, max_rings,
+                            tolerance, time_window, min_x0, max_x0, min_y0,
+                            max_y0, min_radius, max_radius, force_circle) ? 0 : 1;
 }
