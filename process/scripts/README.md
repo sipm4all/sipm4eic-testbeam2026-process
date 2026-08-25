@@ -576,3 +576,35 @@ CLEAN_TIMING_SPILLS=0
 ```
 
 so the per-spill timing files are kept. Pass `--clean-timing-spills` only when those intermediate files should be removed after the final `hadd`.
+
+## ring-finder.sh
+
+`ring-finder.sh` runs the time-aware Hough ring finder over triggered frames.
+By default it consumes the timing-augmented output of `timing.sh` and writes a
+ring tree while preserving the other synchronized trees.
+
+```bash
+process/scripts/ring-finder.sh \
+    --run RUN_NAME \
+    --trigger fingers \
+    --gpu
+```
+
+Default input and output are:
+
+```text
+/data/2026-testbeam/process/<run>/trigger/triggered.<tag>.timing.root
+/data/2026-testbeam/process/<run>/trigger/triggered.<tag>.timing.ring.root
+```
+
+Use `--input-stage trigger` to run directly on the output of `trigger.sh`;
+the corresponding output is `triggered.<tag>.ring.root`. For large files,
+`--parallel-spills --jobs N` processes split-spill files concurrently and
+combines the results with `hadd`. Ring spill files are kept by default and can
+be removed after a successful merge with `--clean-ring-spills`.
+
+The workflow uses `ring-finder-hough` and accepts the main Hough controls,
+including `--min-inliers`, `--max-rings`, `--spatial-resolution`,
+`--time-resolution`, `--x0-step`, `--y0-step`, `--radius-step`, `--t-step`,
+`--ransac-tolerance`, and `--ransac-time-window`. Pass `--overwrite` to
+regenerate existing outputs.

@@ -10,6 +10,7 @@ decoder.sh
   -> process.sh
   -> trigger.sh
   -> timing.sh
+  -> ring-finder.sh
 ```
 
 Conceptually this expands to:
@@ -24,6 +25,7 @@ raw per-FIFO data
   -> trigger frame production
   -> hadd per-trigger output
   -> optional trained TIMING estimator
+  -> optional time-aware Cherenkov ring reconstruction
 ```
 
 The scripts use `/data/2026-testbeam/process/<run>/` as the working area. For physics data, `--run-type physics` is the default and can be omitted.
@@ -292,7 +294,47 @@ This stage reads the per-frame `timing` tree and adds scalar `timing_valid`, `T0
 
 For large triggered files, `timing.sh --parallel-spills` can instead run on the per-spill triggered files left by `trigger.sh`, then combine the timing-augmented spill files with `hadd`.
 
-## 6. Check Delta-T Distributions
+## 6. Find Cherenkov Rings
+
+After the timing estimator, run the time-aware Hough ring finder:
+
+```bash
+sipm4eic-testbeam2026-process/process/scripts/ring-finder.sh \
+    --run <run> \
+    --trigger <tag> \
+    --gpu
+```
+
+By default it reads:
+
+```text
+/data/2026-testbeam/process/<run>/trigger/triggered.<tag>.timing.root
+```
+
+and writes:
+
+```text
+/data/2026-testbeam/process/<run>/trigger/triggered.<tag>.timing.ring.root
+```
+
+The output preserves the synchronized `frames`, `trigger`, `timing`, and
+`cherenkov` trees and adds one `ring` entry per frame. The Hough finder uses a
+RANSAC pre-pass to localize the search, supports multiple rings, and uses the
+time coordinate during the ring search. Use `--parallel-spills --jobs N` for
+parallel split-spill processing. Ring spill files are kept by default; pass
+`--clean-ring-spills` to remove them after `hadd`.
+
+To run directly on a trigger output without the timing estimator, use:
+
+```bash
+sipm4eic-testbeam2026-process/process/scripts/ring-finder.sh \
+    --run <run> \
+    --trigger <tag> \
+    --input-stage trigger \
+    --gpu
+```
+
+## 7. Check Delta-T Distributions
 
 After triggered frames have been built, run the example `deltat.C` macro as a first reconstruction check.
 
