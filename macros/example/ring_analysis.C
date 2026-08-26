@@ -39,10 +39,11 @@ void
 ring_analysis(const char *filename = "ring.root",
               reference_ptr_t reference = nullptr,
               const std::vector<selection_ptr_t> &selections = {},
-              const std::string &outfilename = "ring_analysis.root")
+              const std::string &outfilename = "ring_analysis.root",
+              const char *ring_name = "ring")
 {
   trigger_reader_t reader;
-  if (!reader.open(filename))
+  if (!reader.open(filename, ring_name ? ring_name : "ring"))
     return;
   if (!reader.has_rings()) {
     std::cerr << "ERROR: input file does not contain the ring tree" << std::endl;

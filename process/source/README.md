@@ -351,14 +351,15 @@ When RANSAC localization is enabled, a frame without a valid seed produces no
 Hough candidates. This avoids falling back to an impractically large global
 accumulator with the fine default grid. Several separated maxima are extracted
 from the same local accumulator, so a frame can
-contain multiple rings. The output uses the same `ring` tree as
-`ring-finder-ransac`. `ring_r` is the semi-major axis, `ring_e` is the
+contain multiple rings. The output uses a ring-result tree named `ring` by
+default, with the same branches as `ring-finder-ransac`. Use `--branch-name`
+to choose another tree name. `ring_r` is the semi-major axis, `ring_e` is the
 eccentricity, and `ring_phi` is the major-axis rotation in radians. The model
 uses `b = R*sqrt(1-e*e)` for the semi-minor axis, so `e=0` is exactly a circle
 and `phi` is irrelevant for a circle.
 
-If the input already contains a `ring` tree, the executable refuses to run by
-default. Pass `--overwrite` to recompute the ring tree and replace the old
+If the input already contains the selected ring tree, the executable refuses to
+run by default. Pass `--overwrite` to recompute that tree and replace the old
 one in the output. Using the same path for `--input` and `--output` is also
 supported with `--overwrite`; the updated file is written through a temporary
 file and replaces the original only after successful processing.
@@ -413,13 +414,13 @@ the ring's inlier count. The default fraction is `0.5`. If the candidate is
 too strongly overlapping, only the new candidate is rejected; previously
 accepted rings are never removed. If the project was configured with
 CUDA, pass `--gpu` to run
-the accumulator scan on the CUDA device; the final weighted
-candidate extraction and validation remain in the common C++ implementation.
+the accumulator scan on the CUDA device. Maximum extraction and neighborhood
+suppression also remain on the GPU; only compact selected peaks are copied to
+the host before the common C++ validation.
 The CUDA backend assigns one thread to each complete six-dimensional Hough cell. Each thread
 loops over the event hits and writes one score, avoiding accumulator atomics.
-The accumulator is copied back once; the common C++ code keeps only a bounded
-top-score candidate pool rather than sorting every Hough cell. Device
-allocations are reused when consecutive frames have the same local grid.
+Device allocations are reused when consecutive frames have the same local
+grid.
 The RANSAC localization defaults are `--ransac-iterations 128`,
 `--ransac-tolerance 5`,
 `--ransac-center-window 10`, `--ransac-radius-window 10`, and

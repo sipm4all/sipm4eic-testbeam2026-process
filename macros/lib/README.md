@@ -22,6 +22,17 @@ while (reader.next_spill()) {
 }
 ```
 
+The optional second argument to `open` selects the ring-result tree and
+defaults to `"ring"`:
+
+```cpp
+if (!reader.open("frames.root", "ring.ellipse"))
+    return;
+```
+
+This is useful when several ring-finder configurations are stored in the same
+ROOT file. The selected tree must have the standard ring branches.
+
 The returned vectors contain `hit_t` objects with the original stored fields plus `double time`, `double x`, and `double y`, the calibrated time and spatial coordinates persisted by `trigger.cc`. The vectors remain valid until the next call to `open()`, `next_spill()`, or `next_frame()`.
 
 

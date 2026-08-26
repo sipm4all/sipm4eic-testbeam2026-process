@@ -1,4 +1,5 @@
 #include <TFile.h>
+#include <TKey.h>
 #include <TTree.h>
 #include <TTreeReader.h>
 #include <TTreeReaderArray.h>
@@ -14,6 +15,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <limits>
@@ -836,6 +838,7 @@ count_shared_hits(const std::vector<int> &first,
 
 bool
 ring_finder_hough(const std::string &filename, const std::string &outfilename,
+                  const std::string &branch_name,
                   int min_inliers, int max_rings,
                   double max_shared_fraction,
                   Long64_t max_events,
@@ -873,8 +876,9 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
       return false;
     }
   }
-  if (fin->Get("ring") && !overwrite_existing_ring) {
-    std::cerr << "ERROR: input already contains a 'ring' tree" << std::endl;
+  if (fin->Get(branch_name.c_str()) && !overwrite_existing_ring) {
+    std::cerr << "ERROR: input already contains a '" << branch_name
+              << "' ring tree" << std::endl;
     std::cerr << "       pass --overwrite to replace it" << std::endl;
     fin->Close();
     return false;
@@ -951,7 +955,8 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
   float ring_phi[maxrings];
   float ring_time[maxrings];
   UShort_t ring_ninliers[maxrings];
-  auto ring_out = new TTree("ring", "ring candidates, one entry per frame");
+  auto ring_out = new TTree(branch_name.c_str(),
+                            "ring candidates, one entry per frame");
   ring_out->Branch("nring", &nring, "nring/b");
   ring_out->Branch("ring_x0", ring_x0, "ring_x0[nring]/F");
   ring_out->Branch("ring_y0", ring_y0, "ring_y0[nring]/F");
@@ -1217,6 +1222,28 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
       return false;
     }
   }
+  fout->cd();
+  TIter key_iterator(fin->GetListOfKeys());
+  while (auto key = static_cast<TKey *>(key_iterator())) {
+    const char *name = key->GetName();
+    if (!std::strcmp(name, "frames") || !std::strcmp(name, "trigger") ||
+        !std::strcmp(name, "timing") || !std::strcmp(name, "cherenkov") ||
+        !std::strcmp(name, "spill_participation") ||
+        !std::strcmp(name, branch_name.c_str()))
+      continue;
+
+    auto object = std::unique_ptr<TObject>(key->ReadObj());
+    auto tree = dynamic_cast<TTree *>(object.get());
+    if (!tree)
+      continue;
+    if (!tree->CloneTree(-1, "fast")) {
+      std::cerr << "ERROR: failed to copy auxiliary tree '" << name << "'"
+                << std::endl;
+      fout->Close();
+      fin->Close();
+      return false;
+    }
+  }
   fout->Write();
   fout->Close();
   fin->Close();
@@ -1244,7 +1271,7 @@ int
 main(int argc, char **argv)
 {
   namespace po = boost::program_options;
-  std::string input, output;
+  std::string input, output, branch_name = "ring";
   int min_inliers = 8, max_rings = maxrings;
   double max_shared_fraction = 0.5;
   Long64_t max_events = -1;
@@ -1269,6 +1296,8 @@ main(int argc, char **argv)
     ("help,h", "show this help message")
     ("input,i", po::value<std::string>(&input)->required(), "input triggered ROOT file")
     ("output,o", po::value<std::string>(&output)->required(), "output ROOT file")
+    ("branch-name", po::value<std::string>(&branch_name)->default_value(branch_name),
+     "name of the output ring tree (default: ring)")
     ("min-inliers", po::value<int>(&min_inliers)->default_value(min_inliers), "minimum spatial/time inliers")
     ("max-rings", po::value<int>(&max_rings)->default_value(max_rings), "maximum rings per frame")
     ("max-shared-fraction", po::value<double>(&max_shared_fraction)
@@ -1337,7 +1366,10 @@ main(int argc, char **argv)
     }
     po::notify(vm);
     int unused = 0;
-    if (min_inliers < 3 || max_rings < 1 || max_rings > maxrings ||
+    if (branch_name.empty() || branch_name == "frames" ||
+        branch_name == "trigger" || branch_name == "timing" ||
+        branch_name == "cherenkov" || branch_name == "spill_participation" ||
+        min_inliers < 3 || max_rings < 1 || max_rings > maxrings ||
         max_events < -1 ||
         max_shared_fraction < 0. || max_shared_fraction > 1. ||
         ransac_iterations < 0 || ransac_center_window <= 0. ||
@@ -1362,7 +1394,8 @@ main(int argc, char **argv)
   }
 
   return ring_finder_hough(
-             input, output, min_inliers, max_rings, max_shared_fraction,
+             input, output, branch_name, min_inliers, max_rings,
+             max_shared_fraction,
              max_events,
              min_x0, max_x0, x0_step, min_y0, max_y0, y0_step,
              min_radius, max_radius, radius_step, min_t, max_t, t_step,

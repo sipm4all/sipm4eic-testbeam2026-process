@@ -2,7 +2,7 @@
 
 `display.C` is an interactive Cherenkov event display for the synchronized
 triggered-data format. It reads the `frames`, `trigger`, `timing`,
-`cherenkov`, and optional `ring` trees through `trigger_reader.h`.
+`cherenkov`, and optional ring-result tree through `trigger_reader.h`.
 
 The display draws Cherenkov hits as squares at their stored `(x,y)` positions.
 The square colour represents time. Absolute hit times are not used for the
@@ -126,6 +126,20 @@ display("rings.root",
             std::make_shared<trigger_selection_t>(200)
         });
 ```
+
+The ring-result tree name is the final optional argument to `display` and
+defaults to `"ring"`. This allows a file containing several reconstructions to
+be inspected selectively:
+
+```cpp
+display("rings.root", nullptr, {},
+        std::numeric_limits<int>::min(), 0,
+        std::numeric_limits<int>::min(), -1,
+        "ring.ellipse");
+```
+
+The same selection and reference arguments are used; only the ring tree read
+by the reader changes.
 
 The constructor arguments are:
 

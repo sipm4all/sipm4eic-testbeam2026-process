@@ -441,10 +441,11 @@ display_frames(const char *filename,
                int start_spill,
                int start_frame,
                int target_spill,
-               int target_frame)
+               int target_frame,
+               const char *ring_name)
 {
   trigger_reader_t reader;
-  if (!reader.open(filename))
+  if (!reader.open(filename, ring_name ? ring_name : "ring"))
     return;
 
   auto canvas = make_display_canvas();
@@ -521,8 +522,9 @@ display(const char *filename = "triggered.root",
         int start_spill = std::numeric_limits<int>::min(),
         int start_frame = 0,
         int target_spill = std::numeric_limits<int>::min(),
-        int target_frame = -1)
+        int target_frame = -1,
+        const char *ring_name = "ring")
 {
   display_frames(filename, reference, selections, start_spill, start_frame,
-                 target_spill, target_frame);
+                 target_spill, target_frame, ring_name);
 }

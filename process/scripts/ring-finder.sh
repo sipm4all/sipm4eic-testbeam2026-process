@@ -39,6 +39,7 @@ options:
   --clean-ring-spills            remove ring spill files after hadd, default: keep
   --min-inliers N                minimum ring inliers
   --max-rings N                  maximum rings per frame
+  --branch-name NAME             output ring tree name; default: ring
   --max-shared-fraction VALUE    maximum shared fraction of the smaller ring
   --max-events N                 maximum frames to process; default: all
   --spatial-resolution VALUE     Hough spatial resolution in mm
@@ -143,7 +144,7 @@ while [ $# -gt 0 ]; do
             clean_ring_spills=1
             shift
             ;;
-        --min-inliers|--max-rings|--max-shared-fraction|--max-events|--spatial-resolution|\
+        --min-inliers|--max-rings|--branch-name|--max-shared-fraction|--max-events|--spatial-resolution|\
         --time-resolution|--x0-step|--y0-step|--radius-step|--t-step|\
         --min-e|--max-e|--e-step|--min-phi|--max-phi|--phi-step|\
         --ransac-tolerance|--ransac-time-window)

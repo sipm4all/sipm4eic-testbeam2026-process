@@ -604,7 +604,7 @@ combines the results with `hadd`. Ring spill files are kept by default and can
 be removed after a successful merge with `--clean-ring-spills`.
 
 The workflow uses `ring-finder-hough` and accepts the main Hough controls,
-including `--min-inliers`, `--max-rings`, `--spatial-resolution`,
+including `--min-inliers`, `--max-rings`, `--branch-name`, `--spatial-resolution`,
 `--time-resolution`, `--x0-step`, `--y0-step`, `--radius-step`, `--t-step`,
 `--min-e`, `--max-e`, `--e-step`, `--min-phi`, `--max-phi`, `--phi-step`,
 `--ransac-tolerance`, `--ransac-time-window`, and
@@ -615,5 +615,7 @@ candidate and each already accepted ring to the configured fraction of the
 smaller inlier set; its default is `0.5`. Candidates are considered in score
 order, so rejecting an overlapping candidate does not remove an earlier ring.
 Pass `--overwrite` to regenerate existing outputs. The flag is also forwarded
-to the executable, allowing an existing `ring` tree in an input file to be
-recomputed explicitly.
+to the executable, allowing an existing selected ring tree in an input file to
+be recomputed explicitly. The selected ring tree is named `ring` by default;
+`--branch-name NAME` allows multiple configurations to be stored in one ROOT
+file.

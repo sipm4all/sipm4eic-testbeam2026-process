@@ -8,7 +8,8 @@ triggered frame while using both spatial and timing information.
 The input must contain synchronized `frames` and `cherenkov` trees. The
 Cherenkov tree must provide the per-hit `x`, `y`, and trigger-relative `time`
 branches. The output preserves the input trees and adds one `ring` tree entry
-for every frame.
+for every frame. The output tree name defaults to `ring` and can be changed
+with `--branch-name`.
 
 ## Workflow
 
@@ -203,10 +204,10 @@ single score, so the vote calculation does not require accumulator atomics.
 The coordinate maps and accumulator are allocated once and reused when
 successive RANSAC seeds have the same grid dimensions. Different seed origins
 update the coordinate maps without requiring a new allocation. The complete
-accumulator is copied back once after the vote kernel. The common C++ code
-keeps only a bounded top-score candidate pool rather than sorting every Hough
-cell, then performs peak suppression, candidate merging, interpolation, and
-validation.
+accumulator is reduced on the device: the GPU selects the maximum, suppresses
+its neighborhood, and repeats for the requested candidate peaks. Only the
+compact selected peak is copied back to the host. The common C++ code then
+performs candidate merging, interpolation, and validation.
 
 The CUDA memory requirement is proportional to the number of local Hough cells.
 Reducing the RANSAC windows or increasing grid steps reduces both memory use and
@@ -258,7 +259,9 @@ never removed because a later candidate overlaps them.
 
 ## Output Tree
 
-The output contains one `ring` entry for every input frame. The branch layout is:
+The output contains one entry in the selected ring-result tree for every input
+frame. The default tree name is `ring`; use `--branch-name` for a different
+name. The branch layout is:
 
 ```text
 nring                         UChar_t

@@ -221,8 +221,9 @@ void
 deltat(const std::string &filename,
        const std::vector<target_ptr_t> &targets,
        reference_ptr_t reference,
-       const std::vector<selection_ptr_t> &selections = {},
-       const std::string &outfilename = "deltat.root")
+       const std::vector<selection_ptr_t> &selections,
+       const std::string &outfilename,
+       const std::string &ring_name)
 {
   if (!reference) {
     std::cerr << " --- no reference selector was supplied" << std::endl;
@@ -230,7 +231,7 @@ deltat(const std::string &filename,
   }
 
   trigger_reader_t reader;
-  if (!reader.open(filename))
+  if (!reader.open(filename, ring_name))
     return;
 
   const ring_target_t *ring_target = find_ring_target(targets);
@@ -295,6 +296,28 @@ deltat(const std::string &filename,
               << std::endl;
   histograms.write(nframes_used, nframes_with_reference);
   fout->Close();
+}
+
+void
+deltat(const std::string &filename,
+       const std::vector<target_ptr_t> &targets,
+       reference_ptr_t reference,
+       const std::vector<selection_ptr_t> &selections = {},
+       const std::string &outfilename = "deltat.root")
+{
+  deltat(filename, targets, reference, selections, outfilename, "ring");
+}
+
+void
+deltat(const std::string &filename,
+       target_ptr_t target,
+       reference_ptr_t reference,
+       const std::vector<selection_ptr_t> &selections,
+       const std::string &outfilename,
+       const std::string &ring_name)
+{
+  deltat(filename, std::vector<target_ptr_t>{target}, reference,
+         selections, outfilename, ring_name);
 }
 
 void

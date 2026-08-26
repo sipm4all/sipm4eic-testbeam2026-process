@@ -46,7 +46,8 @@ class trigger_reader_t {
 public:
   trigger_reader_t() = default;
 
-  bool open(const std::string &filename);
+  bool open(const std::string &filename,
+            const std::string &ring_name = "ring");
 
   bool next_spill();
   bool next_frame();
@@ -112,6 +113,7 @@ private:
   TTree *cherenkov_tree_ = nullptr;
   TTree *ring_tree_ = nullptr;
   TTree *meta_tree_ = nullptr;
+  std::string ring_name_ = "ring";
 
   UInt_t frame_spill_ = 0;
   Double_t frame_time_ = 0.;
@@ -321,9 +323,15 @@ trigger_reader_t::reset()
 }
 
 inline bool
-trigger_reader_t::open(const std::string &filename)
+trigger_reader_t::open(const std::string &filename,
+                       const std::string &ring_name)
 {
   reset();
+  if (ring_name.empty()) {
+    std::cerr << "ERROR: ring tree name is empty" << std::endl;
+    return false;
+  }
+  ring_name_ = ring_name;
   file_.reset(TFile::Open(filename.c_str(), "READ"));
   if (!file_ || file_->IsZombie()) {
     std::cerr << "ERROR: could not open input file '" << filename << "'" << std::endl;
@@ -401,7 +409,7 @@ trigger_reader_t::open(const std::string &filename)
     }
   }
 
-  ring_tree_ = (TTree *)file_->Get("ring");
+  ring_tree_ = (TTree *)file_->Get(ring_name_.c_str());
   if (ring_tree_) {
     if (ring_tree_->GetEntries() != entries_ ||
         !bind(ring_tree_, "nring", &nring_) ||

@@ -141,6 +141,15 @@ ring_analysis("triggered.timing.rings.root",
               "ring_analysis.root");
 ```
 
+The optional final argument selects the ring-result tree and defaults to
+`"ring"`:
+
+```cpp
+ring_analysis("triggered.timing.rings.root",
+              std::make_shared<timing_reference_t>("T"),
+              {}, "ring_analysis.ellipse.root", "ring.ellipse");
+```
+
 The reference is used as an additional frame requirement; `#Delta t` itself
 is always measured relative to each stored `ring_time`.
 
@@ -289,7 +298,22 @@ deltat("triggered.timing.rings.root",
        "deltat.ring.root");
 ```
 
-The ring target reads the `ring` tree produced by `ring-finder-ransac`. It does
+For a non-default ring tree, use the six-argument form with the ring tree name
+after the output filename:
+
+```cpp
+deltat("triggered.timing.rings.root",
+       {
+           std::make_shared<channel_target_t>(-1),
+           std::make_shared<ring_target_t>(8, 64, 3.5, 1., 200.)
+       },
+       std::make_shared<timing_reference_t>("T"),
+       {},
+       "deltat.ring.ellipse.root",
+       "ring.ellipse");
+```
+
+The ring target reads the selected ring-result tree produced by a ring finder. It does
 not run RANSAC or any other ring reconstruction. Its arguments are:
 
 ```text
