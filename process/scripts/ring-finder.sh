@@ -40,12 +40,19 @@ options:
   --min-inliers N                minimum ring inliers
   --max-rings N                  maximum rings per frame
   --max-shared-fraction VALUE    maximum shared fraction of the smaller ring
+  --max-events N                 maximum frames to process; default: all
   --spatial-resolution VALUE     Hough spatial resolution in mm
   --time-resolution VALUE        Hough time resolution in native units
   --x0-step VALUE                Hough x step in mm
   --y0-step VALUE                Hough y step in mm
   --radius-step VALUE            Hough radius step in mm
   --t-step VALUE                 Hough time step in native units
+  --min-e VALUE                  minimum ellipse eccentricity
+  --max-e VALUE                  maximum ellipse eccentricity
+  --e-step VALUE                 Hough eccentricity step
+  --min-phi VALUE                minimum ellipse angle in radians
+  --max-phi VALUE                maximum ellipse angle in radians
+  --phi-step VALUE               Hough ellipse angle step in radians
   --ransac-tolerance VALUE       RANSAC spatial tolerance in mm
   --ransac-time-window VALUE     RANSAC/local-Hough time half-width
   --help, -h                     show this help message
@@ -136,8 +143,9 @@ while [ $# -gt 0 ]; do
             clean_ring_spills=1
             shift
             ;;
-        --min-inliers|--max-rings|--max-shared-fraction|--spatial-resolution|\
+        --min-inliers|--max-rings|--max-shared-fraction|--max-events|--spatial-resolution|\
         --time-resolution|--x0-step|--y0-step|--radius-step|--t-step|\
+        --min-e|--max-e|--e-step|--min-phi|--max-phi|--phi-step|\
         --ransac-tolerance|--ransac-time-window)
             [ $# -ge 2 ] || fail "$1 requires VALUE"
             ring_options+=("$1" "$2")

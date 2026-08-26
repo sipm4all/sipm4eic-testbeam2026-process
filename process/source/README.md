@@ -301,7 +301,8 @@ Accepted inliers are removed and the search repeats, allowing multiple
 separated rings per frame.
 
 The output preserves the synchronized input trees and adds a `ring` tree with
-one entry per frame:
+one entry per frame. The RANSAC executable stores circles, so its ellipse
+fields are `ring_e=0` and `ring_phi=0`.
 
 ```text
 nring
@@ -315,11 +316,12 @@ ring_ninliers[nring]
 ```
 
 The `ring` entry at index `i` corresponds to the `frames`, `trigger`,
-`timing`, and `cherenkov` entries at index `i`. `ring_r` is the semi-major axis,
-`ring_e` is the eccentricity, `ring_phi` is the rotation angle in radians,
-and `ring_time` is the fitted ring time in native time units.
-Setting `ring_e=0` gives a circle. Defaults are a radial tolerance of `5`,
-a time window of `5` native units, and `8` rings maximum. Use
+`timing`, and `cherenkov` entries at index `i`. In the Hough output,
+`ring_r` is the semi-major axis, `ring_e` is the eccentricity,
+`ring_phi` is the rotation angle in radians, and `ring_time` is the fitted
+ring time in native time units. Setting `ring_e=0` gives a circle. Defaults
+are a radial tolerance of `5`, a time window of `5` native units, and `8` rings
+maximum. Use
 `--tolerance`, `--time-window`, `--min-inliers`, `--iterations`, and
 `--max-rings` to change them. Candidate centers and radii are constrained by
 `--min-x0`, `--max-x0`, `--min-y0`, `--max-y0`, `--min-radius`, and
@@ -330,11 +332,14 @@ the original circle is used as a fallback if ellipse refinement loses inliers.
 
 ### ring-finder-hough
 
-Finds time-aware circular rings with a two-stage search. A time-aware RANSAC
-pre-pass, following the circle/refit logic of `ring-finder-ransac`, supplies
-several approximate ring regions. For each RANSAC seed, the fine weighted Hough
-search scans its own local `(x0,y0,R,t)` region. The candidates from the
-independent scans are then combined, sorted, and deduplicated before validation.
+Finds time-aware elliptical rings with a two-stage search. A time-aware RANSAC
+circle pre-pass, following the candidate-localization logic of
+`ring-finder-ransac`, supplies several approximate ring regions. For each RANSAC
+seed, the weighted six-dimensional Hough search scans its own local
+`(x0,y0,R,t,e,phi)` region. The eccentricity and angle ranges are global within
+each seed region; the RANSAC seed is used only to localize the center, radius,
+and time. Candidates from the independent scans are then combined, sorted, and
+deduplicated before validation.
 This prevents separated seeds from expanding one accumulator into a large union
 volume. The RANSAC values are only used to bound the search; the strongest Hough maxima are
 the stored ring parameters directly, followed by an optional local 4D
@@ -347,7 +352,10 @@ Hough candidates. This avoids falling back to an impractically large global
 accumulator with the fine default grid. Several separated maxima are extracted
 from the same local accumulator, so a frame can
 contain multiple rings. The output uses the same `ring` tree as
-`ring-finder-ransac`, with `ring_e=0`.
+`ring-finder-ransac`. `ring_r` is the semi-major axis, `ring_e` is the
+eccentricity, and `ring_phi` is the major-axis rotation in radians. The model
+uses `b = R*sqrt(1-e*e)` for the semi-minor axis, so `e=0` is exactly a circle
+and `phi` is irrelevant for a circle.
 
 If the input already contains a `ring` tree, the executable refuses to run by
 default. Pass `--overwrite` to recompute the ring tree and replace the old
@@ -359,19 +367,24 @@ file and replaces the original only after successful processing.
 process/bin/ring-finder-hough \
   --input triggered.timing.root \
   --output triggered.rings.hough.root \
+  --max-events 1000 \
   --min-inliers 8 --max-shared-fraction 0.5 \
   --min-x0 -100 --max-x0 100 --x0-step 1 \
   --min-y0 -100 --max-y0 100 --y0-step 1 \
   --min-radius 1 --max-radius 200 --radius-step 1 \
-  --min-t -32 --max-t 32 --t-step 1
+  --min-t -32 --max-t 32 --t-step 1 \
+  --min-e 0 --max-e 0.9 --e-step 0.1 \
+  --min-phi 0 --max-phi 3.141592653589793 --phi-step 0.1653469818
 ```
 
 The `x0`, `y0`, and radius steps are in mm. The time range and `t-step` are
 in native timing units. The accumulator uses Gaussian hit weights. For a
-candidate `(x0,y0,R,t)` and hit `(x,y,hit_time)`, the weight is proportional to:
+candidate `(x0,y0,R,t,e,phi)` and hit `(x,y,hit_time)`, the weight is
+proportional to a spatial Gaussian in the ellipse radial residual and a
+temporal Gaussian:
 
 ```text
- exp(-0.5 * ((hypot(x-x0,y-y0)-R) / spatial_resolution)^2)
+ exp(-0.5 * (ellipse_radial_residual / spatial_resolution)^2)
  * exp(-0.5 * ((hit_time-t) / time_resolution)^2)
 ```
 
@@ -381,7 +394,15 @@ Gaussian is evaluated over four standard deviations; this finite truncation
 keeps the accumulator practical. The `x0-step`, `y0-step`, `radius-step`, and
 `t-step` options independently control the Hough grid sampling. Smaller grid
 steps improve the initial Hough resolution but increase CPU/GPU work. The
-default steps are 1 mm for x, y, and radius, and 1 native time unit.
+default steps are 1 mm for x, y, and radius, and 1 native time unit. The
+ellipse controls are `--min-e`, `--max-e`, `--e-step`, `--min-phi`,
+`--max-phi`, and `--phi-step`; eccentricity must be in `[0,1)` and angles are
+in radians over the equivalent-orientation interval `[0,pi]`. The defaults
+are `e=0..0.9` in steps of `0.1` (10 bins) and `phi=0..pi` in steps of
+`pi/19` (20 bins). With the default RANSAC localization, the local scan has
+21 x0 bins, 21 y0 bins, 21 radius bins, 11 time bins, 10 eccentricity bins,
+and 20 angle bins. Setting `--ransac-iterations 0` instead requests a scan of
+the full configured global bounds and is substantially larger.
 The candidate is accepted only if at least `--min-inliers` hits lie within four
 spatial standard deviations and four time standard deviations of the Hough
 maximum. Hit sets are not removed between candidates: the same hit may be an
@@ -394,10 +415,11 @@ accepted rings are never removed. If the project was configured with
 CUDA, pass `--gpu` to run
 the accumulator scan on the CUDA device; the final weighted
 candidate extraction and validation remain in the common C++ implementation.
-The CUDA backend assigns one thread to each complete Hough cell. Each thread
+The CUDA backend assigns one thread to each complete six-dimensional Hough cell. Each thread
 loops over the event hits and writes one score, avoiding accumulator atomics.
-Block-level reductions find candidate maxima, and device allocations are reused
-when consecutive frames have the same local grid.
+The accumulator is copied back once; the common C++ code keeps only a bounded
+top-score candidate pool rather than sorting every Hough cell. Device
+allocations are reused when consecutive frames have the same local grid.
 The RANSAC localization defaults are `--ransac-iterations 128`,
 `--ransac-tolerance 5`,
 `--ransac-center-window 10`, `--ransac-radius-window 10`, and

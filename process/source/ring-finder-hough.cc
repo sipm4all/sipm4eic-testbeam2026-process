@@ -39,6 +39,8 @@ struct circle_t {
   double x = 0.;
   double y = 0.;
   double radius = 0.;
+  double eccentricity = 0.;
+  double phi = 0.;
   double ring_time = 0.;
   int inliers = 0;
   double residual_sum = std::numeric_limits<double>::infinity();
@@ -49,7 +51,31 @@ struct circle_t {
 double
 radial_residual(const circle_t &circle, const point_t &point)
 {
-  return std::hypot(point.x - circle.x, point.y - circle.y) - circle.radius;
+  const double dx = point.x - circle.x;
+  const double dy = point.y - circle.y;
+  const double cosine = std::cos(circle.phi);
+  const double sine = std::sin(circle.phi);
+  const double xr = cosine * dx + sine * dy;
+  const double yr = -sine * dx + cosine * dy;
+  const double minor = circle.radius * std::sqrt(
+      std::max(0., 1. - circle.eccentricity * circle.eccentricity));
+  const double angle = std::atan2(yr, xr);
+  const double ca = std::cos(angle);
+  const double sa = std::sin(angle);
+  const double denominator = std::hypot(minor * ca, circle.radius * sa);
+  if (!(denominator > 0.))
+    return std::numeric_limits<double>::infinity();
+  const double ellipse_radius = circle.radius * minor / denominator;
+  return std::hypot(dx, dy) - ellipse_radius;
+}
+
+double
+angle_distance_pi(double first, double second)
+{
+  double distance = std::fmod(std::abs(first - second), pi);
+  if (distance > 0.5 * pi)
+    distance = pi - distance;
+  return distance;
 }
 
 bool
@@ -334,14 +360,18 @@ hough_candidates(const std::vector<point_t> &points,
                double min_y0, double max_y0, double y0_step,
                double min_radius, double max_radius, double radius_step,
                double min_t, double max_t, double t_step,
+               double min_e, double max_e, double e_step,
+               double min_phi, double max_phi, double phi_step,
                double spatial_resolution, double time_resolution)
 {
   std::vector<circle_t> empty;
-  int nx = 0, ny = 0, nr = 0, nt = 0;
+  int nx = 0, ny = 0, nr = 0, nt = 0, ne = 0, nphi = 0;
   if (!grid_bins(min_x0, max_x0, x0_step, nx) ||
       !grid_bins(min_y0, max_y0, y0_step, ny) ||
       !grid_bins(min_radius, max_radius, radius_step, nr) ||
-      !grid_bins(min_t, max_t, t_step, nt))
+      !grid_bins(min_t, max_t, t_step, nt) ||
+      !grid_bins(min_e, max_e, e_step, ne) ||
+      !grid_bins(min_phi, max_phi, phi_step, nphi))
     return empty;
   if (static_cast<long long>(nx) * ny > 2000000LL ||
       static_cast<long long>(nr) * nt > 5000000LL) {
@@ -350,7 +380,9 @@ hough_candidates(const std::vector<point_t> &points,
     return empty;
   }
 
-  std::vector<double> accumulator(static_cast<std::size_t>(nr) * nt);
+  const std::size_t ellipse_plane = static_cast<std::size_t>(ne) * nphi;
+  std::vector<double> accumulator(static_cast<std::size_t>(nr) * nt *
+                                   ellipse_plane);
   const int pool_limit = std::max(32, max_candidates * 32);
   std::vector<circle_t> peaks;
   peaks.reserve(pool_limit);
@@ -364,15 +396,6 @@ hough_candidates(const std::vector<point_t> &points,
       for (int index : indices) {
         const double radius = std::hypot(points[index].x - x0,
                                          points[index].y - y0);
-        const int rfirst = std::max(
-            0, static_cast<int>(std::ceil(
-                   (radius - gaussian_cut * spatial_resolution - min_radius) /
-                   radius_step)));
-        const int rlast = std::min(
-            nr - 1, static_cast<int>(std::floor(
-                        (radius + gaussian_cut * spatial_resolution -
-                         min_radius) /
-                        radius_step)));
         const int tfirst = std::max(
             0, static_cast<int>(std::ceil(
                    (points[index].time - gaussian_cut * time_resolution -
@@ -383,55 +406,95 @@ hough_candidates(const std::vector<point_t> &points,
                         (points[index].time + gaussian_cut * time_resolution -
                          min_t) /
                         t_step)));
-        for (int ir = rfirst; ir <= rlast; ++ir) {
-          const double radius_bin = min_radius + ir * radius_step;
-          const double spatial_weight = std::exp(
-              -0.5 * std::pow((radius - radius_bin) / spatial_resolution, 2)) /
-              (std::sqrt(2. * pi) * spatial_resolution);
-          for (int it = tfirst; it <= tlast; ++it) {
-            const double time_bin = min_t + it * t_step;
-            const double time_weight = std::exp(
-                -0.5 * std::pow((points[index].time - time_bin) /
-                                 time_resolution, 2)) /
-                (std::sqrt(2. * pi) * time_resolution);
-            accumulator[static_cast<std::size_t>(ir) * nt + it] +=
-                spatial_weight * time_weight;
+        for (int ie = 0; ie < ne; ++ie) {
+          const double eccentricity = min_e + ie * e_step;
+          for (int iphi = 0; iphi < nphi; ++iphi) {
+            const double phi = min_phi + iphi * phi_step;
+            circle_t model;
+            model.x = x0;
+            model.y = y0;
+            model.eccentricity = eccentricity;
+            model.phi = phi;
+            for (int ir = 0; ir < nr; ++ir) {
+              const double radius_bin = min_radius + ir * radius_step;
+              model.radius = radius_bin;
+              const double spatial = radial_residual(model, points[index]);
+              if (std::abs(spatial) > gaussian_cut * spatial_resolution)
+                continue;
+              const double spatial_weight = std::exp(
+                  -0.5 * std::pow(spatial / spatial_resolution, 2)) /
+                  (std::sqrt(2. * pi) * spatial_resolution);
+              for (int it = tfirst; it <= tlast; ++it) {
+                const double time_bin = min_t + it * t_step;
+                const double time_weight = std::exp(
+                    -0.5 * std::pow((points[index].time - time_bin) /
+                                     time_resolution, 2)) /
+                    (std::sqrt(2. * pi) * time_resolution);
+                const std::size_t offset =
+                    (static_cast<std::size_t>(ir) * nt + it) * ellipse_plane +
+                    static_cast<std::size_t>(ie) * nphi + iphi;
+                accumulator[offset] += spatial_weight * time_weight;
+              }
+            }
           }
         }
       }
 
       for (int ir = 0; ir < nr; ++ir) {
         for (int it = 0; it < nt; ++it) {
-          const double score = accumulator[static_cast<std::size_t>(ir) * nt + it];
-          if (!(score > 0.))
-            continue;
-          bool local_maximum = true;
-          for (int dr = -1; dr <= 1 && local_maximum; ++dr) {
-            const int neighbor_r = ir + dr;
-            if (neighbor_r < 0 || neighbor_r >= nr)
-              continue;
-            for (int dt = -1; dt <= 1; ++dt) {
-              const int neighbor_t = it + dt;
-              if (neighbor_t < 0 || neighbor_t >= nt ||
-                  (dr == 0 && dt == 0))
+          for (int ie = 0; ie < ne; ++ie) {
+            for (int iphi = 0; iphi < nphi; ++iphi) {
+              const std::size_t offset =
+                  (static_cast<std::size_t>(ir) * nt + it) * ellipse_plane +
+                  static_cast<std::size_t>(ie) * nphi + iphi;
+              const double score = accumulator[offset];
+              if (!(score > 0.))
                 continue;
-              if (accumulator[static_cast<std::size_t>(neighbor_r) * nt +
-                              neighbor_t] > score) {
-                local_maximum = false;
-                break;
+              bool local_maximum = true;
+              for (int dr = -1; dr <= 1 && local_maximum; ++dr) {
+                const int neighbor_r = ir + dr;
+                if (neighbor_r < 0 || neighbor_r >= nr)
+                  continue;
+                for (int dt = -1; dt <= 1 && local_maximum; ++dt) {
+                  const int neighbor_t = it + dt;
+                  if (neighbor_t < 0 || neighbor_t >= nt)
+                    continue;
+                  for (int de = -1; de <= 1 && local_maximum; ++de) {
+                    const int neighbor_e = ie + de;
+                    if (neighbor_e < 0 || neighbor_e >= ne)
+                      continue;
+                    for (int dphi = -1; dphi <= 1; ++dphi) {
+                      const int neighbor_phi = iphi + dphi;
+                      if (neighbor_phi < 0 || neighbor_phi >= nphi ||
+                          (dr == 0 && dt == 0 && de == 0 && dphi == 0))
+                        continue;
+                      const std::size_t neighbor_offset =
+                          (static_cast<std::size_t>(neighbor_r) * nt +
+                           neighbor_t) * ellipse_plane +
+                          static_cast<std::size_t>(neighbor_e) * nphi +
+                          neighbor_phi;
+                      if (accumulator[neighbor_offset] > score) {
+                        local_maximum = false;
+                        break;
+                      }
+                    }
+                  }
+                }
               }
+              if (!local_maximum)
+                continue;
+
+              circle_t peak;
+              peak.x = min_x0 + ix * x0_step;
+              peak.y = min_y0 + iy * y0_step;
+              peak.radius = min_radius + ir * radius_step;
+              peak.ring_time = min_t + it * t_step;
+              peak.eccentricity = min_e + ie * e_step;
+              peak.phi = min_phi + iphi * phi_step;
+              peak.score = score;
+              peaks.push_back(peak);
             }
           }
-          if (!local_maximum)
-            continue;
-
-          circle_t peak;
-          peak.x = min_x0 + ix * x0_step;
-          peak.y = min_y0 + iy * y0_step;
-          peak.radius = min_radius + ir * radius_step;
-          peak.ring_time = min_t + it * t_step;
-          peak.score = score;
-          peaks.push_back(peak);
         }
       }
       if (static_cast<int>(peaks.size()) > 2 * pool_limit) {
@@ -457,7 +520,10 @@ hough_candidates(const std::vector<point_t> &points,
       if (std::abs(peak.x - candidate.x) <= x0_step &&
           std::abs(peak.y - candidate.y) <= y0_step &&
           std::abs(peak.radius - candidate.radius) <= radius_step &&
-          std::abs(peak.ring_time - candidate.ring_time) <= t_step) {
+          std::abs(peak.ring_time - candidate.ring_time) <= t_step &&
+          std::abs(peak.eccentricity - candidate.eccentricity) <= e_step &&
+          (std::min(peak.eccentricity, candidate.eccentricity) <= e_step ||
+           angle_distance_pi(peak.phi, candidate.phi) <= phi_step)) {
         duplicate = true;
         break;
       }
@@ -476,6 +542,8 @@ make_cuda_grid(double min_x0, double max_x0, double x0_step,
                double min_y0, double max_y0, double y0_step,
                double min_radius, double max_radius, double radius_step,
                double min_t, double max_t, double t_step,
+               double min_e, double max_e, double e_step,
+               double min_phi, double max_phi, double phi_step,
                double spatial_resolution, double time_resolution)
 {
   ring_hough_cuda::grid_t grid{};
@@ -483,16 +551,22 @@ make_cuda_grid(double min_x0, double max_x0, double x0_step,
   grid.min_y0 = min_y0;
   grid.min_radius = min_radius;
   grid.min_t = min_t;
+  grid.min_e = min_e;
+  grid.min_phi = min_phi;
   grid.x0_step = x0_step;
   grid.y0_step = y0_step;
   grid.radius_step = radius_step;
   grid.t_step = t_step;
+  grid.e_step = e_step;
+  grid.phi_step = phi_step;
   grid.spatial_resolution = spatial_resolution;
   grid.time_resolution = time_resolution;
   grid_bins(min_x0, max_x0, x0_step, grid.nx);
   grid_bins(min_y0, max_y0, y0_step, grid.ny);
   grid_bins(min_radius, max_radius, radius_step, grid.nr);
   grid_bins(min_t, max_t, t_step, grid.nt);
+  grid_bins(min_e, max_e, e_step, grid.ne);
+  grid_bins(min_phi, max_phi, phi_step, grid.nphi);
   return grid;
 }
 
@@ -532,6 +606,8 @@ hough_candidates_cuda(const std::vector<point_t> &points,
     candidate.y = grid.min_y0 + result.y0_bin * grid.y0_step;
     candidate.radius = grid.min_radius + result.radius_bin * grid.radius_step;
     candidate.ring_time = grid.min_t + result.t_bin * grid.t_step;
+    candidate.eccentricity = grid.min_e + result.e_bin * grid.e_step;
+    candidate.phi = grid.min_phi + result.phi_bin * grid.phi_step;
     candidate.score = result.score;
     candidates.push_back(candidate);
   }
@@ -762,10 +838,13 @@ bool
 ring_finder_hough(const std::string &filename, const std::string &outfilename,
                   int min_inliers, int max_rings,
                   double max_shared_fraction,
+                  Long64_t max_events,
                   double min_x0, double max_x0, double x0_step,
                   double min_y0, double max_y0, double y0_step,
                   double min_radius, double max_radius, double radius_step,
                   double min_t, double max_t, double t_step,
+                  double min_e, double max_e, double e_step,
+                  double min_phi, double max_phi, double phi_step,
                   double spatial_resolution, double time_resolution,
                   int ransac_iterations,
                   double ransac_center_window,
@@ -814,14 +893,17 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
 #endif
   }
 
-  const Long64_t entries = frames_in->GetEntries();
-  if (cherenkov_in->GetEntries() != entries) {
+  const Long64_t total_entries = frames_in->GetEntries();
+  if (cherenkov_in->GetEntries() != total_entries) {
     std::cerr << "ERROR: frames/cherenkov entry-count mismatch: frames="
-              << entries << " cherenkov=" << cherenkov_in->GetEntries()
+              << total_entries << " cherenkov=" << cherenkov_in->GetEntries()
               << std::endl;
     fin->Close();
     return false;
   }
+  const Long64_t entries = max_events < 0
+                               ? total_entries
+                               : std::min(max_events, total_entries);
 
   TTreeReader reader(cherenkov_in);
   TTreeReaderValue<UShort_t> ncherenkovhits(reader, "nhits");
@@ -970,6 +1052,7 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
             local_min_y0, local_max_y0, y0_step,
             local_min_radius, local_max_radius, radius_step,
             local_min_t, local_max_t, t_step,
+            min_e, max_e, e_step, min_phi, max_phi, phi_step,
             spatial_resolution, time_resolution);
         if (!gpu->initialize(local_grid, scan_error))
           return false;
@@ -984,6 +1067,7 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
             local_min_y0, local_max_y0, y0_step,
             local_min_radius, local_max_radius, radius_step,
             local_min_t, local_max_t, t_step,
+            min_e, max_e, e_step, min_phi, max_phi, phi_step,
             spatial_resolution, time_resolution);
       }
 
@@ -1044,7 +1128,10 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
         if (std::abs(candidate.x - kept.x) <= x0_step &&
             std::abs(candidate.y - kept.y) <= y0_step &&
             std::abs(candidate.radius - kept.radius) <= radius_step &&
-            std::abs(candidate.ring_time - kept.ring_time) <= t_step) {
+            std::abs(candidate.ring_time - kept.ring_time) <= t_step &&
+            std::abs(candidate.eccentricity - kept.eccentricity) <= e_step &&
+            (std::min(candidate.eccentricity, kept.eccentricity) <= e_step ||
+             angle_distance_pi(candidate.phi, kept.phi) <= phi_step)) {
           duplicate = true;
           break;
         }
@@ -1082,8 +1169,8 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
       ring_x0[nring] = static_cast<float>(ring.x);
       ring_y0[nring] = static_cast<float>(ring.y);
       ring_r[nring] = static_cast<float>(ring.radius);
-      ring_e[nring] = 0.;
-      ring_phi[nring] = 0.;
+      ring_e[nring] = static_cast<float>(ring.eccentricity);
+      ring_phi[nring] = static_cast<float>(ring.phi);
       ring_time[nring] = static_cast<float>(ring.ring_time);
       ring_ninliers[nring] = static_cast<UShort_t>(ring.inliers);
       ++nring;
@@ -1160,10 +1247,13 @@ main(int argc, char **argv)
   std::string input, output;
   int min_inliers = 8, max_rings = maxrings;
   double max_shared_fraction = 0.5;
+  Long64_t max_events = -1;
   double min_x0 = -100., max_x0 = 100., x0_step = 1.;
   double min_y0 = -100., max_y0 = 100., y0_step = 1.;
   double min_radius = 1., max_radius = 200., radius_step = 1.;
   double min_t = -32., max_t = 32., t_step = 1.;
+  double min_e = 0., max_e = 0.9, e_step = 0.1;
+  double min_phi = 0., max_phi = pi, phi_step = pi / 19.;
   double spatial_resolution = 1.5;
   double time_resolution = 1.;
   int ransac_iterations = 128;
@@ -1184,6 +1274,9 @@ main(int argc, char **argv)
     ("max-shared-fraction", po::value<double>(&max_shared_fraction)
                                  ->default_value(max_shared_fraction),
      "maximum fraction of the smaller ring's inliers shared by two rings")
+    ("max-events", po::value<Long64_t>(&max_events)
+                       ->default_value(max_events),
+     "maximum number of frames to process; negative means all")
     ("min-x0", po::value<double>(&min_x0)->default_value(min_x0), "minimum ring center x")
     ("max-x0", po::value<double>(&max_x0)->default_value(max_x0), "maximum ring center x")
     ("x0-step", po::value<double>(&x0_step)->default_value(x0_step), "Hough center x step")
@@ -1196,6 +1289,18 @@ main(int argc, char **argv)
     ("min-t", po::value<double>(&min_t)->default_value(min_t), "minimum ring time")
     ("max-t", po::value<double>(&max_t)->default_value(max_t), "maximum ring time")
     ("t-step", po::value<double>(&t_step)->default_value(t_step), "Hough ring-time step")
+    ("min-e", po::value<double>(&min_e)->default_value(min_e),
+     "minimum ellipse eccentricity")
+    ("max-e", po::value<double>(&max_e)->default_value(max_e),
+     "maximum ellipse eccentricity (must be below one)")
+    ("e-step", po::value<double>(&e_step)->default_value(e_step),
+     "Hough eccentricity step")
+    ("min-phi", po::value<double>(&min_phi)->default_value(min_phi),
+     "minimum ellipse angle in radians")
+    ("max-phi", po::value<double>(&max_phi)->default_value(max_phi),
+     "maximum ellipse angle in radians")
+    ("phi-step", po::value<double>(&phi_step)->default_value(phi_step),
+     "Hough ellipse angle step in radians")
     ("spatial-resolution", po::value<double>(&spatial_resolution)
                                ->default_value(spatial_resolution),
      "Gaussian spatial resolution for Hough weights")
@@ -1233,17 +1338,22 @@ main(int argc, char **argv)
     po::notify(vm);
     int unused = 0;
     if (min_inliers < 3 || max_rings < 1 || max_rings > maxrings ||
+        max_events < -1 ||
         max_shared_fraction < 0. || max_shared_fraction > 1. ||
         ransac_iterations < 0 || ransac_center_window <= 0. ||
         ransac_radius_window <= 0. || ransac_time_window <= 0. ||
         ransac_tolerance <= 0. ||
         min_x0 > max_x0 || min_y0 > max_y0 || min_radius <= 0. ||
         min_radius > max_radius ||
-        min_t > max_t || spatial_resolution <= 0. || time_resolution <= 0. ||
+        min_t > max_t || min_e < 0. || max_e < min_e || max_e >= 1. ||
+        min_phi < 0. || max_phi < min_phi || max_phi > pi ||
+        spatial_resolution <= 0. || time_resolution <= 0. ||
         !grid_bins(min_x0, max_x0, x0_step, unused) ||
         !grid_bins(min_y0, max_y0, y0_step, unused) ||
         !grid_bins(min_radius, max_radius, radius_step, unused) ||
-        !grid_bins(min_t, max_t, t_step, unused))
+        !grid_bins(min_t, max_t, t_step, unused) ||
+        !grid_bins(min_e, max_e, e_step, unused) ||
+        !grid_bins(min_phi, max_phi, phi_step, unused))
       throw std::runtime_error("invalid ring-finder-hough parameter");
   } catch (const std::exception &error) {
     std::cerr << "ERROR: " << error.what() << std::endl
@@ -1253,8 +1363,10 @@ main(int argc, char **argv)
 
   return ring_finder_hough(
              input, output, min_inliers, max_rings, max_shared_fraction,
+             max_events,
              min_x0, max_x0, x0_step, min_y0, max_y0, y0_step,
              min_radius, max_radius, radius_step, min_t, max_t, t_step,
+             min_e, max_e, e_step, min_phi, max_phi, phi_step,
              spatial_resolution, time_resolution,
              ransac_iterations, ransac_center_window,
              ransac_radius_window, ransac_time_window, ransac_tolerance,

@@ -9,16 +9,22 @@ struct grid_t {
   double min_y0;
   double min_radius;
   double min_t;
+  double min_e;
+  double min_phi;
   double x0_step;
   double y0_step;
   double radius_step;
   double t_step;
+  double e_step;
+  double phi_step;
   double spatial_resolution;
   double time_resolution;
   int nx;
   int ny;
   int nr;
   int nt;
+  int ne;
+  int nphi;
 };
 
 struct candidate_t {
@@ -26,6 +32,8 @@ struct candidate_t {
   int y0_bin = -1;
   int radius_bin = -1;
   int t_bin = -1;
+  int e_bin = -1;
+  int phi_bin = -1;
   float score = 0.f;
 };
 

@@ -298,6 +298,10 @@ For large triggered files, `timing.sh --parallel-spills` can instead run on the 
 
 After the timing estimator, run the time-aware Hough ring finder:
 
+See [`RINGFINDER.md`](RINGFINDER.md) for the complete two-stage RANSAC/Hough
+strategy, ellipse parameters, validation rules, GPU implementation, and output
+tree layout.
+
 ```bash
 sipm4eic-testbeam2026-process/process/scripts/ring-finder.sh \
     --run <run> \

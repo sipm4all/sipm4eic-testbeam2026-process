@@ -606,8 +606,11 @@ be removed after a successful merge with `--clean-ring-spills`.
 The workflow uses `ring-finder-hough` and accepts the main Hough controls,
 including `--min-inliers`, `--max-rings`, `--spatial-resolution`,
 `--time-resolution`, `--x0-step`, `--y0-step`, `--radius-step`, `--t-step`,
+`--min-e`, `--max-e`, `--e-step`, `--min-phi`, `--max-phi`, `--phi-step`,
 `--ransac-tolerance`, `--ransac-time-window`, and
-`--max-shared-fraction`. The latter limits the shared inliers between a new
+`--max-shared-fraction`. The ellipse parameters are scanned for every
+RANSAC-localized candidate region; `e=0` is the circle sub-model. The latter
+option limits the shared inliers between a new
 candidate and each already accepted ring to the configured fraction of the
 smaller inlier set; its default is `0.5`. Candidates are considered in score
 order, so rejecting an overlapping candidate does not remove an earlier ring.
