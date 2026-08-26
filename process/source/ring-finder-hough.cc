@@ -973,9 +973,9 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
   double ransac_seconds = 0.;
   double hough_seconds = 0.;
   double validation_seconds = 0.;
-  // Keep several maxima available for validation without making the CUDA
-  // reduction scan the full accumulator an excessive number of times.
-  const int candidate_limit = std::max(8, max_rings * 4);
+  // Each RANSAC seed defines one candidate search region. Keep exactly one
+  // maximum per seed; validation and shared-hit handling happen below.
+  const int candidate_limit = 1;
   std::mt19937 generator(0x9e3779b9u);
   for (Long64_t iframe = 0; iframe < entries; ++iframe) {
     if (frames_in->GetEntry(iframe) <= 0 || !reader.Next()) {

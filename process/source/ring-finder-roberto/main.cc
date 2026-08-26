@@ -28,6 +28,8 @@ struct options_t {
   std::string output;
   std::string branch_name = "ring";
   int nrings = 1;
+  int min_inliers = 8;
+  float max_shared_fraction = 0.5f;
   float xmin = -100.f;
   float xmax = 100.f;
   float ymin = -100.f;
@@ -63,6 +65,7 @@ struct circle_t {
   float time = 0.f;
   int inliers = 0;
   float residual_sum = std::numeric_limits<float>::infinity();
+  float score = 0.f;
   bool valid = false;
 };
 
@@ -95,43 +98,93 @@ circle_residual(const circle_t &circle, const point_t &point)
                    circle.radius);
 }
 
-bool
-collect_ransac_inliers(const std::vector<point_t> &points,
-                       const std::vector<int> &indices,
-                       const circle_t &circle,
-                       float ring_time,
-                       float spatial_tolerance,
-                       float time_window,
-                       std::vector<int> &inliers,
-                       float &residual_sum)
+float
+mean_time(const std::vector<point_t> &points,
+          const std::vector<int> &indices)
 {
-  inliers.clear();
-  residual_sum = 0.f;
-  for (int index : indices) {
-    const float residual = circle_residual(circle, points[index]);
-    if (residual > spatial_tolerance ||
-        std::fabs(points[index].time - ring_time) > time_window)
-      continue;
-    inliers.push_back(index);
-    residual_sum += residual;
-  }
-  return !inliers.empty();
+  if (indices.empty())
+    return std::numeric_limits<float>::quiet_NaN();
+  float sum = 0.f;
+  for (int index : indices)
+    sum += points[index].time;
+  return sum / indices.size();
 }
 
 bool
-find_ransac_seed(const std::vector<point_t> &points,
-                 const std::vector<int> &indices,
-                 const options_t &opt,
-                 std::mt19937 &generator,
-                 circle_t &best)
+fit_circle(const std::vector<point_t> &points,
+           const std::vector<int> &indices,
+           circle_t &circle)
 {
-  if (indices.size() < 3 || opt.ransac_iterations <= 0)
+  if (indices.size() < 3)
     return false;
 
+  double normal[3][3] = {};
+  double rhs[3] = {};
+  for (int index : indices) {
+    const double x = points[index].x;
+    const double y = points[index].y;
+    const double row[3] = {x, y, 1.};
+    const double value = x * x + y * y;
+    for (int i = 0; i < 3; ++i) {
+      rhs[i] += row[i] * value;
+      for (int j = 0; j < 3; ++j)
+        normal[i][j] += row[i] * row[j];
+    }
+  }
+
+  for (int column = 0; column < 3; ++column) {
+    int pivot = column;
+    for (int row = column + 1; row < 3; ++row) {
+      if (std::abs(normal[row][column]) >
+          std::abs(normal[pivot][column]))
+        pivot = row;
+    }
+    if (std::abs(normal[pivot][column]) < 1.e-12)
+      return false;
+    if (pivot != column) {
+      for (int j = column; j < 3; ++j)
+        std::swap(normal[column][j], normal[pivot][j]);
+      std::swap(rhs[column], rhs[pivot]);
+    }
+    for (int row = column + 1; row < 3; ++row) {
+      const double factor = normal[row][column] / normal[column][column];
+      for (int j = column; j < 3; ++j)
+        normal[row][j] -= factor * normal[column][j];
+      rhs[row] -= factor * rhs[column];
+    }
+  }
+
+  double solution[3] = {};
+  for (int row = 2; row >= 0; --row) {
+    double value = rhs[row];
+    for (int column = row + 1; column < 3; ++column)
+      value -= normal[row][column] * solution[column];
+    solution[row] = value / normal[row][row];
+  }
+
+  circle.x = 0.5f * solution[0];
+  circle.y = 0.5f * solution[1];
+  const double radius_squared = solution[2] + circle.x * circle.x +
+                                circle.y * circle.y;
+  if (radius_squared <= 0.)
+    return false;
+  circle.radius = std::sqrt(radius_squared);
+  return std::isfinite(circle.x) && std::isfinite(circle.y) &&
+         std::isfinite(circle.radius);
+}
+
+std::vector<circle_t>
+ransac_seeds(const std::vector<point_t> &points,
+            const std::vector<int> &indices,
+            const options_t &opt,
+            std::mt19937 &generator)
+{
+  std::vector<circle_t> hypotheses;
+  if (indices.size() < 3 || opt.ransac_iterations <= 0)
+    return hypotheses;
+
   std::vector<int> temporal_indices;
-  std::vector<int> inliers;
-  int best_inliers = 0;
-  float best_residual_sum = std::numeric_limits<float>::infinity();
+  std::vector<int> accepted;
   for (int iteration = 0; iteration < opt.ransac_iterations; ++iteration) {
     std::uniform_int_distribution<std::size_t> pick(0, indices.size() - 1);
     const int ia = indices[pick(generator)];
@@ -151,31 +204,165 @@ find_ransac_seed(const std::vector<point_t> &points,
     if (ia == ib || ia == ic || ib == ic)
       continue;
 
-    circle_t candidate;
-    if (!circle_from_three(points[ia], points[ib], points[ic], candidate) ||
-        candidate.x < opt.xmin || candidate.x > opt.xmax ||
-        candidate.y < opt.ymin || candidate.y > opt.ymax ||
-        candidate.radius < opt.rmin || candidate.radius > opt.rmax)
+    circle_t hypothesis;
+    if (!circle_from_three(points[ia], points[ib], points[ic], hypothesis) ||
+        hypothesis.x < opt.xmin || hypothesis.x > opt.xmax ||
+        hypothesis.y < opt.ymin || hypothesis.y > opt.ymax ||
+        hypothesis.radius < opt.rmin || hypothesis.radius > opt.rmax)
       continue;
+
+    auto collect = [&](const circle_t &model, float ring_time,
+                       std::vector<int> &out, float &residual_sum) {
+      out.clear();
+      residual_sum = 0.f;
+      for (int index : indices) {
+        const float residual = circle_residual(model, points[index]);
+        if (residual <= opt.ransac_tolerance &&
+            std::fabs(points[index].time - ring_time) <=
+                opt.ransac_time_window) {
+          out.push_back(index);
+          residual_sum += residual;
+        }
+      }
+    };
 
     float residual_sum = 0.f;
-    collect_ransac_inliers(points, indices, candidate, points[ia].time,
-                           opt.ransac_tolerance, opt.ransac_time_window,
-                           inliers, residual_sum);
-    if (static_cast<int>(inliers.size()) < best_inliers ||
-        (static_cast<int>(inliers.size()) == best_inliers &&
-         residual_sum >= best_residual_sum))
+    hypothesis.time = points[ia].time;
+    collect(hypothesis, hypothesis.time, accepted, residual_sum);
+    hypothesis.time = mean_time(points, accepted);
+    collect(hypothesis, hypothesis.time, accepted, residual_sum);
+    if (!fit_circle(points, accepted, hypothesis))
+      continue;
+    for (int refit = 0; refit < 2; ++refit) {
+      hypothesis.time = mean_time(points, accepted);
+      collect(hypothesis, hypothesis.time, accepted, residual_sum);
+      if (!fit_circle(points, accepted, hypothesis)) {
+        accepted.clear();
+        break;
+      }
+    }
+    if (accepted.size() < 3 || !std::isfinite(hypothesis.time) ||
+        hypothesis.x < opt.xmin || hypothesis.x > opt.xmax ||
+        hypothesis.y < opt.ymin || hypothesis.y > opt.ymax ||
+        hypothesis.radius < opt.rmin || hypothesis.radius > opt.rmax)
       continue;
 
-    best = candidate;
-    best.time = points[ia].time;
-    best.inliers = static_cast<int>(inliers.size());
-    best.residual_sum = residual_sum;
-    best.valid = true;
-    best_inliers = best.inliers;
-    best_residual_sum = residual_sum;
+    hypothesis.time = mean_time(points, accepted);
+    collect(hypothesis, hypothesis.time, accepted, residual_sum);
+    hypothesis.inliers = static_cast<int>(accepted.size());
+    hypothesis.residual_sum = residual_sum;
+    hypotheses.push_back(hypothesis);
   }
-  return best.valid;
+
+  std::vector<circle_t> seeds;
+  seeds.reserve(opt.nrings);
+  std::vector<int> remaining = indices;
+  for (int iseed = 0;
+       iseed < opt.nrings &&
+       static_cast<int>(remaining.size()) >= opt.min_inliers;
+       ++iseed) {
+    int best_hypothesis = -1;
+    int best_inliers = 0;
+    float best_residual_sum = std::numeric_limits<float>::infinity();
+    std::vector<int> best_inlier_indices;
+    for (int ihypothesis = 0;
+         ihypothesis < static_cast<int>(hypotheses.size()); ++ihypothesis) {
+      const circle_t &hypothesis = hypotheses[ihypothesis];
+      std::vector<int> inlier_indices;
+      float residual_sum = 0.f;
+      for (int index : remaining) {
+        const float residual = circle_residual(hypothesis, points[index]);
+        if (residual <= opt.ransac_tolerance &&
+            std::fabs(points[index].time - hypothesis.time) <=
+                opt.ransac_time_window) {
+          inlier_indices.push_back(index);
+          residual_sum += residual;
+        }
+      }
+      const int ninliers = static_cast<int>(inlier_indices.size());
+      if (ninliers < opt.min_inliers || ninliers < best_inliers ||
+          (ninliers == best_inliers && residual_sum >= best_residual_sum))
+        continue;
+      best_hypothesis = ihypothesis;
+      best_inliers = ninliers;
+      best_residual_sum = residual_sum;
+      best_inlier_indices.swap(inlier_indices);
+    }
+    if (best_hypothesis < 0)
+      break;
+
+    circle_t seed = hypotheses[best_hypothesis];
+    seed.inliers = best_inliers;
+    seed.residual_sum = best_residual_sum;
+    seeds.push_back(seed);
+
+    std::vector<int> next_remaining;
+    next_remaining.reserve(remaining.size() - best_inlier_indices.size());
+    for (int index : remaining) {
+      if (std::find(best_inlier_indices.begin(),
+                    best_inlier_indices.end(), index) ==
+          best_inlier_indices.end())
+        next_remaining.push_back(index);
+    }
+    remaining.swap(next_remaining);
+  }
+  return seeds;
+}
+
+void
+evaluate_candidate(const std::vector<point_t> &points,
+                   const std::vector<int> &indices,
+                   const options_t &opt,
+                   circle_t &circle,
+                   std::vector<int> &inlier_indices)
+{
+  constexpr float spatial_resolution = 2.1f;
+  inlier_indices.clear();
+  float residual_sum = 0.f;
+  for (int index : indices) {
+    const float spatial = circle_residual(circle, points[index]);
+    const float temporal = std::fabs(points[index].time - circle.time);
+    if (spatial <= 4.f * spatial_resolution &&
+        temporal <= 4.f * opt.tsigma) {
+      inlier_indices.push_back(index);
+      residual_sum += spatial;
+    }
+  }
+  circle.inliers = static_cast<int>(inlier_indices.size());
+  circle.residual_sum = residual_sum;
+  circle.valid = circle.inliers >= opt.min_inliers;
+}
+
+int
+count_shared_hits(const std::vector<int> &first,
+                  const std::vector<int> &second)
+{
+  int shared = 0;
+  std::size_t i = 0;
+  std::size_t j = 0;
+  while (i < first.size() && j < second.size()) {
+    if (first[i] == second[j]) {
+      ++shared;
+      ++i;
+      ++j;
+    } else if (first[i] < second[j]) {
+      ++i;
+    } else {
+      ++j;
+    }
+  }
+  return shared;
+}
+
+bool
+is_duplicate_candidate(const circle_t &first,
+                       const circle_t &second,
+                       const options_t &opt)
+{
+  return std::fabs(first.x - second.x) <= opt.hough_x_step &&
+         std::fabs(first.y - second.y) <= opt.hough_y_step &&
+         std::fabs(first.radius - second.radius) <= opt.hough_radius_step &&
+         std::fabs(first.time - second.time) <= opt.hough_time_step;
 }
 
 int
@@ -360,7 +547,7 @@ run(const options_t &opt)
 
   Long64_t processed = 0;
   Long64_t rings_found = 0;
-  Long64_t ransac_seeds = 0;
+  Long64_t ransac_seed_count = 0;
   Long64_t frames_with_seed = 0;
   std::vector<float> points_x;
   std::vector<float> points_y;
@@ -416,20 +603,24 @@ run(const options_t &opt)
       points[hit] = {points_x[hit], points_y[hit], points_t[hit]};
 
     nring = 0;
-    int used = 0;
-    while (nring < opt.nrings && used < n) {
-      std::vector<int> active;
-      active.reserve(n - used);
-      for (int hit = 0; hit < n; ++hit) {
-        if (data.points.x[hit] != 0.f && data.points.y[hit] != 0.f)
-          active.push_back(hit);
-      }
-      circle_t seed;
-      if (!find_ransac_seed(points, active, opt, generator, seed))
-        break;
-      ++ransac_seeds;
+    std::vector<int> active;
+    active.reserve(n);
+    for (int hit = 0; hit < n; ++hit) {
+      if (data.points.x[hit] != 0.f && data.points.y[hit] != 0.f)
+        active.push_back(hit);
+    }
+    const std::vector<circle_t> seeds =
+        ransac_seeds(points, active, opt, generator);
+    ransac_seed_count += seeds.size();
+    if (!seeds.empty())
       ++frames_with_seed;
 
+    // Each seed gets its own local accumulator and contributes exactly one
+    // maximum. Candidate selection follows ring-finder-hough: sort maxima,
+    // remove duplicate models, validate inliers, and reject excessive
+    // sharing. Hits remain available to overlapping candidates.
+    std::vector<circle_t> candidates;
+    for (const circle_t &seed : seeds) {
       set_local_hough_grid(data, seed, opt);
       hough_init(data);
       hough_transform(data);
@@ -442,35 +633,69 @@ run(const options_t &opt)
                            data.hough.rh + local_grid_size)));
       const int maximum = data.hough.rhi[block];
       if (maximum < 0)
-        break;
+        continue;
 
-      ring_x0[nring] = data.map.x[maximum];
-      ring_y0[nring] = data.map.y[maximum];
-      ring_r[nring] = data.map.r[maximum];
+      circle_t candidate;
+      candidate.x = data.map.x[maximum];
+      candidate.y = data.map.y[maximum];
+      candidate.radius = data.map.r[maximum];
+      candidate.time = data.map.t[maximum];
+      candidate.score = data.hough.h[maximum];
+      candidates.push_back(candidate);
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+              [](const circle_t &first, const circle_t &second) {
+                return first.score > second.score;
+              });
+    std::vector<circle_t> unique_candidates;
+    unique_candidates.reserve(candidates.size());
+    for (const circle_t &candidate : candidates) {
+      bool duplicate = false;
+      for (const circle_t &kept : unique_candidates) {
+        if (is_duplicate_candidate(candidate, kept, opt)) {
+          duplicate = true;
+          break;
+        }
+      }
+      if (!duplicate)
+        unique_candidates.push_back(candidate);
+    }
+
+    std::vector<std::vector<int>> accepted_inliers;
+    for (circle_t candidate : unique_candidates) {
+      std::vector<int> inliers;
+      evaluate_candidate(points, active, opt, candidate, inliers);
+      if (!candidate.valid)
+        continue;
+
+      bool too_many_shared_hits = false;
+      for (const auto &previous_inliers : accepted_inliers) {
+        const int shared_hits = count_shared_hits(inliers, previous_inliers);
+        const std::size_t smaller_ring =
+            std::min(inliers.size(), previous_inliers.size());
+        const int max_shared = static_cast<int>(std::floor(
+            opt.max_shared_fraction * static_cast<float>(smaller_ring)));
+        if (shared_hits > max_shared) {
+          too_many_shared_hits = true;
+          break;
+        }
+      }
+      if (too_many_shared_hits)
+        continue;
+
+      ring_x0[nring] = candidate.x;
+      ring_y0[nring] = candidate.y;
+      ring_r[nring] = candidate.radius;
       ring_e[nring] = 0.f;
       ring_phi[nring] = 0.f;
-      ring_time[nring] = data.map.t[maximum];
-      ring_ninliers[nring] = static_cast<UShort_t>(data.hough.nh[maximum]);
-
-      for (int hit = 0; hit < n; ++hit) {
-        if (data.points.x[hit] == 0.f || data.points.y[hit] == 0.f)
-          continue;
-        const float dx = data.points.x[hit] - ring_x0[nring];
-        const float dy = data.points.y[hit] - ring_y0[nring];
-        const float radius = std::hypot(dx, dy);
-        if (std::fabs(radius - ring_r[nring]) > 3.f * 2.1f)
-          continue;
-        if (std::fabs(data.points.t[hit] - ring_time[nring]) >
-            3.f * opt.tsigma)
-          continue;
-        data.points.x[hit] = 0.f;
-        data.points.y[hit] = 0.f;
-        points[hit].x = 0.f;
-        points[hit].y = 0.f;
-        ++used;
-      }
+      ring_time[nring] = candidate.time;
+      ring_ninliers[nring] = static_cast<UShort_t>(candidate.inliers);
       ++nring;
       ++rings_found;
+      accepted_inliers.push_back(inliers);
+      if (nring == maxrings)
+        break;
     }
 
     if (trigger_in)
@@ -530,7 +755,7 @@ run(const options_t &opt)
   output->Close();
   input->Close();
   std::cout << "frames processed: " << processed << std::endl
-            << "RANSAC seeds:     " << ransac_seeds << " ("
+            << "RANSAC seeds:     " << ransac_seed_count << " ("
             << frames_with_seed << " ring iterations)" << std::endl
             << "rings found:      " << rings_found << std::endl
             << "output:            " << opt.output << std::endl;
@@ -556,6 +781,12 @@ main(int argc, char **argv)
      "output ring tree name")
     ("nrings", po::value<int>(&opt.nrings)->default_value(opt.nrings),
      "maximum number of rings per frame")
+    ("min-inliers", po::value<int>(&opt.min_inliers)
+                              ->default_value(opt.min_inliers),
+     "minimum RANSAC inliers per seed")
+    ("max-shared-fraction", po::value<float>(&opt.max_shared_fraction)
+                                  ->default_value(opt.max_shared_fraction),
+     "maximum fraction of the smaller ring's inliers shared by two rings")
     ("xmin", po::value<float>(&opt.xmin)->default_value(opt.xmin),
      "Hough x minimum")
     ("xmax", po::value<float>(&opt.xmax)->default_value(opt.xmax),
@@ -617,7 +848,9 @@ main(int argc, char **argv)
     }
     po::notify(variables);
     if (opt.input.empty() || opt.output.empty() || opt.branch_name.empty() ||
-        opt.nrings < 1 || opt.nrings > maxrings || opt.max_events < -1 ||
+        opt.nrings < 1 || opt.nrings > maxrings || opt.min_inliers < 3 ||
+        opt.max_shared_fraction < 0.f || opt.max_shared_fraction > 1.f ||
+        opt.max_events < -1 ||
         opt.xmin > opt.xmax || opt.ymin > opt.ymax || opt.rmin >= opt.rmax ||
         opt.tmin >= opt.tmax || opt.tsigma <= 0.f ||
         opt.ransac_iterations <= 0 || opt.ransac_tolerance <= 0.f ||
