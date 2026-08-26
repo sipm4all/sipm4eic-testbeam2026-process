@@ -759,7 +759,7 @@ count_shared_hits(const std::vector<int> &first,
 bool
 ring_finder_hough(const std::string &filename, const std::string &outfilename,
                   int min_inliers, int max_rings,
-                  int max_shared_hits,
+                  double max_shared_fraction,
                   double min_x0, double max_x0, double x0_step,
                   double min_y0, double max_y0, double y0_step,
                   double min_radius, double max_radius, double radius_step,
@@ -1050,8 +1050,13 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
 
       bool too_many_shared_hits = false;
       for (const auto &previous_inliers : accepted_inliers) {
-        if (count_shared_hits(inlier_indices, previous_inliers) >
-            max_shared_hits) {
+        const int shared_hits =
+            count_shared_hits(inlier_indices, previous_inliers);
+        const std::size_t smaller_ring =
+            std::min(inlier_indices.size(), previous_inliers.size());
+        const int max_shared = static_cast<int>(std::floor(
+            max_shared_fraction * static_cast<double>(smaller_ring)));
+        if (shared_hits > max_shared) {
           too_many_shared_hits = true;
           break;
         }
@@ -1134,7 +1139,7 @@ main(int argc, char **argv)
   namespace po = boost::program_options;
   std::string input, output;
   int min_inliers = 8, max_rings = maxrings;
-  int max_shared_hits = 2;
+  double max_shared_fraction = 0.5;
   double min_x0 = -100., max_x0 = 100., x0_step = 1.;
   double min_y0 = -100., max_y0 = 100., y0_step = 1.;
   double min_radius = 1., max_radius = 200., radius_step = 1.;
@@ -1155,9 +1160,9 @@ main(int argc, char **argv)
     ("output,o", po::value<std::string>(&output)->required(), "output ROOT file")
     ("min-inliers", po::value<int>(&min_inliers)->default_value(min_inliers), "minimum spatial/time inliers")
     ("max-rings", po::value<int>(&max_rings)->default_value(max_rings), "maximum rings per frame")
-    ("max-shared-hits", po::value<int>(&max_shared_hits)
-                             ->default_value(max_shared_hits),
-     "maximum hits shared by any two accepted rings")
+    ("max-shared-fraction", po::value<double>(&max_shared_fraction)
+                                 ->default_value(max_shared_fraction),
+     "maximum fraction of the smaller ring's inliers shared by two rings")
     ("min-x0", po::value<double>(&min_x0)->default_value(min_x0), "minimum ring center x")
     ("max-x0", po::value<double>(&max_x0)->default_value(max_x0), "maximum ring center x")
     ("x0-step", po::value<double>(&x0_step)->default_value(x0_step), "Hough center x step")
@@ -1204,7 +1209,7 @@ main(int argc, char **argv)
     po::notify(vm);
     int unused = 0;
     if (min_inliers < 3 || max_rings < 1 || max_rings > maxrings ||
-        max_shared_hits < 0 ||
+        max_shared_fraction < 0. || max_shared_fraction > 1. ||
         ransac_iterations < 0 || ransac_center_window <= 0. ||
         ransac_radius_window <= 0. || ransac_time_window <= 0. ||
         ransac_tolerance <= 0. ||
@@ -1223,7 +1228,7 @@ main(int argc, char **argv)
   }
 
   return ring_finder_hough(
-             input, output, min_inliers, max_rings, max_shared_hits,
+             input, output, min_inliers, max_rings, max_shared_fraction,
              min_x0, max_x0, x0_step, min_y0, max_y0, y0_step,
              min_radius, max_radius, radius_step, min_t, max_t, t_step,
              spatial_resolution, time_resolution,

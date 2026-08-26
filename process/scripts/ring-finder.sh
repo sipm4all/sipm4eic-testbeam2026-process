@@ -39,7 +39,7 @@ options:
   --clean-ring-spills            remove ring spill files after hadd, default: keep
   --min-inliers N                minimum ring inliers
   --max-rings N                  maximum rings per frame
-  --max-shared-hits N            maximum hits shared by two rings
+  --max-shared-fraction VALUE    maximum shared fraction of the smaller ring
   --spatial-resolution VALUE     Hough spatial resolution in mm
   --time-resolution VALUE        Hough time resolution in native units
   --x0-step VALUE                Hough x step in mm
@@ -136,7 +136,7 @@ while [ $# -gt 0 ]; do
             clean_ring_spills=1
             shift
             ;;
-        --min-inliers|--max-rings|--max-shared-hits|--spatial-resolution|\
+        --min-inliers|--max-rings|--max-shared-fraction|--spatial-resolution|\
         --time-resolution|--x0-step|--y0-step|--radius-step|--t-step|\
         --ransac-tolerance|--ransac-time-window)
             [ $# -ge 2 ] || fail "$1 requires VALUE"

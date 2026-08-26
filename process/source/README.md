@@ -353,7 +353,7 @@ contain multiple rings. The output uses the same `ring` tree as
 process/bin/ring-finder-hough \
   --input triggered.timing.root \
   --output triggered.rings.hough.root \
-  --min-inliers 8 --max-shared-hits 2 \
+  --min-inliers 8 --max-shared-fraction 0.5 \
   --min-x0 -100 --max-x0 100 --x0-step 1 \
   --min-y0 -100 --max-y0 100 --y0-step 1 \
   --min-radius 1 --max-radius 200 --radius-step 1 \
@@ -379,9 +379,12 @@ default steps are 1 mm for x, y, and radius, and 1 native time unit.
 The candidate is accepted only if at least `--min-inliers` hits lie within four
 spatial standard deviations and four time standard deviations of the Hough
 maximum. Hit sets are not removed between candidates: the same hit may be an
-inlier of more than one accepted ring, but no more than
-`--max-shared-hits` hits may be shared by any pair of accepted rings. The
-default is two shared hits. If the project was configured with
+inlier of more than one accepted ring. For each new candidate, the number of
+shared hits with every previously accepted ring must not exceed
+`floor(--max-shared-fraction * min(N_candidate, N_previous))`, where `N` is
+the ring's inlier count. The default fraction is `0.5`. If the candidate is
+too strongly overlapping, only the new candidate is rejected; previously
+accepted rings are never removed. If the project was configured with
 CUDA, pass `--gpu` to run
 the accumulator scan on the CUDA device; the final weighted
 candidate extraction and validation remain in the common C++ implementation.
