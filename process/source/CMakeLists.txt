@@ -34,6 +34,18 @@ if(CMAKE_CUDA_COMPILER)
     )
     target_include_directories(ring_hough_cuda PUBLIC ${CMAKE_CURRENT_LIST_DIR})
     target_link_libraries(ring_hough_cuda PUBLIC CUDA::cudart)
+
+    add_library(ring_finder_roberto_cuda STATIC
+      ring-finder-roberto/cuda.cu
+    )
+    set_target_properties(ring_finder_roberto_cuda PROPERTIES
+      CUDA_STANDARD 17
+      CUDA_STANDARD_REQUIRED ON
+    )
+    target_include_directories(ring_finder_roberto_cuda PUBLIC
+      ${CMAKE_CURRENT_LIST_DIR}/ring-finder-roberto
+    )
+    target_link_libraries(ring_finder_roberto_cuda PUBLIC CUDA::cudart)
   endif()
 endif()
 
@@ -71,6 +83,9 @@ add_executable(trigger trigger.cc)
 add_executable(timing timing.cc)
 add_executable(ring-finder-ransac ring-finder-ransac.cc)
 add_executable(ring-finder-hough ring-finder-hough.cc)
+if(RING_HOUGH_CUDA_ENABLED)
+  add_executable(ring-finder-roberto ring-finder-roberto/main.cc)
+endif()
 add_executable(validate_timing_estimator timing/test/validate_timing_estimator.cc)
 target_include_directories(validate_timing_estimator PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/timing/include
@@ -86,6 +101,10 @@ target_link_libraries(timing PRIVATE timing_estimator)
 if(RING_HOUGH_CUDA_ENABLED)
   target_compile_definitions(ring-finder-hough PRIVATE RING_HOUGH_HAS_CUDA=1)
   target_link_libraries(ring-finder-hough PRIVATE ring_hough_cuda)
+  target_compile_options(ring-finder-roberto PRIVATE ${ROOT_CFLAGS_LIST})
+  target_link_libraries(ring-finder-roberto PRIVATE
+    ${ROOT_LIBS_LIST} Boost::program_options ring_finder_roberto_cuda
+  )
 endif()
 
 install(TARGETS
@@ -108,6 +127,12 @@ install(TARGETS
   LIBRARY DESTINATION lib
   RUNTIME DESTINATION bin
 )
+
+if(RING_HOUGH_CUDA_ENABLED)
+  install(TARGETS ring-finder-roberto
+    RUNTIME DESTINATION bin
+  )
+endif()
 
 install(FILES
   timing/include/TimingEstimator.h
