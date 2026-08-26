@@ -184,7 +184,7 @@ sigmaT = sqrt(sigma0^2 + sigma1^2) / 2
 Build the project:
 
 ```bash
-cmake -S process/source -B process/build
+cmake -S process/source -B process/build -DCMAKE_BUILD_TYPE=Release
 cmake --build process/build --target validate_timing_estimator -j
 ```
 

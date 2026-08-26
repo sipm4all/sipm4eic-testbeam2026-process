@@ -21,10 +21,14 @@ macros/lib/              reusable ROOT macro helper headers
 From the repository root:
 
 ```bash
-cmake -S process/source -B process/build
+cmake -S process/source -B process/build -DCMAKE_BUILD_TYPE=Release
 cmake --build process/build -j
 cmake --install process/build
 ```
+
+Use the `Release` build for normal processing. It enables compiler
+optimisation, which is particularly important for the ring-finder workloads.
+Re-run the configure command when changing build types.
 
 After install, this creates the processing executables in `process/bin/`:
 

@@ -5,7 +5,7 @@ This directory contains the C++ sources and `CMakeLists.txt` for the processing 
 Build from the repository root:
 
 ```bash
-cmake -S process/source -B process/build
+cmake -S process/source -B process/build -DCMAKE_BUILD_TYPE=Release
 cmake --build process/build -j
 cmake --install process/build
 ```

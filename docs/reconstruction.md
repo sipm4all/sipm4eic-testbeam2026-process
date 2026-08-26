@@ -35,7 +35,7 @@ The scripts use `/data/2026-testbeam/process/<run>/` as the working area. For ph
 From the repository root:
 
 ```bash
-cmake -S process/source -B process/build
+cmake -S process/source -B process/build -DCMAKE_BUILD_TYPE=Release
 cmake --build process/build -j
 cmake --install process/build
 ```

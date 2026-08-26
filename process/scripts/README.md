@@ -5,7 +5,7 @@ This directory contains shell scripts for running larger processing workflows. R
 Build first:
 
 ```bash
-cmake -S process/source -B process/build
+cmake -S process/source -B process/build -DCMAKE_BUILD_TYPE=Release
 cmake --build process/build -j
 cmake --install process/build
 ```
