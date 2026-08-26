@@ -611,4 +611,6 @@ including `--min-inliers`, `--max-rings`, `--spatial-resolution`,
 candidate and each already accepted ring to the configured fraction of the
 smaller inlier set; its default is `0.5`. Candidates are considered in score
 order, so rejecting an overlapping candidate does not remove an earlier ring.
-Pass `--overwrite` to regenerate existing outputs.
+Pass `--overwrite` to regenerate existing outputs. The flag is also forwarded
+to the executable, allowing an existing `ring` tree in an input file to be
+recomputed explicitly.

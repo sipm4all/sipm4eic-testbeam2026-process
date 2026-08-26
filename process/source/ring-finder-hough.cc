@@ -13,6 +13,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <filesystem>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -770,7 +772,8 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
                   double ransac_radius_window,
                   double ransac_time_window,
                   double ransac_tolerance,
-                  bool use_gpu)
+                  bool use_gpu,
+                  bool overwrite_existing_ring)
 {
   auto fin = TFile::Open(filename.c_str(), "READ");
   if (!fin || fin->IsZombie()) {
@@ -791,8 +794,9 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
       return false;
     }
   }
-  if (fin->Get("ring")) {
+  if (fin->Get("ring") && !overwrite_existing_ring) {
     std::cerr << "ERROR: input already contains a 'ring' tree" << std::endl;
+    std::cerr << "       pass --overwrite to replace it" << std::endl;
     fin->Close();
     return false;
   }
@@ -825,9 +829,20 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
   TTreeReaderArray<Float_t> y(reader, "y");
   TTreeReaderArray<Float_t> time(reader, "time");
 
-  auto fout = TFile::Open(outfilename.c_str(), "RECREATE");
+  std::error_code input_path_error;
+  std::error_code output_path_error;
+  const auto input_path =
+      std::filesystem::weakly_canonical(filename, input_path_error);
+  const auto output_path =
+      std::filesystem::weakly_canonical(outfilename, output_path_error);
+  const bool in_place = !input_path_error && !output_path_error &&
+                        input_path == output_path;
+  const std::string write_filename =
+      in_place ? outfilename + ".ring-finder-hough.tmp" : outfilename;
+
+  auto fout = TFile::Open(write_filename.c_str(), "RECREATE");
   if (!fout || fout->IsZombie()) {
-    std::cerr << "ERROR: could not create output file: " << outfilename
+    std::cerr << "ERROR: could not create output file: " << write_filename
               << std::endl;
     return false;
   }
@@ -1118,6 +1133,11 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
   fout->Write();
   fout->Close();
   fin->Close();
+  if (in_place && std::rename(write_filename.c_str(), outfilename.c_str()) != 0) {
+    std::cerr << "ERROR: could not replace input file with updated ring tree: "
+              << outfilename << std::endl;
+    return false;
+  }
   std::cout << "frames processed: " << frames << std::endl
             << "RANSAC seeds:     " << total_seeds << " ("
             << frames_with_seeds << " frames, average "
@@ -1152,6 +1172,7 @@ main(int argc, char **argv)
   double ransac_time_window = 5.;
   double ransac_tolerance = 5.;
   bool use_gpu = false;
+  bool overwrite_existing_ring = false;
 
   po::options_description options("options");
   options.add_options()
@@ -1198,6 +1219,9 @@ main(int argc, char **argv)
      "RANSAC spatial inlier tolerance in mm")
     ("gpu", po::bool_switch(&use_gpu)->default_value(false),
      "use the CUDA Hough backend (if compiled)")
+    ("overwrite", po::bool_switch(&overwrite_existing_ring)
+                       ->default_value(false),
+     "replace an existing ring tree in the input file")
     ;
   try {
     po::variables_map vm;
@@ -1234,6 +1258,6 @@ main(int argc, char **argv)
              spatial_resolution, time_resolution,
              ransac_iterations, ransac_center_window,
              ransac_radius_window, ransac_time_window, ransac_tolerance,
-             use_gpu)
+             use_gpu, overwrite_existing_ring)
              ? 0 : 1;
 }

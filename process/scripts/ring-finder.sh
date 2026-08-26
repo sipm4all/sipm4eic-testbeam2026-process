@@ -214,6 +214,7 @@ for tag in "${trigger_tags[@]}"; do
             fi
             args=()
             [ "${gpu}" -eq 1 ] && args+=(--gpu)
+            [ "${overwrite}" -eq 1 ] && args+=(--overwrite)
             time -p "${finder}" --input "${input}" --output "${output}" \
                 "${args[@]}" "$@"
         ' _ "${RING_FINDER}" "${input}" "${output}" "${overwrite}" \
@@ -248,6 +249,7 @@ for tag in "${trigger_tags[@]}"; do
             fi
             args=()
             [ "${gpu}" -eq 1 ] && args+=(--gpu)
+            [ "${overwrite}" -eq 1 ] && args+=(--overwrite)
             time -p "${finder}" --input "${input}" --output "${output}" \
                 "${args[@]}" "$@"
         ' _ "${RING_FINDER}" "${input}" "${spill_output}" "${overwrite}" \

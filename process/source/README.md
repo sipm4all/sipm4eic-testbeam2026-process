@@ -349,6 +349,12 @@ from the same local accumulator, so a frame can
 contain multiple rings. The output uses the same `ring` tree as
 `ring-finder-ransac`, with `ring_e=0`.
 
+If the input already contains a `ring` tree, the executable refuses to run by
+default. Pass `--overwrite` to recompute the ring tree and replace the old
+one in the output. Using the same path for `--input` and `--output` is also
+supported with `--overwrite`; the updated file is written through a temporary
+file and replaces the original only after successful processing.
+
 ```bash
 process/bin/ring-finder-hough \
   --input triggered.timing.root \
