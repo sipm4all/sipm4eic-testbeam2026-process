@@ -73,9 +73,9 @@ fail()
 
 run_job()
 {
-    local logfile=$1
+    local _logfile=$1
     shift
-    ( "$@" ) > "${logfile}" 2>&1
+    "$@"
 }
 
 wait_for_jobs()

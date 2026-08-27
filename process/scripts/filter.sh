@@ -3,6 +3,7 @@ set -euo pipefail
 shopt -s nullglob
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 FILTER="${ROOT_DIR}/process/bin/filter"
+HADD="hadd"
 ipath="/data/2026-testbeam/process"; opath="/data/2026-testbeam/process"
 run=""; trigger_tag=""; filter_tag=""; filter_config=""; overwrite=0; jobs=8
 usage() { echo "usage: $0 --run RUN --trigger TAG --filter FILE TAG [--jobs N] [--overwrite]"; }
@@ -27,13 +28,28 @@ done
 input_dir="${ipath}/${run}/trigger"; output_dir="${opath}/${run}/trigger"; mkdir -p "${output_dir}"
 inputs=("${input_dir}"/rings.${trigger_tag}.spill_*.root)
 [ ${#inputs[@]} -gt 0 ] || fail "no ring spill files found: ${input_dir}/rings.${trigger_tag}.spill_*.root"
+outputs=("${output_dir}"/filtered."${filter_tag}"."${trigger_tag}".spill_*.root)
+merged_output="${output_dir}/filtered.${filter_tag}.${trigger_tag}.root"
+if [ "${overwrite}" -ne 1 ] && [ -f "${merged_output}" ]; then
+    echo " --- filtered output exists, skipping: ${merged_output}"
+    exit 0
+fi
 pids=()
 for input in "${inputs[@]}"; do
-    spill=${input##*.spill_}; spill=${spill%.root}; output="${output_dir}/filtered.${filter_tag}.spill_${spill}.root"
+    spill=${input##*.spill_}; spill=${spill%.root}; output="${output_dir}/filtered.${filter_tag}.${trigger_tag}.spill_${spill}.root"
     if [ "${overwrite}" -ne 1 ] && [ -f "${output}" ]; then echo " --- filter output exists, skipping: ${output}"; continue; fi
     while [ ${#pids[@]} -ge "${jobs}" ]; do wait "${pids[0]}"; pids=("${pids[@]:1}"); done
     ( time -p "${FILTER}" --input "${input}" --output "${output}" --config "${filter_config}" ) > "${output%.root}.log" 2>&1 &
     pids+=("$!")
 done
 for pid in "${pids[@]}"; do wait "${pid}"; done
+outputs=("${output_dir}"/filtered."${filter_tag}"."${trigger_tag}".spill_*.root)
+[ ${#outputs[@]} -eq ${#inputs[@]} ] || fail "filtered spill count ${#outputs[@]} differs from input count ${#inputs[@]}"
+if [ "${overwrite}" -eq 1 ] || [ ! -f "${merged_output}" ]; then
+    command -v "${HADD}" >/dev/null 2>&1 || fail "${HADD} was not found"
+    "${HADD}" -f "${merged_output}" "${outputs[@]}"
+else
+    echo " --- filtered output exists, skipping merge: ${merged_output}"
+fi
+rm -f "${outputs[@]}"
 echo " --- filter workflow completed"

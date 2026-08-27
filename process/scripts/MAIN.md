@@ -55,7 +55,9 @@ The expected files are:
     │   deleted after successful ring production
     ├── rings.<tag>.spill_<spill>.root
     │   kept: reconstructed ring information
-    └── filtered.<tag>.spill_<spill>.root
+    ├── filtered.<filter-tag>.<trigger-tag>.spill_<spill>.root
+    │   deleted after successful merge
+    └── filtered.<filter-tag>.<trigger-tag>.root
         kept: final selected analysis data
 ```
 
@@ -80,7 +82,8 @@ successfully. By default:
 | `trigger/triggered.<tag>.spill_<spill>.root` | Delete after timing estimation |
 | `trigger/timing.<tag>.spill_<spill>.root` | Delete after ring finding |
 | `trigger/rings.<tag>.spill_<spill>.root` | Keep |
-| `trigger/filtered.<tag>.spill_<spill>.root` | Keep |
+| `trigger/filtered.<filter-tag>.<trigger-tag>.spill_<spill>.root` | Delete after merge |
+| `trigger/filtered.<filter-tag>.<trigger-tag>.root` | Keep |
 
 An interrupted or failed stage must not delete its input. Existing outputs are
 also skipped unless `--overwrite` is explicitly requested, so a stopped run
