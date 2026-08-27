@@ -606,29 +606,14 @@ run(const options_t &opt)
   UShort_t ring_ninliers[maxrings] = {};
   auto ring_out = new TTree(opt.branch_name.c_str(),
                             "circle candidates, one entry per frame");
-  ring_out->Branch("nring", &nring, "nring/b");
-  ring_out->Branch("ring_x0", ring_x0, "ring_x0[nring]/F");
-  ring_out->Branch("ring_y0", ring_y0, "ring_y0[nring]/F");
-  ring_out->Branch("ring_r", ring_r, "ring_r[nring]/F");
-  ring_out->Branch("ring_e", ring_e, "ring_e[nring]/F");
-  ring_out->Branch("ring_phi", ring_phi, "ring_phi[nring]/F");
-  ring_out->Branch("ring_time", ring_time, "ring_time[nring]/F");
-  ring_out->Branch("ring_ninliers", ring_ninliers, "ring_ninliers[nring]/s");
-
-  // Diagnostic distributions use final minus RANSAC-seed parameters. They
-  // are histograms only; the persistent ring-tree schema is unchanged.
-  auto hRansacDeltaX0 = new TH1D(
-      "hRansacDeltaX0", "final x0 - RANSAC seed x0;#Delta x0;entries",
-      200, -10., 10.);
-  auto hRansacDeltaY0 = new TH1D(
-      "hRansacDeltaY0", "final y0 - RANSAC seed y0;#Delta y0;entries",
-      200, -10., 10.);
-  auto hRansacDeltaRadius = new TH1D(
-      "hRansacDeltaRadius",
-      "final radius - RANSAC seed radius;#Delta R;entries", 200, -10., 10.);
-  auto hRansacDeltaTime = new TH1D(
-      "hRansacDeltaTime",
-      "final ring time - RANSAC seed time;#Delta t;entries", 200, -5., 5.);
+  ring_out->Branch("nrings", &nring, "nrings/b");
+  ring_out->Branch("x0", ring_x0, "x0[nrings]/F");
+  ring_out->Branch("y0", ring_y0, "y0[nrings]/F");
+  ring_out->Branch("r", ring_r, "r[nrings]/F");
+  ring_out->Branch("e", ring_e, "e[nrings]/F");
+  ring_out->Branch("phi", ring_phi, "phi[nrings]/F");
+  ring_out->Branch("time", ring_time, "time[nrings]/F");
+  ring_out->Branch("ninliers", ring_ninliers, "ninliers[nrings]/s");
 
   // Allocate host-side maps for the initial scan and grow them if successive
   // boundary retries produce a larger per-seed grid.
@@ -867,12 +852,6 @@ run(const options_t &opt)
       ring_phi[nring] = 0.f;
       ring_time[nring] = candidate.time;
       ring_ninliers[nring] = static_cast<UShort_t>(candidate.inliers);
-      if (candidate.has_seed) {
-        hRansacDeltaX0->Fill(candidate.x - candidate.seed_x);
-        hRansacDeltaY0->Fill(candidate.y - candidate.seed_y);
-        hRansacDeltaRadius->Fill(candidate.radius - candidate.seed_radius);
-        hRansacDeltaTime->Fill(candidate.time - candidate.seed_time);
-      }
       ++nring;
       ++rings_found;
       accepted_inliers.push_back(inliers);

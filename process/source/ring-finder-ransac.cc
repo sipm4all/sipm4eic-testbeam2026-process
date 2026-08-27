@@ -406,14 +406,14 @@ bool ring_finder_ransac(const std::string &filename,
   float ring_time[maxrings];
   UShort_t ring_ninliers[maxrings];
   auto ring_out = new TTree("ring", "ring candidates, one entry per frame");
-  ring_out->Branch("nring", &nring, "nring/b");
-  ring_out->Branch("ring_x0", ring_x0, "ring_x0[nring]/F");
-  ring_out->Branch("ring_y0", ring_y0, "ring_y0[nring]/F");
-  ring_out->Branch("ring_r", ring_r, "ring_r[nring]/F");
-  ring_out->Branch("ring_e", ring_e, "ring_e[nring]/F");
-  ring_out->Branch("ring_phi", ring_phi, "ring_phi[nring]/F");
-  ring_out->Branch("ring_time", ring_time, "ring_time[nring]/F");
-  ring_out->Branch("ring_ninliers", ring_ninliers, "ring_ninliers[nring]/s");
+  ring_out->Branch("nrings", &nring, "nrings/b");
+  ring_out->Branch("x0", ring_x0, "x0[nrings]/F");
+  ring_out->Branch("y0", ring_y0, "y0[nrings]/F");
+  ring_out->Branch("r", ring_r, "r[nrings]/F");
+  ring_out->Branch("e", ring_e, "e[nrings]/F");
+  ring_out->Branch("phi", ring_phi, "phi[nrings]/F");
+  ring_out->Branch("time", ring_time, "time[nrings]/F");
+  ring_out->Branch("ninliers", ring_ninliers, "ninliers[nrings]/s");
 
   std::mt19937 generator(0x9e3779b9u);
   Long64_t frames = 0;

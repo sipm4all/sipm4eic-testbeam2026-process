@@ -412,14 +412,14 @@ trigger_reader_t::open(const std::string &filename,
   ring_tree_ = (TTree *)file_->Get(ring_name_.c_str());
   if (ring_tree_) {
     if (ring_tree_->GetEntries() != entries_ ||
-        !bind(ring_tree_, "nring", &nring_) ||
-        !bind(ring_tree_, "ring_x0", ring_x0_) ||
-        !bind(ring_tree_, "ring_y0", ring_y0_) ||
-        !bind(ring_tree_, "ring_r", ring_r_) ||
-        !bind(ring_tree_, "ring_e", ring_e_) ||
-        !bind(ring_tree_, "ring_phi", ring_phi_) ||
-        !bind(ring_tree_, "ring_time", ring_time_) ||
-        !bind(ring_tree_, "ring_ninliers", ring_ninliers_)) {
+        !bind(ring_tree_, "nrings", &nring_) ||
+        !bind(ring_tree_, "x0", ring_x0_) ||
+        !bind(ring_tree_, "y0", ring_y0_) ||
+        !bind(ring_tree_, "r", ring_r_) ||
+        !bind(ring_tree_, "e", ring_e_) ||
+        !bind(ring_tree_, "phi", ring_phi_) ||
+        !bind(ring_tree_, "time", ring_time_) ||
+        !bind(ring_tree_, "ninliers", ring_ninliers_)) {
       std::cerr << "ERROR: invalid ring tree" << std::endl;
       reset();
       return false;
@@ -514,7 +514,7 @@ trigger_reader_t::load_frame(Long64_t entry)
   rings_.clear();
   if (has_rings_) {
     if (nring_ > maxrings_) {
-      std::cerr << "ERROR: invalid nring=" << static_cast<int>(nring_) << std::endl;
+      std::cerr << "ERROR: invalid nrings=" << static_cast<int>(nring_) << std::endl;
       return false;
     }
     rings_.reserve(nring_);

@@ -305,14 +305,14 @@ one entry per frame. The RANSAC executable stores circles, so its ellipse
 fields are `ring_e=0` and `ring_phi=0`.
 
 ```text
-nring
-ring_x0[nring]
-ring_y0[nring]
-ring_r[nring]
-ring_e[nring]
-ring_phi[nring]
-ring_time[nring]
-ring_ninliers[nring]
+nrings
+x0[nrings]
+y0[nrings]
+r[nrings]
+e[nrings]
+phi[nrings]
+time[nrings]
+ninliers[nrings]
 ```
 
 The `ring` entry at index `i` corresponds to the `frames`, `trigger`,

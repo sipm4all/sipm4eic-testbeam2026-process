@@ -168,18 +168,18 @@ options controlling the ellipse dimensions are:
 ```
 
 Eccentricity must be in `[0,1)`. Orientations are equivalent modulo `pi`
-because an ellipse has no directed major axis. The default `ring_e=0` model is
+because an ellipse has no directed major axis. The default `e=0` model is
 exactly a circle; `ring_phi` is then physically irrelevant.
 
 ## Ellipse Model
 
-`ring_r` is the semi-major axis. The semi-minor axis is calculated as:
+`r` is the semi-major axis. The semi-minor axis is calculated as:
 
 ```text
-b = ring_r * sqrt(1 - ring_e^2)
+b = r * sqrt(1 - e^2)
 ```
 
-The ellipse is rotated by `ring_phi` radians. For a hit, the implementation
+The ellipse is rotated by `phi` radians. For a hit, the implementation
 calculates the radial residual between the hit's distance from `(x0,y0)` and
 the ellipse radius at that direction. The Hough model therefore uses the same
 ellipse residual in the CPU and CUDA paths.
@@ -189,7 +189,7 @@ event hits. Conceptually, each hit contributes:
 
 ```text
 spatial_weight = Gaussian(ellipse_radial_residual / spatial_resolution)
-time_weight    = Gaussian((hit_time - ring_time) / time_resolution)
+time_weight    = Gaussian((hit_time - time) / time_resolution)
 vote           = spatial_weight * time_weight
 ```
 
@@ -259,11 +259,11 @@ inlier only if both conditions hold:
 
 ```text
 abs(ellipse_radial_residual) <= 4 * spatial_resolution
-abs(hit_time - ring_time)   <= 4 * time_resolution
+abs(hit_time - time)        <= 4 * time_resolution
 ```
 
 The candidate is accepted only if it has at least `--min-inliers` inliers. The
-default is 5. The stored `ring_ninliers` is the number of validated inliers.
+default is 5. The stored `ninliers` is the number of validated inliers.
 
 The candidate list is processed in descending Hough score. Hits are not
 removed after accepting a ring, so multiple rings may share hits. A new ring
@@ -286,29 +286,29 @@ frame. The default tree name is `ring`; use `--branch-name` for a different
 name. The branch layout is:
 
 ```text
-nring                         UChar_t
-ring_x0[nring]                float
-ring_y0[nring]                float
-ring_r[nring]                 float
-ring_e[nring]                 float
-ring_phi[nring]               float
-ring_time[nring]              float
-ring_ninliers[nring]          unsigned short
+nrings                        UChar_t
+x0[nrings]                    float
+y0[nrings]                    float
+r[nrings]                     float
+e[nrings]                     float
+phi[nrings]                   float
+time[nrings]                  float
+ninliers[nrings]              unsigned short
 ```
 
 The entry index is the frame index shared by the `frames`, `trigger`, `timing`,
 and `cherenkov` trees. For ring `i`:
 
 ```text
-(ring_x0[i], ring_y0[i])       ellipse center in mm
-ring_r[i]                      semi-major axis in mm
-ring_e[i]                      eccentricity
-ring_phi[i]                    orientation in radians
-ring_time[i]                   ring time in native units
-ring_ninliers[i]               validated inlier count
+(x0[i], y0[i])                 ellipse center in mm
+r[i]                           semi-major axis in mm
+e[i]                           eccentricity
+phi[i]                         orientation in radians
+time[i]                        ring time in native units
+ninliers[i]                    validated inlier count
 ```
 
-Multiple rings may be stored in one frame. `nring=0` is a valid result when no
+Multiple rings may be stored in one frame. `nrings=0` is a valid result when no
 candidate passes validation.
 
 ## Useful Commands

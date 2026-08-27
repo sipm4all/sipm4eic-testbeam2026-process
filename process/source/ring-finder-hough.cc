@@ -1167,36 +1167,14 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
   UShort_t ring_ninliers[maxrings];
   auto ring_out = new TTree(branch_name.c_str(),
                             "ring candidates, one entry per frame");
-  ring_out->Branch("nring", &nring, "nring/b");
-  ring_out->Branch("ring_x0", ring_x0, "ring_x0[nring]/F");
-  ring_out->Branch("ring_y0", ring_y0, "ring_y0[nring]/F");
-  ring_out->Branch("ring_r", ring_r, "ring_r[nring]/F");
-  ring_out->Branch("ring_e", ring_e, "ring_e[nring]/F");
-  ring_out->Branch("ring_phi", ring_phi, "ring_phi[nring]/F");
-  ring_out->Branch("ring_time", ring_time, "ring_time[nring]/F");
-  ring_out->Branch("ring_ninliers", ring_ninliers, "ring_ninliers[nring]/s");
-
-  // Diagnostic distributions use final minus RANSAC-seed parameters. They
-  // are histograms only; the persistent ring-tree schema is unchanged.
-  auto hRansacDeltaX0 = new TH1D(
-      "hRansacDeltaX0", "final x0 - RANSAC seed x0;#Delta x0;entries",
-      200, -10., 10.);
-  auto hRansacDeltaY0 = new TH1D(
-      "hRansacDeltaY0", "final y0 - RANSAC seed y0;#Delta y0;entries",
-      200, -10., 10.);
-  auto hRansacDeltaRadius = new TH1D(
-      "hRansacDeltaRadius",
-      "final radius - RANSAC seed radius;#Delta R;entries", 200, -10., 10.);
-  auto hRansacDeltaTime = new TH1D(
-      "hRansacDeltaTime",
-      "final ring time - RANSAC seed time;#Delta t;entries", 200, -5., 5.);
-  auto hRansacDeltaEccentricity = new TH1D(
-      "hRansacDeltaEccentricity",
-      "final eccentricity - RANSAC seed eccentricity;#Delta e;entries",
-      200, -1., 1.);
-  auto hRansacDeltaPhi = new TH1D(
-      "hRansacDeltaPhi", "final phi - RANSAC seed phi;#Delta #phi;entries",
-      200, -pi, pi);
+  ring_out->Branch("nrings", &nring, "nrings/b");
+  ring_out->Branch("x0", ring_x0, "x0[nrings]/F");
+  ring_out->Branch("y0", ring_y0, "y0[nrings]/F");
+  ring_out->Branch("r", ring_r, "r[nrings]/F");
+  ring_out->Branch("e", ring_e, "e[nrings]/F");
+  ring_out->Branch("phi", ring_phi, "phi[nrings]/F");
+  ring_out->Branch("time", ring_time, "time[nrings]/F");
+  ring_out->Branch("ninliers", ring_ninliers, "ninliers[nrings]/s");
 
   Long64_t frames = 0;
   Long64_t accepted = 0;
@@ -1492,15 +1470,6 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
       ring_phi[nring] = static_cast<float>(ring.phi);
       ring_time[nring] = static_cast<float>(ring.ring_time);
       ring_ninliers[nring] = static_cast<UShort_t>(ring.inliers);
-      if (ring.has_seed) {
-        hRansacDeltaX0->Fill(ring.x - ring.seed_x);
-        hRansacDeltaY0->Fill(ring.y - ring.seed_y);
-        hRansacDeltaRadius->Fill(ring.radius - ring.seed_radius);
-        hRansacDeltaTime->Fill(ring.ring_time - ring.seed_ring_time);
-        hRansacDeltaEccentricity->Fill(
-            ring.eccentricity - ring.seed_eccentricity);
-        hRansacDeltaPhi->Fill(ring.phi - ring.seed_phi);
-      }
       ++nring;
       ++accepted;
       accepted_inliers.push_back(std::move(inlier_indices));
