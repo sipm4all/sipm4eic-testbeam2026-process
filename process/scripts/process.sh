@@ -62,14 +62,9 @@ fail()
 
 run_job()
 {
-    local logfile=$1
+    local _logfile=$1
     shift
-
-    if [ "${WRITE_LOGS}" -eq 1 ]; then
-        ( "$@" ) > "${logfile}" 2>&1
-    else
-        ( "$@" )
-    fi
+    ( "$@" )
 }
 
 

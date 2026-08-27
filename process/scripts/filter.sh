@@ -39,7 +39,7 @@ for input in "${inputs[@]}"; do
     spill=${input##*.spill_}; spill=${spill%.root}; output="${output_dir}/filtered.${filter_tag}.${trigger_tag}.spill_${spill}.root"
     if [ "${overwrite}" -ne 1 ] && [ -f "${output}" ]; then echo " --- filter output exists, skipping: ${output}"; continue; fi
     while [ ${#pids[@]} -ge "${jobs}" ]; do wait "${pids[0]}"; pids=("${pids[@]:1}"); done
-    ( time -p "${FILTER}" --input "${input}" --output "${output}" --config "${filter_config}" ) > "${output%.root}.log" 2>&1 &
+    ( time -p "${FILTER}" --input "${input}" --output "${output}" --config "${filter_config}" ) &
     pids+=("$!")
 done
 for pid in "${pids[@]}"; do wait "${pid}"; done
