@@ -16,7 +16,7 @@ OVERWRITE=0
 STAGES=()
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-SCRIPTS="${ROOT_DIR}/process/scripts"
+SCRIPT_DIR="${ROOT_DIR}/process/scripts"
 DATA_ROOT="/data/2026-testbeam/process"
 
 usage()
@@ -74,31 +74,31 @@ run_one()
         done
     fi
 
-    [ "${do_decoder}" -eq 1 ] && "${SCRIPTS}/decoder.sh" "${common[@]}" "${overwrite[@]}"
-    [ "${do_checker}" -eq 1 ] && "${SCRIPTS}/checker.sh" "${common[@]}"
+    [ "${do_decoder}" -eq 1 ] && "${SCRIPT_DIR}/decoder.sh" "${common[@]}" "${overwrite[@]}"
+    [ "${do_checker}" -eq 1 ] && "${SCRIPT_DIR}/checker.sh" "${common[@]}"
 
-    [ "${do_process}" -eq 1 ] && "${SCRIPTS}/process.sh" "${common[@]}" \
+    [ "${do_process}" -eq 1 ] && "${SCRIPT_DIR}/process.sh" "${common[@]}" \
         --calibration "${CALIBRATION_CONFIG}" \
         --clock "${CLOCK_CORRECTION_CONFING}" \
         "${overwrite[@]}"
 
-    [ "${do_trigger}" -eq 1 ] && "${SCRIPTS}/trigger.sh" "${common[@]}" \
+    [ "${do_trigger}" -eq 1 ] && "${SCRIPT_DIR}/trigger.sh" "${common[@]}" \
         --trigger "${TRIGGER_CONFIG}" "${TRIGGER_TAG}" \
         --window "${WINDOW}" "${overwrite[@]}"
 
-    [ "${do_timing}" -eq 1 ] && "${SCRIPTS}/timing.sh" "${common[@]}" \
+    [ "${do_timing}" -eq 1 ] && "${SCRIPT_DIR}/timing.sh" "${common[@]}" \
         --trigger "${TRIGGER_TAG}" --parallel-spills --jobs 8 "${overwrite[@]}"
 
     [ "${do_timing}" -eq 1 ] && rm -f "${DATA_ROOT}/${run}/trigger/triggered.${TRIGGER_TAG}.spill_"*.root
 
     local gpu=()
     [ "${USE_GPU}" -eq 1 ] && gpu+=(--gpu)
-    [ "${do_ring}" -eq 1 ] && "${SCRIPTS}/ring-finder.sh" "${common[@]}" \
+    [ "${do_ring}" -eq 1 ] && "${SCRIPT_DIR}/ring-finder.sh" "${common[@]}" \
         --trigger "${TRIGGER_TAG}" --parallel-spills --jobs 8 "${gpu[@]}" "${overwrite[@]}"
 
     [ "${do_ring}" -eq 1 ] && rm -f "${DATA_ROOT}/${run}/trigger/timing.${TRIGGER_TAG}.spill_"*.root
 
-    [ "${do_filter}" -eq 1 ] && "${SCRIPTS}/filter.sh" "${common[@]}" \
+    [ "${do_filter}" -eq 1 ] && "${SCRIPT_DIR}/filter.sh" "${common[@]}" \
         --trigger "${TRIGGER_TAG}" \
         --filter "${FILTER_CONFIG}" "${FILTER_TAG}" "${gpu[@]}" "${overwrite[@]}"
 }
