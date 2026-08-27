@@ -101,19 +101,29 @@ and the local Hough time half-width are controlled by
 ```text
 --ransac-iterations       128
 --ransac-tolerance           5 mm
---ransac-center-window      10 mm
---ransac-radius-window      10 mm
+--ransac-center-window       5 mm
+--ransac-radius-window       5 mm
 --ransac-time-window         5 native time units
+--hough-time-window          2 native time units
 ```
 
 The center and radius windows define the local Hough region around each seed:
 
 ```text
-x0     = seed_x0     +/- 10 mm
-y0     = seed_y0     +/- 10 mm
-radius = seed_radius +/- 10 mm
-time   = seed_time   +/- 5 native time units
+x0     = seed_x0     +/- 5 mm
+y0     = seed_y0     +/- 5 mm
+radius = seed_radius +/- 5 mm
+time   = seed_time   +/- 2 native time units
 ```
+
+The local scan is adaptive. If its maximum is on an `x0`, `y0`, radius, or
+time boundary, only that parameter's half-width is doubled and the same seed
+is scanned again. The boundary test is repeated after every retry, so a
+second or later retry can expand a different parameter as well. This continues
+until the maximum is no longer on an expandable boundary. Expansion stops for
+a parameter when the configured global range cannot be enlarged further.
+Retries are per seed and per frame; they do not alter the search ranges of
+other seeds.
 
 The RANSAC tolerance is independent of the Hough spatial resolution. The
 RANSAC pass uses circles because it is a fast way to localize a possible ring;
@@ -130,18 +140,18 @@ For every RANSAC seed, the Hough search scans:
 The default local grid is:
 
 ```text
-x0:           21 bins, seed_x0 +/- 10 mm, step 1 mm
-y0:           21 bins, seed_y0 +/- 10 mm, step 1 mm
-radius:       21 bins, seed_radius +/- 10 mm, step 1 mm
-time:         11 bins, seed_time +/- 5 native units, step 1 native unit
-eccentricity: 10 bins, 0..0.9, step 0.1
-phi:          20 bins, 0..pi, step pi/19
+x0:           11 bins, seed_x0 +/- 5 mm, step 1 mm
+y0:           11 bins, seed_y0 +/- 5 mm, step 1 mm
+radius:       11 bins, seed_radius +/- 5 mm, step 1 mm
+time:          5 bins, seed_time +/- 2 native units, step 1 native unit
+eccentricity: 1 bin, e=0 (circle)
+phi:          1 bin, irrelevant for a circle
 ```
 
 Thus the normal per-seed scan contains approximately:
 
 ```text
-21 x 21 x 21 x 11 x 10 x 20 = 20,404,200 Hough cells
+11 x 11 x 11 x 5 = 6,655 Hough cells
 ```
 
 The first four ranges are localized around the RANSAC seed. The eccentricity
@@ -204,15 +214,22 @@ single score, so the vote calculation does not require accumulator atomics.
 The coordinate maps and accumulator are allocated once and reused when
 successive RANSAC seeds have the same grid dimensions. Different seed origins
 update the coordinate maps without requiring a new allocation. The complete
-accumulator is reduced on the device: the GPU selects the maximum, suppresses
-its neighborhood, and repeats for the requested candidate peaks. Only the
-compact selected peak is copied back to the host. The common C++ code then
-performs candidate merging, interpolation, and validation.
+accumulator is reduced with one GPU block-reduction kernel. The GPU writes one
+compact maximum key per block; only this small block-maxima array is copied to
+the host, where the global maximum is selected. If more than one candidate is
+requested, the selected neighborhood is suppressed on the GPU and the block
+reduction is repeated. The common C++ code then performs candidate merging,
+interpolation, and validation.
 
 The CUDA memory requirement is proportional to the number of local Hough cells.
 Reducing the RANSAC windows or increasing grid steps reduces both memory use and
 runtime. A full global scan with `--ransac-iterations 0` can be much larger
 than the normal localized scan.
+When `--min-e 0 --max-e 0` is selected, the implementation detects that an
+ellipse is not required. It collapses the eccentricity and angle dimensions
+to one cell and dispatches a circle-specific CUDA scoring kernel. That kernel
+contains no ellipse trigonometry; the general ellipse kernel is used only
+when a nonzero eccentricity range is requested.
 
 ## Peak Extraction and Refinement
 
@@ -220,7 +237,10 @@ Hough maxima are selected with local suppression in all six scanned dimensions.
 This prevents a broad maximum from producing many neighboring copies of the
 same candidate. Maxima from separate RANSAC seed scans are then combined.
 
-The existing sub-grid interpolation refines the four continuous coordinates:
+The existing sub-grid interpolation is a CPU stage. CUDA returns the discrete
+maximum and the host evaluates the 81 neighboring `(x0,y0,R,t)` values with
+the C++ `hough_score()` implementation. It refines the four continuous
+coordinates:
 
 ```text
 x0, y0, radius, ring_time
@@ -229,6 +249,8 @@ x0, y0, radius, ring_time
 It fits a local quadratic surface to neighboring accumulator values. The
 eccentricity and `phi` values remain the corresponding discrete Hough maximum.
 If the local quadratic is not well formed, the discrete maximum is retained.
+The executable reports the Hough scan and CPU-interpolation times separately;
+the interpolation is never part of the CUDA kernel.
 
 ## Candidate Validation
 
@@ -241,7 +263,7 @@ abs(hit_time - ring_time)   <= 4 * time_resolution
 ```
 
 The candidate is accepted only if it has at least `--min-inliers` inliers. The
-default is 8. The stored `ring_ninliers` is the number of validated inliers.
+default is 5. The stored `ring_ninliers` is the number of validated inliers.
 
 The candidate list is processed in descending Hough score. Hits are not
 removed after accepting a ring, so multiple rings may share hits. A new ring

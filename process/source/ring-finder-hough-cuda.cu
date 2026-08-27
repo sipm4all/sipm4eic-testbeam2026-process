@@ -10,6 +10,7 @@
 #include <cstring>
 #include <limits>
 #include <sstream>
+#include <vector>
 
 namespace {
 
@@ -30,10 +31,21 @@ struct device_state_t {
   float *time = nullptr;
   float *accumulator = nullptr;
   unsigned long long *reduction_a = nullptr;
-  unsigned long long *reduction_b = nullptr;
   int hit_capacity = 0;
   std::size_t accumulator_entries = 0;
   std::size_t reduction_capacity = 0;
+};
+
+struct ransac_device_state_t {
+  float *x = nullptr;
+  float *y = nullptr;
+  float *time = nullptr;
+  ring_hough_cuda::ransac_model_t *models = nullptr;
+  ring_hough_cuda::ransac_stats_t *stats = nullptr;
+  std::uint32_t *masks = nullptr;
+  int hit_capacity = 0;
+  int model_capacity = 0;
+  std::size_t mask_capacity = 0;
 };
 
 std::string
@@ -71,6 +83,14 @@ coordinate_map_kernel(ring_hough_cuda::grid_t grid,
   radius_map[index] = static_cast<float>(grid.min_radius +
                                          ir * grid.radius_step);
   time_map[index] = static_cast<float>(grid.min_t + it * grid.t_step);
+}
+
+__device__ float
+circle_radial_residual(float x0, float y0, float radius, float x, float y)
+{
+  const float dx = x - x0;
+  const float dy = y - y0;
+  return hypotf(dx, dy) - radius;
 }
 
 __device__ float
@@ -142,6 +162,206 @@ score_kernel(const float *x0_map, const float *y0_map,
   accumulator[index] = score;
 }
 
+__global__ void
+score_circle_kernel(const float *x0_map, const float *y0_map,
+                    const float *radius_map, const float *time_map,
+                    const float *x, const float *y, const float *time,
+                    int nhits, ring_hough_cuda::grid_t grid,
+                    float *accumulator)
+{
+  const std::size_t index = static_cast<std::size_t>(blockIdx.x) *
+                            blockDim.x + threadIdx.x;
+  const std::size_t entries = static_cast<std::size_t>(grid.nx) * grid.ny *
+                              grid.nr * grid.nt;
+  if (index >= entries)
+    return;
+
+  const float x0 = x0_map[index];
+  const float y0 = y0_map[index];
+  const float radius = radius_map[index];
+  const float ring_time = time_map[index];
+  const float spatial_sigma = static_cast<float>(grid.spatial_resolution);
+  const float time_sigma = static_cast<float>(grid.time_resolution);
+
+  float score = 0.f;
+  for (int hit = 0; hit < nhits; ++hit) {
+    const float dr = circle_radial_residual(
+        x0, y0, radius, x[hit], y[hit]);
+    const float dt = time[hit] - ring_time;
+    if (fabsf(dr) > gaussian_cut * spatial_sigma ||
+        fabsf(dt) > gaussian_cut * time_sigma)
+      continue;
+    const float spatial_pull = dr / spatial_sigma;
+    const float time_pull = dt / time_sigma;
+    score += expf(-0.5f * spatial_pull * spatial_pull) /
+             (2.50662827463f * spatial_sigma) *
+             expf(-0.5f * time_pull * time_pull) /
+             (2.50662827463f * time_sigma);
+  }
+  accumulator[index] = score;
+}
+
+__device__ bool
+fit_circle_from_stats(const ring_hough_cuda::ransac_stats_t &stats,
+                      ring_hough_cuda::ransac_model_t &model)
+{
+  double normal[3][3];
+  double rhs[3];
+  for (int row = 0; row < 3; ++row) {
+    rhs[row] = stats.rhs[row];
+    for (int column = 0; column < 3; ++column)
+      normal[row][column] = stats.normal[row][column];
+  }
+
+  for (int column = 0; column < 3; ++column) {
+    int pivot = column;
+    for (int row = column + 1; row < 3; ++row) {
+      if (fabs(normal[row][column]) > fabs(normal[pivot][column]))
+        pivot = row;
+    }
+    if (fabs(normal[pivot][column]) < 1.e-12)
+      return false;
+    if (pivot != column) {
+      for (int j = column; j < 3; ++j) {
+        const double value = normal[column][j];
+        normal[column][j] = normal[pivot][j];
+        normal[pivot][j] = value;
+      }
+      const double value = rhs[column];
+      rhs[column] = rhs[pivot];
+      rhs[pivot] = value;
+    }
+    for (int row = column + 1; row < 3; ++row) {
+      const double factor = normal[row][column] / normal[column][column];
+      for (int j = column; j < 3; ++j)
+        normal[row][j] -= factor * normal[column][j];
+      rhs[row] -= factor * rhs[column];
+    }
+  }
+
+  double solution[3] = {};
+  for (int row = 2; row >= 0; --row) {
+    double value = rhs[row];
+    for (int column = row + 1; column < 3; ++column)
+      value -= normal[row][column] * solution[column];
+    solution[row] = value / normal[row][row];
+  }
+  model.x = static_cast<float>(0.5 * solution[0]);
+  model.y = static_cast<float>(0.5 * solution[1]);
+  const double radius_squared = solution[2] +
+                                model.x * model.x + model.y * model.y;
+  if (!(radius_squared > 0.) || !isfinite(radius_squared))
+    return false;
+  model.radius = static_cast<float>(sqrt(radius_squared));
+  return isfinite(model.x) && isfinite(model.y) && isfinite(model.radius);
+}
+
+__global__ void
+refine_ransac_kernel(
+    const float *x, const float *y, const float *time, int nhits,
+    ring_hough_cuda::ransac_model_t *models, int nmodels,
+    double spatial_cut, double time_cut, bool write_masks, int mask_words,
+    ring_hough_cuda::ransac_stats_t *stats, std::uint32_t *masks)
+{
+  constexpr int nterms = 14;
+  const int model_index = static_cast<int>(blockIdx.x);
+  if (model_index >= nmodels)
+    return;
+
+  __shared__ int partial_count[threads_per_block];
+  __shared__ double partial[nterms][threads_per_block];
+  __shared__ ring_hough_cuda::ransac_model_t model;
+  __shared__ ring_hough_cuda::ransac_stats_t previous;
+  const int thread = threadIdx.x;
+  if (thread == 0) {
+    model = models[model_index];
+    previous = {};
+  }
+  __syncthreads();
+
+  for (int phase = 0; phase < 5; ++phase) {
+    if (thread == 0 && phase >= 2 && model.valid &&
+        previous.inliers >= 3)
+      model.ring_time = static_cast<float>(
+          previous.sum_time / previous.inliers);
+    __syncthreads();
+
+    partial_count[thread] = 0;
+    for (int term = 0; term < nterms; ++term)
+      partial[term][thread] = 0.;
+    __syncthreads();
+
+    if (model.valid) {
+      for (int hit = thread; hit < nhits; hit += blockDim.x) {
+        const float dr = hypotf(x[hit] - model.x, y[hit] - model.y) -
+                         model.radius;
+        const float dt = time[hit] - model.ring_time;
+        if (fabsf(dr) > spatial_cut || fabsf(dt) > time_cut)
+          continue;
+
+        const double hit_x = x[hit];
+        const double hit_y = y[hit];
+        const double value = hit_x * hit_x + hit_y * hit_y;
+        ++partial_count[thread];
+        partial[0][thread] += time[hit];
+        partial[1][thread] += fabs(static_cast<double>(dr));
+        partial[2][thread] += hit_x * hit_x;
+        partial[3][thread] += hit_x * hit_y;
+        partial[4][thread] += hit_x;
+        partial[5][thread] += hit_x * hit_y;
+        partial[6][thread] += hit_y * hit_y;
+        partial[7][thread] += hit_y;
+        partial[8][thread] += hit_x;
+        partial[9][thread] += hit_y;
+        partial[10][thread] += 1.;
+        partial[11][thread] += hit_x * value;
+        partial[12][thread] += hit_y * value;
+        partial[13][thread] += value;
+        if (write_masks && phase == 4)
+          atomicOr(&masks[static_cast<std::size_t>(model_index) *
+                          mask_words + hit / 32],
+                   1u << (hit % 32));
+      }
+    }
+    __syncthreads();
+
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+      if (thread < stride) {
+        partial_count[thread] += partial_count[thread + stride];
+        for (int term = 0; term < nterms; ++term)
+          partial[term][thread] += partial[term][thread + stride];
+      }
+      __syncthreads();
+    }
+    if (thread == 0) {
+      ring_hough_cuda::ransac_stats_t current{};
+      current.inliers = partial_count[0];
+      current.sum_time = partial[0][0];
+      current.residual_sum = partial[1][0];
+      for (int row = 0; row < 3; ++row) {
+        for (int column = 0; column < 3; ++column)
+          current.normal[row][column] =
+              partial[2 + row * 3 + column][0];
+        current.rhs[row] = partial[11 + row][0];
+      }
+      previous = current;
+      if (current.inliers < 3)
+        model.valid = 0;
+      else if (phase == 0) {
+        model.ring_time = static_cast<float>(
+            current.sum_time / current.inliers);
+      } else if (phase < 4 && !fit_circle_from_stats(current, model)) {
+        model.valid = 0;
+      }
+      if (phase == 4)
+        stats[model_index] = current;
+    }
+    __syncthreads();
+  }
+  if (thread == 0)
+    models[model_index] = model;
+}
+
 __device__ unsigned long long
 score_key(float score, std::size_t index)
 {
@@ -157,8 +377,8 @@ score_key(float score, std::size_t index)
 }
 
 __global__ void
-reduce_scores_kernel(const float *scores, std::size_t entries,
-                     unsigned long long *reduced)
+reduce_block_max_kernel(const float *scores, std::size_t entries,
+                        unsigned long long *block_maxima)
 {
   __shared__ unsigned long long keys[threads_per_block];
   const int thread = threadIdx.x;
@@ -172,26 +392,7 @@ reduce_scores_kernel(const float *scores, std::size_t entries,
     __syncthreads();
   }
   if (thread == 0)
-    reduced[blockIdx.x] = keys[0];
-}
-
-__global__ void
-reduce_keys_kernel(const unsigned long long *keys, std::size_t entries,
-                   unsigned long long *reduced)
-{
-  __shared__ unsigned long long block_keys[threads_per_block];
-  const int thread = threadIdx.x;
-  const std::size_t index = static_cast<std::size_t>(blockIdx.x) *
-                            blockDim.x + thread;
-  block_keys[thread] = index < entries ? keys[index] : 0;
-  __syncthreads();
-  for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
-    if (thread < stride)
-      block_keys[thread] = max(block_keys[thread], block_keys[thread + stride]);
-    __syncthreads();
-  }
-  if (thread == 0)
-    reduced[blockIdx.x] = block_keys[0];
+    block_maxima[blockIdx.x] = keys[0];
 }
 
 __global__ void
@@ -275,12 +476,30 @@ release(device_state_t &state)
   state.time = nullptr;
   state.accumulator = nullptr;
   cudaFree(state.reduction_a);
-  cudaFree(state.reduction_b);
   state.reduction_a = nullptr;
-  state.reduction_b = nullptr;
   state.hit_capacity = 0;
   state.accumulator_entries = 0;
   state.reduction_capacity = 0;
+}
+
+void
+release(ransac_device_state_t &state)
+{
+  cudaFree(state.x);
+  cudaFree(state.y);
+  cudaFree(state.time);
+  cudaFree(state.models);
+  cudaFree(state.stats);
+  cudaFree(state.masks);
+  state.x = nullptr;
+  state.y = nullptr;
+  state.time = nullptr;
+  state.models = nullptr;
+  state.stats = nullptr;
+  state.masks = nullptr;
+  state.hit_capacity = 0;
+  state.model_capacity = 0;
+  state.mask_capacity = 0;
 }
 
 bool
@@ -297,7 +516,8 @@ same_grid(const ring_hough_cuda::grid_t &first,
          first.time_resolution == second.time_resolution &&
          first.nx == second.nx && first.ny == second.ny &&
          first.nr == second.nr && first.nt == second.nt &&
-         first.ne == second.ne && first.nphi == second.nphi;
+         first.ne == second.ne && first.nphi == second.nphi &&
+         first.circle_mode == second.circle_mode;
 }
 
 }
@@ -398,13 +618,6 @@ engine_t::initialize(const grid_t &grid, std::string &error)
     release(*state); delete state;
     return false;
   }
-  status = cudaMalloc(&state->reduction_b,
-                     reduction_entries * sizeof(unsigned long long));
-  if (status != cudaSuccess) {
-    error = cuda_error("cudaMalloc Hough reduction buffer", status);
-    release(*state); delete state;
-    return false;
-  }
   state->reduction_capacity = reduction_entries;
   const int map_blocks = static_cast<int>(
       (entries + threads_per_block - 1) / threads_per_block);
@@ -471,10 +684,17 @@ engine_t::find(const float *x, const float *y, const float *time,
   const int blocks = static_cast<int>(
       (state->accumulator_entries + threads_per_block - 1) /
       threads_per_block);
-  score_kernel<<<blocks, threads_per_block>>>(
-      state->x0_map, state->y0_map, state->radius_map, state->time_map,
-      state->x, state->y, state->time, nhits, state->grid,
-      state->accumulator);
+  if (state->grid.circle_mode) {
+    score_circle_kernel<<<blocks, threads_per_block>>>(
+        state->x0_map, state->y0_map, state->radius_map, state->time_map,
+        state->x, state->y, state->time, nhits, state->grid,
+        state->accumulator);
+  } else {
+    score_kernel<<<blocks, threads_per_block>>>(
+        state->x0_map, state->y0_map, state->radius_map, state->time_map,
+        state->x, state->y, state->time, nhits, state->grid,
+        state->accumulator);
+  }
   status = cudaGetLastError();
   if (status == cudaSuccess)
     status = cudaDeviceSynchronize();
@@ -483,11 +703,11 @@ engine_t::find(const float *x, const float *y, const float *time,
     return false;
   }
 
-  std::size_t reduction_entries =
+  const std::size_t reduction_entries =
       (state->accumulator_entries + threads_per_block - 1) /
       threads_per_block;
-  int reduction_blocks = static_cast<int>(reduction_entries);
-  reduce_scores_kernel<<<reduction_blocks, threads_per_block>>>(
+  const int reduction_blocks = static_cast<int>(reduction_entries);
+  reduce_block_max_kernel<<<reduction_blocks, threads_per_block>>>(
       state->accumulator, state->accumulator_entries, state->reduction_a);
   status = cudaGetLastError();
   if (status == cudaSuccess)
@@ -497,33 +717,23 @@ engine_t::find(const float *x, const float *y, const float *time,
     return false;
   }
 
-  unsigned long long *current = state->reduction_a;
-  unsigned long long *next = state->reduction_b;
-  for (std::size_t count = reduction_entries; count > 1;) {
-    const std::size_t next_count = (count + threads_per_block - 1) /
-                                   threads_per_block;
-    reduce_keys_kernel<<<static_cast<int>(next_count), threads_per_block>>>(
-        current, count, next);
-    status = cudaGetLastError();
-    if (status == cudaSuccess)
-      status = cudaDeviceSynchronize();
-    if (status != cudaSuccess) {
-      error = cuda_error("Hough maximum reduction", status);
-      return false;
-    }
-    std::swap(current, next);
-    count = next_count;
-  }
+  // One compact key is produced per GPU block. For the usual one-candidate
+  // path, only this small array is copied back and the final comparison is
+  // performed on the host, as in the Roberto implementation.
+  std::vector<unsigned long long> block_maxima(reduction_entries);
 
   for (int candidate_number = 0;
        candidate_number < max_candidates; ++candidate_number) {
-    unsigned long long best_key = 0;
-    status = cudaMemcpy(&best_key, current, sizeof(best_key),
+    status = cudaMemcpy(block_maxima.data(), state->reduction_a,
+                        reduction_entries * sizeof(unsigned long long),
                         cudaMemcpyDeviceToHost);
     if (status != cudaSuccess) {
-      error = cuda_error("cudaMemcpy Hough maximum", status);
+      error = cuda_error("cudaMemcpy Hough block maxima", status);
       return false;
     }
+    const auto best = std::max_element(block_maxima.begin(),
+                                       block_maxima.end());
+    const unsigned long long best_key = *best;
     if (best_key == 0)
       break;
     const std::uint32_t score_bits =
@@ -555,42 +765,183 @@ engine_t::find(const float *x, const float *y, const float *time,
     candidate.score = best_score;
     candidates[candidate_count++] = candidate;
 
-    suppress_neighborhood_kernel<<<1, 1>>>(state->accumulator, state->grid,
-                                           best_index);
-    status = cudaGetLastError();
-    if (status == cudaSuccess)
-      status = cudaDeviceSynchronize();
-    if (status != cudaSuccess) {
-      error = cuda_error("Hough peak suppression", status);
-      return false;
-    }
-
-    reduce_scores_kernel<<<reduction_blocks, threads_per_block>>>(
-        state->accumulator, state->accumulator_entries, state->reduction_a);
-    status = cudaGetLastError();
-    if (status == cudaSuccess)
-      status = cudaDeviceSynchronize();
-    if (status != cudaSuccess) {
-      error = cuda_error("Hough maximum reduction", status);
-      return false;
-    }
-    current = state->reduction_a;
-    next = state->reduction_b;
-    for (std::size_t count = reduction_entries; count > 1;) {
-      const std::size_t next_count = (count + threads_per_block - 1) /
-                                     threads_per_block;
-      reduce_keys_kernel<<<static_cast<int>(next_count), threads_per_block>>>(
-          current, count, next);
+    if (candidate_number + 1 < max_candidates) {
+      suppress_neighborhood_kernel<<<1, 1>>>(state->accumulator, state->grid,
+                                             best_index);
       status = cudaGetLastError();
       if (status == cudaSuccess)
         status = cudaDeviceSynchronize();
       if (status != cudaSuccess) {
-        error = cuda_error("Hough maximum reduction", status);
+        error = cuda_error("Hough peak suppression", status);
         return false;
       }
-      std::swap(current, next);
-      count = next_count;
+
+      reduce_block_max_kernel<<<reduction_blocks, threads_per_block>>>(
+          state->accumulator, state->accumulator_entries,
+          state->reduction_a);
+      status = cudaGetLastError();
+      if (status == cudaSuccess)
+        status = cudaDeviceSynchronize();
+      if (status != cudaSuccess) {
+        error = cuda_error("Hough block maximum reduction", status);
+        return false;
+      }
     }
+  }
+  return true;
+}
+
+ransac_engine_t::ransac_engine_t() = default;
+
+ransac_engine_t::~ransac_engine_t()
+{
+  auto *state = static_cast<ransac_device_state_t *>(impl_);
+  if (state) {
+    release(*state);
+    delete state;
+  }
+}
+
+bool
+ransac_engine_t::evaluate(
+    const float *x, const float *y, const float *time, int nhits,
+    ransac_model_t *models, int nmodels, double spatial_cut,
+    double time_cut, bool write_masks, ransac_stats_t *stats,
+    std::uint32_t *masks, std::string &error)
+{
+  if (nhits <= 0 || nmodels <= 0) {
+    error = "RANSAC evaluation requires hits and hypotheses";
+    return false;
+  }
+  if (!x || !y || !time || !models || !stats) {
+    error = "RANSAC evaluation received a null buffer";
+    return false;
+  }
+  if (write_masks && !masks) {
+    error = "RANSAC inlier-mask buffer is null";
+    return false;
+  }
+
+  auto *state = static_cast<ransac_device_state_t *>(impl_);
+  if (!state) {
+    int devices = 0;
+    cudaError_t status = cudaGetDeviceCount(&devices);
+    if (status != cudaSuccess) {
+      error = cuda_error("cudaGetDeviceCount", status);
+      return false;
+    }
+    if (devices <= 0) {
+      error = "no CUDA device available";
+      return false;
+    }
+    state = new ransac_device_state_t;
+    impl_ = state;
+  }
+
+  cudaError_t status = cudaSuccess;
+  if (nhits > state->hit_capacity) {
+    cudaFree(state->x);
+    cudaFree(state->y);
+    cudaFree(state->time);
+    state->x = state->y = state->time = nullptr;
+    status = cudaMalloc(&state->x, nhits * sizeof(float));
+    if (status == cudaSuccess)
+      status = cudaMalloc(&state->y, nhits * sizeof(float));
+    if (status == cudaSuccess)
+      status = cudaMalloc(&state->time, nhits * sizeof(float));
+    if (status != cudaSuccess) {
+      error = cuda_error("cudaMalloc RANSAC event arrays", status);
+      state->hit_capacity = 0;
+      return false;
+    }
+    state->hit_capacity = nhits;
+  }
+
+  if (nmodels > state->model_capacity) {
+    cudaFree(state->models);
+    cudaFree(state->stats);
+    state->models = nullptr;
+    state->stats = nullptr;
+    status = cudaMalloc(&state->models,
+                        nmodels * sizeof(ransac_model_t));
+    if (status == cudaSuccess)
+      status = cudaMalloc(&state->stats,
+                          nmodels * sizeof(ransac_stats_t));
+    if (status != cudaSuccess) {
+      error = cuda_error("cudaMalloc RANSAC hypothesis arrays", status);
+      state->model_capacity = 0;
+      return false;
+    }
+    state->model_capacity = nmodels;
+  }
+
+  const int mask_words = (nhits + 31) / 32;
+  const std::size_t mask_entries =
+      static_cast<std::size_t>(nmodels) * mask_words;
+  if (write_masks && mask_entries > state->mask_capacity) {
+    cudaFree(state->masks);
+    state->masks = nullptr;
+    status = cudaMalloc(&state->masks,
+                        mask_entries * sizeof(std::uint32_t));
+    if (status != cudaSuccess) {
+      error = cuda_error("cudaMalloc RANSAC inlier masks", status);
+      state->mask_capacity = 0;
+      return false;
+    }
+    state->mask_capacity = mask_entries;
+  }
+
+  status = cudaMemcpy(state->x, x, nhits * sizeof(float),
+                      cudaMemcpyHostToDevice);
+  if (status == cudaSuccess)
+    status = cudaMemcpy(state->y, y, nhits * sizeof(float),
+                        cudaMemcpyHostToDevice);
+  if (status == cudaSuccess)
+    status = cudaMemcpy(state->time, time, nhits * sizeof(float),
+                        cudaMemcpyHostToDevice);
+  if (status == cudaSuccess)
+    status = cudaMemcpy(state->models, models,
+                        nmodels * sizeof(ransac_model_t),
+                        cudaMemcpyHostToDevice);
+  if (status != cudaSuccess) {
+    error = cuda_error("cudaMemcpy RANSAC input", status);
+    return false;
+  }
+  if (write_masks) {
+    status = cudaMemset(state->masks, 0,
+                        mask_entries * sizeof(std::uint32_t));
+    if (status != cudaSuccess) {
+      error = cuda_error("cudaMemset RANSAC inlier masks", status);
+      return false;
+    }
+  }
+
+  refine_ransac_kernel<<<nmodels, threads_per_block>>>(
+      state->x, state->y, state->time, nhits, state->models, nmodels,
+      spatial_cut, time_cut, write_masks, mask_words, state->stats,
+      state->masks);
+  status = cudaGetLastError();
+  if (status == cudaSuccess)
+    status = cudaDeviceSynchronize();
+  if (status != cudaSuccess) {
+    error = cuda_error("RANSAC evaluation kernel", status);
+    return false;
+  }
+
+  status = cudaMemcpy(stats, state->stats,
+                      nmodels * sizeof(ransac_stats_t),
+                      cudaMemcpyDeviceToHost);
+  if (status == cudaSuccess)
+    status = cudaMemcpy(models, state->models,
+                        nmodels * sizeof(ransac_model_t),
+                        cudaMemcpyDeviceToHost);
+  if (status == cudaSuccess && write_masks)
+    status = cudaMemcpy(masks, state->masks,
+                        mask_entries * sizeof(std::uint32_t),
+                        cudaMemcpyDeviceToHost);
+  if (status != cudaSuccess) {
+    error = cuda_error("cudaMemcpy RANSAC results", status);
+    return false;
   }
   return true;
 }

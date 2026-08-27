@@ -343,7 +343,8 @@ deduplicated before validation.
 This prevents separated seeds from expanding one accumulator into a large union
 volume. The RANSAC values are only used to bound the search; the strongest Hough maxima are
 the stored ring parameters directly, followed by an optional local 4D
-sub-grid interpolation around each maximum. The interpolation uses the 81
+sub-grid interpolation around each maximum. This interpolation is performed
+on the CPU after the discrete maximum has been returned from CUDA. It uses the 81
 neighboring `(x0,y0,R,t)` accumulator values and is accepted only for a
 well-formed concave peak within one grid step; otherwise the discrete maximum
 is retained.
@@ -369,13 +370,13 @@ process/bin/ring-finder-hough \
   --input triggered.timing.root \
   --output triggered.rings.hough.root \
   --max-events 1000 \
-  --min-inliers 8 --max-shared-fraction 0.5 \
+  --min-inliers 5 --max-shared-fraction 0.5 \
   --min-x0 -100 --max-x0 100 --x0-step 1 \
   --min-y0 -100 --max-y0 100 --y0-step 1 \
   --min-radius 1 --max-radius 200 --radius-step 1 \
   --min-t -32 --max-t 32 --t-step 1 \
-  --min-e 0 --max-e 0.9 --e-step 0.1 \
-  --min-phi 0 --max-phi 3.141592653589793 --phi-step 0.1653469818
+  --min-e 0 --max-e 0 --e-step 1 \
+  --min-phi 0 --max-phi 0 --phi-step 1
 ```
 
 The `x0`, `y0`, and radius steps are in mm. The time range and `t-step` are
@@ -398,11 +399,10 @@ steps improve the initial Hough resolution but increase CPU/GPU work. The
 default steps are 1 mm for x, y, and radius, and 1 native time unit. The
 ellipse controls are `--min-e`, `--max-e`, `--e-step`, `--min-phi`,
 `--max-phi`, and `--phi-step`; eccentricity must be in `[0,1)` and angles are
-in radians over the equivalent-orientation interval `[0,pi]`. The defaults
-are `e=0..0.9` in steps of `0.1` (10 bins) and `phi=0..pi` in steps of
-`pi/19` (20 bins). With the default RANSAC localization, the local scan has
-21 x0 bins, 21 y0 bins, 21 radius bins, 11 time bins, 10 eccentricity bins,
-and 20 angle bins. Setting `--ransac-iterations 0` instead requests a scan of
+in radians over the equivalent-orientation interval `[0,pi]`. The default is
+the pure circle model, `e=0` with one angle cell. With the default RANSAC
+localization, the local scan has 11 x0 bins, 11 y0 bins, 11 radius bins, and
+5 time bins. Setting `--ransac-iterations 0` instead requests a scan of
 the full configured global bounds and is substantially larger.
 The candidate is accepted only if at least `--min-inliers` hits lie within four
 spatial standard deviations and four time standard deviations of the Hough
@@ -414,24 +414,41 @@ the ring's inlier count. The default fraction is `0.5`. If the candidate is
 too strongly overlapping, only the new candidate is rejected; previously
 accepted rings are never removed. If the project was configured with
 CUDA, pass `--gpu` to run
-the accumulator scan on the CUDA device. Maximum extraction and neighborhood
-suppression also remain on the GPU; only compact selected peaks are copied to
-the host before the common C++ validation.
+the accumulator scan on the CUDA device. The GPU reduces each accumulator to
+one compact maximum key per block; only those block maxima are copied to the
+host for the final maximum comparison. Neighborhood suppression remains on
+the GPU when more than one candidate is requested, before the block reduction
+is repeated for the next candidate.
+The runtime summary reports the CUDA Hough scan and CPU interpolation stages
+separately.
 The CUDA backend assigns one thread to each complete six-dimensional Hough cell. Each thread
 loops over the event hits and writes one score, avoiding accumulator atomics.
 Device allocations are reused when consecutive frames have the same local
 grid.
+When `--min-e 0 --max-e 0` is selected, the eccentricity and angle dimensions
+are collapsed to one cell and a circle-specific CUDA scoring kernel is used.
+This avoids ellipse trigonometry entirely in circle mode; the general ellipse
+kernel is used when a nonzero eccentricity range is requested.
 The RANSAC localization defaults are `--ransac-iterations 128`,
 `--ransac-tolerance 5`,
-`--ransac-center-window 10`, `--ransac-radius-window 10`, and
+`--ransac-center-window 5`, `--ransac-radius-window 5`, and
 `--ransac-time-window 5`. The center and radius options are half-widths in mm;
-the tolerance is a spatial inlier cut in mm, and the time option is a
-half-width in native time units. Increase the windows when the RANSAC
+the tolerance is a spatial inlier cut in mm, and `--ransac-time-window` is the
+RANSAC time compatibility cut. The local Hough ring-time half-width defaults
+to `--hough-time-window 2` native units. Increase the windows when the RANSAC
 approximation is poor, at the cost of a larger fine Hough accumulator. The
 RANSAC tolerance is independent of `--spatial-resolution`; the latter controls
 the Hough Gaussian width and final Hough validation. Set
 `--ransac-iterations 0` to disable localization and scan the global bounds,
 which is useful as a reference but is much slower for 1 mm steps.
+During localized scanning, the x0, y0, radius, and ring-time half-widths are
+tracked independently. If a seed's maximum reaches a local boundary, only the
+corresponding half-widths are doubled and that seed is scanned again. The test
+is repeated after each retry, allowing a different parameter to expand on a
+later retry. Expansion stops when the maximum is interior or the relevant
+configured global bound leaves no room for further expansion. The reported
+`boundary retries` count is the number of additional seed scans, not the
+number of parameters that reached a boundary.
 Without `--gpu`
 the executable always uses the CPU reference implementation. A CUDA build
 uses architecture `75` by default and can be configured with

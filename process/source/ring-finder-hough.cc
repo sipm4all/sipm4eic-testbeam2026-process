@@ -1,5 +1,6 @@
 #include <TFile.h>
 #include <TKey.h>
+#include <TH1D.h>
 #include <TTree.h>
 #include <TTreeReader.h>
 #include <TTreeReaderArray.h>
@@ -47,6 +48,13 @@ struct circle_t {
   int inliers = 0;
   double residual_sum = std::numeric_limits<double>::infinity();
   double score = 0.;
+  double seed_x = 0.;
+  double seed_y = 0.;
+  double seed_radius = 0.;
+  double seed_eccentricity = 0.;
+  double seed_phi = 0.;
+  double seed_ring_time = 0.;
+  bool has_seed = false;
   bool valid = false;
 };
 
@@ -55,6 +63,8 @@ radial_residual(const circle_t &circle, const point_t &point)
 {
   const double dx = point.x - circle.x;
   const double dy = point.y - circle.y;
+  if (circle.eccentricity == 0.)
+    return std::hypot(dx, dy) - circle.radius;
   const double cosine = std::cos(circle.phi);
   const double sine = std::sin(circle.phi);
   const double xr = cosine * dx + sine * dy;
@@ -78,6 +88,47 @@ angle_distance_pi(double first, double second)
   if (distance > 0.5 * pi)
     distance = pi - distance;
   return distance;
+}
+
+struct local_boundary_t {
+  bool x = false;
+  bool y = false;
+  bool radius = false;
+  bool time = false;
+
+  bool any() const { return x || y || radius || time; }
+};
+
+local_boundary_t
+local_scan_boundary(const circle_t &candidate, const circle_t &seed,
+                    double x_window, double y_window,
+                    double radius_window, double time_window,
+                    double x_step, double y_step, double radius_step,
+                    double time_step)
+{
+  constexpr double epsilon = 1.e-9;
+  return {
+      std::abs(candidate.x - seed.x) >=
+          x_window - 0.5 * x_step - epsilon,
+      std::abs(candidate.y - seed.y) >=
+          y_window - 0.5 * y_step - epsilon,
+      std::abs(candidate.radius - seed.radius) >=
+          radius_window - 0.5 * radius_step - epsilon,
+      std::abs(candidate.ring_time - seed.ring_time) >=
+          time_window - 0.5 * time_step - epsilon};
+}
+
+bool
+can_expand_window(double seed, double candidate, double window,
+                  double global_min, double global_max, double step)
+{
+  constexpr double epsilon = 1.e-9;
+  const bool lower_boundary = candidate <= seed - window +
+                                             0.5 * step + epsilon;
+  const bool upper_boundary = candidate >= seed + window -
+                                             0.5 * step - epsilon;
+  return (lower_boundary && seed - window > global_min + epsilon) ||
+         (upper_boundary && seed + window < global_max - epsilon);
 }
 
 bool
@@ -315,6 +366,166 @@ ransac_seeds(const std::vector<point_t> &points,
           best_inlier_indices.end())
         next_remaining.push_back(index);
       }
+    remaining.swap(next_remaining);
+  }
+  return seeds;
+}
+
+std::vector<circle_t>
+ransac_seeds_cuda(const std::vector<point_t> &points,
+                  const std::vector<int> &indices,
+                  const std::vector<float> &points_x,
+                  const std::vector<float> &points_y,
+                  const std::vector<float> &points_time,
+                  int max_seeds, int iterations, int min_inliers,
+                  double min_x0, double max_x0,
+                  double min_y0, double max_y0,
+                  double min_radius, double max_radius,
+                  double ransac_tolerance, double time_window,
+                  ring_hough_cuda::ransac_engine_t &engine,
+                  std::mt19937 &generator, std::string &error)
+{
+  std::vector<circle_t> hypotheses;
+  if (indices.size() < 3 || max_seeds <= 0 || iterations <= 0)
+    return hypotheses;
+
+  const double spatial_cut = ransac_tolerance;
+  const double time_cut = time_window;
+  for (int iteration = 0; iteration < iterations; ++iteration) {
+    std::uniform_int_distribution<std::size_t> pick(0, indices.size() - 1);
+    const std::size_t ia = pick(generator);
+    const double seed_time = points[indices[ia]].time;
+    std::vector<int> temporal_indices;
+    for (int index : indices) {
+      if (std::abs(points[index].time - seed_time) <= time_cut)
+        temporal_indices.push_back(index);
+    }
+    if (temporal_indices.size() < 3)
+      continue;
+
+    std::uniform_int_distribution<std::size_t> temporal_pick(
+        0, temporal_indices.size() - 1);
+    const std::size_t ib = temporal_pick(generator);
+    const std::size_t ic = temporal_pick(generator);
+    if (temporal_indices[ib] == indices[ia] ||
+        temporal_indices[ic] == indices[ia] || ib == ic)
+      continue;
+
+    circle_t hypothesis;
+    if (!circle_from_three(points[indices[ia]],
+                           points[temporal_indices[ib]],
+                           points[temporal_indices[ic]], hypothesis) ||
+        hypothesis.x < min_x0 || hypothesis.x > max_x0 ||
+        hypothesis.y < min_y0 || hypothesis.y > max_y0 ||
+        hypothesis.radius < min_radius || hypothesis.radius > max_radius)
+      continue;
+    hypothesis.ring_time = seed_time;
+    hypotheses.push_back(hypothesis);
+  }
+  if (hypotheses.empty())
+    return hypotheses;
+
+  const int nmodels = static_cast<int>(hypotheses.size());
+  std::vector<ring_hough_cuda::ransac_model_t> models(nmodels);
+  std::vector<ring_hough_cuda::ransac_stats_t> stats(nmodels);
+  const int mask_words = (static_cast<int>(points.size()) + 31) / 32;
+  std::vector<std::uint32_t> masks(
+      static_cast<std::size_t>(nmodels) * mask_words);
+  auto copy_models = [&]() {
+    for (int imodel = 0; imodel < nmodels; ++imodel) {
+      models[imodel].x = static_cast<float>(hypotheses[imodel].x);
+      models[imodel].y = static_cast<float>(hypotheses[imodel].y);
+      models[imodel].radius = static_cast<float>(
+          hypotheses[imodel].radius);
+      models[imodel].ring_time = static_cast<float>(
+          hypotheses[imodel].ring_time);
+      models[imodel].valid = hypotheses[imodel].valid ? 1 : 0;
+    }
+  };
+  auto evaluate = [&](bool write_masks) {
+    copy_models();
+    return engine.evaluate(
+        points_x.data(), points_y.data(), points_time.data(),
+        static_cast<int>(points.size()), models.data(), nmodels,
+        spatial_cut, time_cut, write_masks, stats.data(),
+        write_masks ? masks.data() : nullptr, error);
+  };
+
+  for (circle_t &hypothesis : hypotheses)
+    hypothesis.valid = true;
+  if (!evaluate(true))
+    return {};
+
+  for (int imodel = 0; imodel < nmodels; ++imodel) {
+    circle_t &hypothesis = hypotheses[imodel];
+    hypothesis.x = models[imodel].x;
+    hypothesis.y = models[imodel].y;
+    hypothesis.radius = models[imodel].radius;
+    hypothesis.ring_time = models[imodel].ring_time;
+    hypothesis.valid = models[imodel].valid != 0;
+    if (!hypothesis.valid || stats[imodel].inliers < 3 ||
+        !std::isfinite(hypothesis.ring_time) ||
+        hypothesis.x < min_x0 || hypothesis.x > max_x0 ||
+        hypothesis.y < min_y0 || hypothesis.y > max_y0 ||
+        hypothesis.radius < min_radius || hypothesis.radius > max_radius) {
+      hypothesis.valid = false;
+      continue;
+    }
+    hypothesis.inliers = stats[imodel].inliers;
+    hypothesis.residual_sum = stats[imodel].residual_sum;
+  }
+
+  std::vector<circle_t> seeds;
+  seeds.reserve(max_seeds);
+  std::vector<int> remaining = indices;
+  for (int iseed = 0;
+       iseed < max_seeds && static_cast<int>(remaining.size()) >= min_inliers;
+       ++iseed) {
+    int best_hypothesis = -1;
+    int best_inliers = 0;
+    double best_residual_sum = std::numeric_limits<double>::infinity();
+    std::vector<int> best_inlier_indices;
+    for (int ihypothesis = 0; ihypothesis < nmodels; ++ihypothesis) {
+      if (!hypotheses[ihypothesis].valid)
+        continue;
+      std::vector<int> inlier_indices;
+      double residual_sum = 0.;
+      for (int index : remaining) {
+        const std::uint32_t word =
+            masks[static_cast<std::size_t>(ihypothesis) * mask_words +
+                  index / 32];
+        if (!(word & (1u << (index % 32))))
+          continue;
+        inlier_indices.push_back(index);
+        residual_sum += std::abs(
+            radial_residual(hypotheses[ihypothesis], points[index]));
+      }
+      const int ninliers = static_cast<int>(inlier_indices.size());
+      if (ninliers < min_inliers ||
+          ninliers < best_inliers ||
+          (ninliers == best_inliers && residual_sum >= best_residual_sum))
+        continue;
+      best_hypothesis = ihypothesis;
+      best_inliers = ninliers;
+      best_residual_sum = residual_sum;
+      best_inlier_indices.swap(inlier_indices);
+    }
+    if (best_hypothesis < 0)
+      break;
+
+    circle_t seed = hypotheses[best_hypothesis];
+    seed.inliers = best_inliers;
+    seed.residual_sum = best_residual_sum;
+    seeds.push_back(seed);
+
+    std::vector<int> next_remaining;
+    next_remaining.reserve(remaining.size() - best_inlier_indices.size());
+    for (int index : remaining) {
+      if (std::find(best_inlier_indices.begin(),
+                    best_inlier_indices.end(), index) ==
+          best_inlier_indices.end())
+        next_remaining.push_back(index);
+    }
     remaining.swap(next_remaining);
   }
   return seeds;
@@ -569,35 +780,33 @@ make_cuda_grid(double min_x0, double max_x0, double x0_step,
   grid_bins(min_t, max_t, t_step, grid.nt);
   grid_bins(min_e, max_e, e_step, grid.ne);
   grid_bins(min_phi, max_phi, phi_step, grid.nphi);
+  grid.circle_mode = min_e == 0. && max_e == 0.;
+  if (grid.circle_mode) {
+    // With zero eccentricity phi is physically irrelevant. Collapse these
+    // dimensions so circle mode does not rescan identical Hough cells.
+    grid.min_e = 0.;
+    grid.min_phi = 0.;
+    grid.e_step = 1.;
+    grid.phi_step = 1.;
+    grid.ne = 1;
+    grid.nphi = 1;
+  }
   return grid;
 }
 
 bool
-hough_candidates_cuda(const std::vector<point_t> &points,
-                       const std::vector<int> &indices,
+hough_candidates_cuda(const float *x, const float *y, const float *time,
+                       int nhits,
                        int max_candidates,
                        ring_hough_cuda::engine_t &engine,
                        const ring_hough_cuda::grid_t &grid,
                        std::vector<circle_t> &candidates,
                        std::string &error)
 {
-  std::vector<float> x;
-  std::vector<float> y;
-  std::vector<float> time;
-  x.reserve(indices.size());
-  y.reserve(indices.size());
-  time.reserve(indices.size());
-  for (const int index : indices) {
-    x.push_back(static_cast<float>(points[index].x));
-    y.push_back(static_cast<float>(points[index].y));
-    time.push_back(static_cast<float>(points[index].time));
-  }
-
   std::vector<ring_hough_cuda::candidate_t> results(max_candidates);
   int result_count = 0;
-  if (!engine.find(x.data(), y.data(), time.data(),
-                  static_cast<int>(indices.size()), max_candidates,
-                  results.data(), result_count, error)) {
+  if (!engine.find(x, y, time, nhits, max_candidates, results.data(),
+                   result_count, error)) {
     return false;
   }
   candidates.clear();
@@ -853,6 +1062,7 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
                   double ransac_center_window,
                   double ransac_radius_window,
                   double ransac_time_window,
+                  double hough_time_window,
                   double ransac_tolerance,
                   bool use_gpu,
                   bool overwrite_existing_ring)
@@ -966,16 +1176,40 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
   ring_out->Branch("ring_time", ring_time, "ring_time[nring]/F");
   ring_out->Branch("ring_ninliers", ring_ninliers, "ring_ninliers[nring]/s");
 
+  // Diagnostic distributions use final minus RANSAC-seed parameters. They
+  // are histograms only; the persistent ring-tree schema is unchanged.
+  auto hRansacDeltaX0 = new TH1D(
+      "hRansacDeltaX0", "final x0 - RANSAC seed x0;#Delta x0;entries",
+      200, -10., 10.);
+  auto hRansacDeltaY0 = new TH1D(
+      "hRansacDeltaY0", "final y0 - RANSAC seed y0;#Delta y0;entries",
+      200, -10., 10.);
+  auto hRansacDeltaRadius = new TH1D(
+      "hRansacDeltaRadius",
+      "final radius - RANSAC seed radius;#Delta R;entries", 200, -10., 10.);
+  auto hRansacDeltaTime = new TH1D(
+      "hRansacDeltaTime",
+      "final ring time - RANSAC seed time;#Delta t;entries", 200, -5., 5.);
+  auto hRansacDeltaEccentricity = new TH1D(
+      "hRansacDeltaEccentricity",
+      "final eccentricity - RANSAC seed eccentricity;#Delta e;entries",
+      200, -1., 1.);
+  auto hRansacDeltaPhi = new TH1D(
+      "hRansacDeltaPhi", "final phi - RANSAC seed phi;#Delta #phi;entries",
+      200, -pi, pi);
+
   Long64_t frames = 0;
   Long64_t accepted = 0;
   Long64_t total_seeds = 0;
   Long64_t frames_with_seeds = 0;
+  Long64_t boundary_retries = 0;
   double ransac_seconds = 0.;
-  double hough_seconds = 0.;
+  double hough_scan_seconds = 0.;
+  double interpolation_seconds = 0.;
   double validation_seconds = 0.;
-  // Each RANSAC seed defines one candidate search region. Keep exactly one
-  // maximum per seed; validation and shared-hit handling happen below.
-  const int candidate_limit = 1;
+  // Keep several maxima per RANSAC seed. Deduplication, validation, and
+  // shared-hit handling below remove repeated or incompatible candidates.
+  const int candidate_limit = std::min(3, max_rings);
   std::mt19937 generator(0x9e3779b9u);
   for (Long64_t iframe = 0; iframe < entries; ++iframe) {
     if (frames_in->GetEntry(iframe) <= 0 || !reader.Next()) {
@@ -999,16 +1233,28 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
 
     std::vector<point_t> points;
     std::vector<int> indices;
+    std::vector<float> points_x;
+    std::vector<float> points_y;
+    std::vector<float> points_time;
+    points.reserve(nhits);
+    indices.reserve(nhits);
+    points_x.reserve(nhits);
+    points_y.reserve(nhits);
+    points_time.reserve(nhits);
     for (int index = 0; index < nhits; ++index) {
       if (std::isfinite(x[index]) && std::isfinite(y[index]) &&
           std::isfinite(time[index])) {
         points.push_back({x[index], y[index], time[index]});
         indices.push_back(static_cast<int>(points.size() - 1));
+        points_x.push_back(x[index]);
+        points_y.push_back(y[index]);
+        points_time.push_back(time[index]);
       }
     }
 
     const auto ransac_start = std::chrono::steady_clock::now();
-    const std::vector<circle_t> seeds = ransac_seeds(
+    std::vector<circle_t> seeds;
+    seeds = ransac_seeds(
         points, indices, max_rings, ransac_iterations, min_inliers,
         min_x0, max_x0, min_y0, max_y0, min_radius, max_radius,
         ransac_tolerance, ransac_time_window, generator);
@@ -1020,10 +1266,9 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
 
     std::vector<std::vector<int>> accepted_inliers;
     std::vector<circle_t> candidates;
-    const auto hough_start = std::chrono::steady_clock::now();
     // Scan each RANSAC seed independently. This keeps unrelated seeds from
     // expanding one accumulator into a large union volume. Candidates from
-    // the separate scans are combined only after local interpolation.
+    // the separate scans are combined only after CPU-side interpolation.
     std::string scan_error;
     auto scan_region = [&](double requested_min_x0, double requested_max_x0,
                            double requested_min_y0, double requested_max_y0,
@@ -1051,6 +1296,7 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
                         local_min_radius, local_max_radius);
       align_grid_bounds(min_t, max_t, t_step, local_min_t, local_max_t);
 
+      const auto scan_start = std::chrono::steady_clock::now();
       if (gpu) {
         const auto local_grid = make_cuda_grid(
             local_min_x0, local_max_x0, x0_step,
@@ -1061,9 +1307,10 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
             spatial_resolution, time_resolution);
         if (!gpu->initialize(local_grid, scan_error))
           return false;
-        if (!hough_candidates_cuda(points, indices, candidate_limit, *gpu,
-                                   local_grid, region_candidates,
-                                   scan_error))
+        if (!hough_candidates_cuda(
+                points_x.data(), points_y.data(), points_time.data(),
+                static_cast<int>(points_x.size()), candidate_limit, *gpu,
+                local_grid, region_candidates, scan_error))
           return false;
       } else {
         region_candidates = hough_candidates(
@@ -1075,7 +1322,12 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
             min_e, max_e, e_step, min_phi, max_phi, phi_step,
             spatial_resolution, time_resolution);
       }
+      hough_scan_seconds += std::chrono::duration<double>(
+          std::chrono::steady_clock::now() - scan_start).count();
 
+      // CUDA returns the discrete maximum only. Sub-grid refinement is a
+      // deliberately separate CPU stage and never runs in the CUDA kernel.
+      const auto interpolation_start = std::chrono::steady_clock::now();
       for (circle_t &candidate : region_candidates)
         interpolate_peak(points, indices,
                          local_min_x0, local_max_x0, x0_step,
@@ -1083,6 +1335,8 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
                          local_min_radius, local_max_radius, radius_step,
                          local_min_t, local_max_t, t_step,
                          spatial_resolution, time_resolution, candidate);
+      interpolation_seconds += std::chrono::duration<double>(
+          std::chrono::steady_clock::now() - interpolation_start).count();
       return true;
     };
 
@@ -1095,16 +1349,77 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
       } else {
         for (const circle_t &seed : seeds) {
           std::vector<circle_t> region_candidates;
-          if (!scan_region(seed.x - ransac_center_window,
-                           seed.x + ransac_center_window,
-                           seed.y - ransac_center_window,
-                           seed.y + ransac_center_window,
-                           seed.radius - ransac_radius_window,
-                           seed.radius + ransac_radius_window,
-                           seed.ring_time - ransac_time_window,
-                           seed.ring_time + ransac_time_window,
-                           region_candidates))
-            break;
+          auto scan_seed = [&](double x_window, double y_window,
+                               double radius_window, double time_window) {
+            region_candidates.clear();
+            return scan_region(seed.x - x_window,
+                               seed.x + x_window,
+                               seed.y - y_window,
+                               seed.y + y_window,
+                               seed.radius - radius_window,
+                               seed.radius + radius_window,
+                               seed.ring_time - time_window,
+                               seed.ring_time + time_window,
+                               region_candidates);
+          };
+          double x_window = ransac_center_window;
+          double y_window = ransac_center_window;
+          double radius_window = ransac_radius_window;
+          double time_window = hough_time_window;
+          for (;;) {
+            if (!scan_seed(x_window, y_window, radius_window, time_window))
+              break;
+            if (region_candidates.empty())
+              break;
+
+            const local_boundary_t boundary = local_scan_boundary(
+                region_candidates.front(), seed, x_window, y_window,
+                radius_window, time_window, x0_step, y0_step, radius_step,
+                t_step);
+            bool expanded = false;
+            if (boundary.x && can_expand_window(
+                                  seed.x, region_candidates.front().x,
+                                  x_window, min_x0, max_x0, x0_step)) {
+              x_window *= 2.;
+              expanded = true;
+            }
+            if (boundary.y && can_expand_window(
+                                  seed.y, region_candidates.front().y,
+                                  y_window, min_y0, max_y0, y0_step)) {
+              y_window *= 2.;
+              expanded = true;
+            }
+            if (boundary.radius && can_expand_window(
+                                       seed.radius,
+                                       region_candidates.front().radius,
+                                       radius_window, min_radius, max_radius,
+                                       radius_step)) {
+              radius_window *= 2.;
+              expanded = true;
+            }
+            if (boundary.time && can_expand_window(
+                                    seed.ring_time,
+                                    region_candidates.front().ring_time,
+                                    time_window, min_t, max_t, t_step)) {
+              time_window *= 2.;
+              expanded = true;
+            }
+            if (!expanded)
+              break;
+
+            ++boundary_retries;
+          }
+          if (region_candidates.empty())
+            continue;
+          for (circle_t &candidate : region_candidates) {
+            candidate.seed_x = seed.x;
+            candidate.seed_y = seed.y;
+            candidate.seed_radius = seed.radius;
+            candidate.seed_eccentricity = seed.eccentricity;
+            candidate.seed_phi = seed.phi;
+            candidate.seed_ring_time = seed.ring_time;
+            candidate.has_seed = true;
+          }
           candidates.insert(candidates.end(), region_candidates.begin(),
                             region_candidates.end());
         }
@@ -1118,8 +1433,6 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
       return false;
     }
 
-    hough_seconds += std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - hough_start).count();
 
     std::sort(candidates.begin(), candidates.end(),
               [](const circle_t &first, const circle_t &second) {
@@ -1145,6 +1458,7 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
         unique_candidates.push_back(candidate);
     }
     candidates.swap(unique_candidates);
+
 
     const auto validation_start = std::chrono::steady_clock::now();
     for (circle_t ring : candidates) {
@@ -1178,6 +1492,15 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
       ring_phi[nring] = static_cast<float>(ring.phi);
       ring_time[nring] = static_cast<float>(ring.ring_time);
       ring_ninliers[nring] = static_cast<UShort_t>(ring.inliers);
+      if (ring.has_seed) {
+        hRansacDeltaX0->Fill(ring.x - ring.seed_x);
+        hRansacDeltaY0->Fill(ring.y - ring.seed_y);
+        hRansacDeltaRadius->Fill(ring.radius - ring.seed_radius);
+        hRansacDeltaTime->Fill(ring.ring_time - ring.seed_ring_time);
+        hRansacDeltaEccentricity->Fill(
+            ring.eccentricity - ring.seed_eccentricity);
+        hRansacDeltaPhi->Fill(ring.phi - ring.seed_phi);
+      }
       ++nring;
       ++accepted;
       accepted_inliers.push_back(std::move(inlier_indices));
@@ -1257,8 +1580,10 @@ ring_finder_hough(const std::string &filename, const std::string &outfilename,
             << frames_with_seeds << " frames, average "
             << (frames ? static_cast<double>(total_seeds) / frames : 0.)
             << ")" << std::endl
+            << "boundary retries: " << boundary_retries << std::endl
             << "stage seconds:    RANSAC=" << ransac_seconds
-            << " Hough=" << hough_seconds
+            << " Hough=" << hough_scan_seconds
+            << " CPU-interpolation=" << interpolation_seconds
             << " validation=" << validation_seconds << std::endl
             << "rings found:      " << accepted << std::endl
             << "output:            " << outfilename << std::endl;
@@ -1272,21 +1597,22 @@ main(int argc, char **argv)
 {
   namespace po = boost::program_options;
   std::string input, output, branch_name = "ring";
-  int min_inliers = 8, max_rings = maxrings;
+  int min_inliers = 5, max_rings = maxrings;
   double max_shared_fraction = 0.5;
   Long64_t max_events = -1;
   double min_x0 = -100., max_x0 = 100., x0_step = 1.;
   double min_y0 = -100., max_y0 = 100., y0_step = 1.;
   double min_radius = 1., max_radius = 200., radius_step = 1.;
   double min_t = -32., max_t = 32., t_step = 1.;
-  double min_e = 0., max_e = 0.9, e_step = 0.1;
-  double min_phi = 0., max_phi = pi, phi_step = pi / 19.;
+  double min_e = 0., max_e = 0., e_step = 1.;
+  double min_phi = 0., max_phi = 0., phi_step = 1.;
   double spatial_resolution = 1.5;
   double time_resolution = 1.;
   int ransac_iterations = 128;
-  double ransac_center_window = 10.;
-  double ransac_radius_window = 10.;
+  double ransac_center_window = 5.;
+  double ransac_radius_window = 5.;
   double ransac_time_window = 5.;
+  double hough_time_window = 2.;
   double ransac_tolerance = 5.;
   bool use_gpu = false;
   bool overwrite_existing_ring = false;
@@ -1347,7 +1673,10 @@ main(int argc, char **argv)
      "half-width of the local Hough radius window around RANSAC seeds")
     ("ransac-time-window", po::value<double>(&ransac_time_window)
                                  ->default_value(ransac_time_window),
-     "RANSAC time window and local Hough ring-time half-width")
+     "RANSAC time window for seed inliers")
+    ("hough-time-window", po::value<double>(&hough_time_window)
+                                ->default_value(hough_time_window),
+     "local Hough ring-time half-width around RANSAC seeds")
     ("ransac-tolerance", po::value<double>(&ransac_tolerance)
                                 ->default_value(ransac_tolerance),
      "RANSAC spatial inlier tolerance in mm")
@@ -1374,6 +1703,7 @@ main(int argc, char **argv)
         max_shared_fraction < 0. || max_shared_fraction > 1. ||
         ransac_iterations < 0 || ransac_center_window <= 0. ||
         ransac_radius_window <= 0. || ransac_time_window <= 0. ||
+        hough_time_window <= 0. ||
         ransac_tolerance <= 0. ||
         min_x0 > max_x0 || min_y0 > max_y0 || min_radius <= 0. ||
         min_radius > max_radius ||
@@ -1402,7 +1732,8 @@ main(int argc, char **argv)
              min_e, max_e, e_step, min_phi, max_phi, phi_step,
              spatial_resolution, time_resolution,
              ransac_iterations, ransac_center_window,
-             ransac_radius_window, ransac_time_window, ransac_tolerance,
+             ransac_radius_window, ransac_time_window, hough_time_window,
+             ransac_tolerance,
              use_gpu, overwrite_existing_ring)
              ? 0 : 1;
 }

@@ -1,5 +1,6 @@
 #include <TFile.h>
 #include <TKey.h>
+#include <TH1D.h>
 #include <TTree.h>
 #include <TTreeReader.h>
 #include <TTreeReaderArray.h>
@@ -13,6 +14,7 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <new>
 #include <random>
 #include <string>
 #include <vector>
@@ -43,9 +45,9 @@ struct options_t {
   int ransac_iterations = 128;
   float ransac_tolerance = 5.f;
   float ransac_time_window = 5.f;
-  float hough_center_window = 10.f;
-  float hough_radius_window = 10.f;
-  float hough_time_window = 5.f;
+  float hough_center_window = 5.f;
+  float hough_radius_window = 5.f;
+  float hough_time_window = 2.f;
   float hough_x_step = 1.f;
   float hough_y_step = 1.f;
   float hough_radius_step = 1.f;
@@ -66,6 +68,11 @@ struct circle_t {
   int inliers = 0;
   float residual_sum = std::numeric_limits<float>::infinity();
   float score = 0.f;
+  float seed_x = 0.f;
+  float seed_y = 0.f;
+  float seed_radius = 0.f;
+  float seed_time = 0.f;
+  bool has_seed = false;
   bool valid = false;
 };
 
@@ -365,6 +372,47 @@ is_duplicate_candidate(const circle_t &first,
          std::fabs(first.time - second.time) <= opt.hough_time_step;
 }
 
+struct local_boundary_t {
+  bool x = false;
+  bool y = false;
+  bool radius = false;
+  bool time = false;
+
+  bool any() const { return x || y || radius || time; }
+};
+
+local_boundary_t
+local_scan_boundary(const circle_t &candidate, const circle_t &seed,
+                    float x_window, float y_window,
+                    float radius_window, float time_window,
+                    float x_step, float y_step, float radius_step,
+                    float time_step)
+{
+  constexpr float epsilon = 1.e-6f;
+  return {
+      std::fabs(candidate.x - seed.x) >=
+          x_window - 0.5f * x_step - epsilon,
+      std::fabs(candidate.y - seed.y) >=
+          y_window - 0.5f * y_step - epsilon,
+      std::fabs(candidate.radius - seed.radius) >=
+          radius_window - 0.5f * radius_step - epsilon,
+      std::fabs(candidate.time - seed.time) >=
+          time_window - 0.5f * time_step - epsilon};
+}
+
+bool
+can_expand_window(float seed, float candidate, float window, float global_min,
+                  float global_max, float step)
+{
+  constexpr float epsilon = 1.e-6f;
+  const bool lower_boundary = candidate <= seed - window +
+                                             0.5f * step + epsilon;
+  const bool upper_boundary = candidate >= seed + window -
+                                             0.5f * step - epsilon;
+  return (lower_boundary && seed - window > global_min + epsilon) ||
+         (upper_boundary && seed + window < global_max - epsilon);
+}
+
 int
 number_of_bins(float half_width, float step)
 {
@@ -372,31 +420,73 @@ number_of_bins(float half_width, float step)
 }
 
 void
-set_local_hough_grid(data_t &data, const circle_t &seed, const options_t &opt)
+set_local_hough_grid(data_t &data, const circle_t &seed, const options_t &opt,
+                     float x_window, float y_window, float radius_window,
+                     float time_window)
 {
-  data.min.x = seed.x - opt.hough_center_window -
+  data.min.x = seed.x - x_window -
                0.5f * opt.hough_x_step;
-  data.max.x = seed.x + opt.hough_center_window +
+  data.max.x = seed.x + x_window +
                0.5f * opt.hough_x_step;
-  data.min.y = seed.y - opt.hough_center_window -
+  data.min.y = seed.y - y_window -
                0.5f * opt.hough_y_step;
-  data.max.y = seed.y + opt.hough_center_window +
+  data.max.y = seed.y + y_window +
                0.5f * opt.hough_y_step;
-  data.min.r = seed.radius - opt.hough_radius_window -
+  data.min.r = seed.radius - radius_window -
                0.5f * opt.hough_radius_step;
-  data.max.r = seed.radius + opt.hough_radius_window +
+  data.max.r = seed.radius + radius_window +
                0.5f * opt.hough_radius_step;
-  data.min.t = seed.time - opt.hough_time_window -
+  data.min.t = seed.time - time_window -
                0.5f * opt.hough_time_step;
-  data.max.t = seed.time + opt.hough_time_window +
+  data.max.t = seed.time + time_window +
                0.5f * opt.hough_time_step;
   data.bins = {
-    number_of_bins(opt.hough_center_window, opt.hough_x_step),
-    number_of_bins(opt.hough_center_window, opt.hough_y_step),
-    number_of_bins(opt.hough_radius_window, opt.hough_radius_step),
-    number_of_bins(opt.hough_time_window, opt.hough_time_step)
+    number_of_bins(x_window, opt.hough_x_step),
+    number_of_bins(y_window, opt.hough_y_step),
+    number_of_bins(radius_window, opt.hough_radius_step),
+    number_of_bins(time_window, opt.hough_time_step)
   };
   data.sigma.t = opt.tsigma;
+}
+
+bool
+resize_host_hough_data(data_t &data, int required_size, int &capacity)
+{
+  if (required_size <= capacity)
+    return true;
+
+  const int required_grid_size = (required_size + 255) / 256;
+  try {
+    auto map_x = std::make_unique<float[]>(required_size);
+    auto map_y = std::make_unique<float[]>(required_size);
+    auto map_r = std::make_unique<float[]>(required_size);
+    auto map_t = std::make_unique<float[]>(required_size);
+    auto hough_h = std::make_unique<float[]>(required_size);
+    auto hough_nh = std::make_unique<int[]>(required_size);
+    auto hough_rh = std::make_unique<float[]>(required_grid_size);
+    auto hough_rhi = std::make_unique<int[]>(required_grid_size);
+
+    delete[] data.map.x;
+    delete[] data.map.y;
+    delete[] data.map.r;
+    delete[] data.map.t;
+    delete[] data.hough.h;
+    delete[] data.hough.nh;
+    delete[] data.hough.rh;
+    delete[] data.hough.rhi;
+    data.map.x = map_x.release();
+    data.map.y = map_y.release();
+    data.map.r = map_r.release();
+    data.map.t = map_t.release();
+    data.hough.h = hough_h.release();
+    data.hough.nh = hough_nh.release();
+    data.hough.rh = hough_rh.release();
+    data.hough.rhi = hough_rhi.release();
+    capacity = required_size;
+    return true;
+  } catch (const std::bad_alloc &) {
+    return false;
+  }
 }
 
 bool
@@ -525,30 +615,49 @@ run(const options_t &opt)
   ring_out->Branch("ring_time", ring_time, "ring_time[nring]/F");
   ring_out->Branch("ring_ninliers", ring_ninliers, "ring_ninliers[nring]/s");
 
-  const int xbins = number_of_bins(opt.hough_center_window,
-                                   opt.hough_x_step);
-  const int ybins = number_of_bins(opt.hough_center_window,
-                                   opt.hough_y_step);
-  const int rbins = number_of_bins(opt.hough_radius_window,
-                                   opt.hough_radius_step);
-  const int tbins = number_of_bins(opt.hough_time_window,
-                                   opt.hough_time_step);
-  const int size = xbins * ybins * rbins * tbins;
-  const int grid_size = (size + 255) / 256;
+  // Diagnostic distributions use final minus RANSAC-seed parameters. They
+  // are histograms only; the persistent ring-tree schema is unchanged.
+  auto hRansacDeltaX0 = new TH1D(
+      "hRansacDeltaX0", "final x0 - RANSAC seed x0;#Delta x0;entries",
+      200, -10., 10.);
+  auto hRansacDeltaY0 = new TH1D(
+      "hRansacDeltaY0", "final y0 - RANSAC seed y0;#Delta y0;entries",
+      200, -10., 10.);
+  auto hRansacDeltaRadius = new TH1D(
+      "hRansacDeltaRadius",
+      "final radius - RANSAC seed radius;#Delta R;entries", 200, -10., 10.);
+  auto hRansacDeltaTime = new TH1D(
+      "hRansacDeltaTime",
+      "final ring time - RANSAC seed time;#Delta t;entries", 200, -5., 5.);
+
+  // Allocate host-side maps for the initial scan and grow them if successive
+  // boundary retries produce a larger per-seed grid.
+  const int max_xbins = number_of_bins(2.f * opt.hough_center_window,
+                                      opt.hough_x_step);
+  const int max_ybins = number_of_bins(2.f * opt.hough_center_window,
+                                      opt.hough_y_step);
+  const int max_rbins = number_of_bins(2.f * opt.hough_radius_window,
+                                      opt.hough_radius_step);
+  const int max_tbins = number_of_bins(2.f * opt.hough_time_window,
+                                       opt.hough_time_step);
+  const int max_size = max_xbins * max_ybins * max_rbins * max_tbins;
+  const int max_grid_size = (max_size + 255) / 256;
   data_t data{};
-  data.map.x = new float[size];
-  data.map.y = new float[size];
-  data.map.r = new float[size];
-  data.map.t = new float[size];
-  data.hough.h = new float[size];
-  data.hough.nh = new int[size];
-  data.hough.rh = new float[grid_size];
-  data.hough.rhi = new int[grid_size];
+  data.map.x = new float[max_size];
+  data.map.y = new float[max_size];
+  data.map.r = new float[max_size];
+  data.map.t = new float[max_size];
+  data.hough.h = new float[max_size];
+  data.hough.nh = new int[max_size];
+  data.hough.rh = new float[max_grid_size];
+  data.hough.rhi = new int[max_grid_size];
+  int data_capacity = max_size;
 
   Long64_t processed = 0;
   Long64_t rings_found = 0;
   Long64_t ransac_seed_count = 0;
   Long64_t frames_with_seed = 0;
+  Long64_t boundary_retries = 0;
   std::vector<float> points_x;
   std::vector<float> points_y;
   std::vector<float> points_t;
@@ -620,8 +729,23 @@ run(const options_t &opt)
     // remove duplicate models, validate inliers, and reject excessive
     // sharing. Hits remain available to overlapping candidates.
     std::vector<circle_t> candidates;
-    for (const circle_t &seed : seeds) {
-      set_local_hough_grid(data, seed, opt);
+    auto scan_seed = [&](const circle_t &seed, float x_window,
+                         float y_window, float radius_window, float time_window,
+                         circle_t &candidate) {
+      candidate.has_seed = false;
+      set_local_hough_grid(data, seed, opt, x_window, y_window,
+                           radius_window,
+                           time_window);
+      const long long local_size_long =
+          static_cast<long long>(data.bins.x) * data.bins.y * data.bins.r *
+          data.bins.t;
+      if (local_size_long <= 0 ||
+          local_size_long > std::numeric_limits<int>::max() ||
+          !resize_host_hough_data(data, static_cast<int>(local_size_long),
+                                  data_capacity)) {
+        std::cerr << "ERROR: adaptive Hough grid is too large" << std::endl;
+        return false;
+      }
       hough_init(data);
       hough_transform(data);
       const int local_size = data.bins.x * data.bins.y * data.bins.r *
@@ -633,14 +757,66 @@ run(const options_t &opt)
                            data.hough.rh + local_grid_size)));
       const int maximum = data.hough.rhi[block];
       if (maximum < 0)
-        continue;
+        return false;
 
-      circle_t candidate;
       candidate.x = data.map.x[maximum];
       candidate.y = data.map.y[maximum];
       candidate.radius = data.map.r[maximum];
       candidate.time = data.map.t[maximum];
       candidate.score = data.hough.h[maximum];
+      candidate.seed_x = seed.x;
+      candidate.seed_y = seed.y;
+      candidate.seed_radius = seed.radius;
+      candidate.seed_time = seed.time;
+      candidate.has_seed = true;
+      return true;
+    };
+    for (const circle_t &seed : seeds) {
+      circle_t candidate;
+      float x_window = opt.hough_center_window;
+      float y_window = opt.hough_center_window;
+      float radius_window = opt.hough_radius_window;
+      float time_window = opt.hough_time_window;
+      for (;;) {
+        if (!scan_seed(seed, x_window, y_window, radius_window, time_window,
+                       candidate))
+          break;
+        const local_boundary_t boundary = local_scan_boundary(
+            candidate, seed, x_window, y_window, radius_window, time_window,
+            opt.hough_x_step, opt.hough_y_step, opt.hough_radius_step,
+            opt.hough_time_step);
+        bool expanded = false;
+        if (boundary.x && can_expand_window(
+                              seed.x, candidate.x, x_window, opt.xmin,
+                              opt.xmax, opt.hough_x_step)) {
+          x_window *= 2.f;
+          expanded = true;
+        }
+        if (boundary.y && can_expand_window(
+                              seed.y, candidate.y, y_window, opt.ymin,
+                              opt.ymax, opt.hough_y_step)) {
+          y_window *= 2.f;
+          expanded = true;
+        }
+        if (boundary.radius && can_expand_window(
+                                  seed.radius, candidate.radius,
+                                  radius_window, opt.rmin, opt.rmax,
+                                  opt.hough_radius_step)) {
+          radius_window *= 2.f;
+          expanded = true;
+        }
+        if (boundary.time && can_expand_window(
+                                 seed.time, candidate.time, time_window,
+                                 opt.tmin, opt.tmax, opt.hough_time_step)) {
+          time_window *= 2.f;
+          expanded = true;
+        }
+        if (!expanded)
+          break;
+        ++boundary_retries;
+      }
+      if (!candidate.has_seed)
+        continue;
       candidates.push_back(candidate);
     }
 
@@ -691,6 +867,12 @@ run(const options_t &opt)
       ring_phi[nring] = 0.f;
       ring_time[nring] = candidate.time;
       ring_ninliers[nring] = static_cast<UShort_t>(candidate.inliers);
+      if (candidate.has_seed) {
+        hRansacDeltaX0->Fill(candidate.x - candidate.seed_x);
+        hRansacDeltaY0->Fill(candidate.y - candidate.seed_y);
+        hRansacDeltaRadius->Fill(candidate.radius - candidate.seed_radius);
+        hRansacDeltaTime->Fill(candidate.time - candidate.seed_time);
+      }
       ++nring;
       ++rings_found;
       accepted_inliers.push_back(inliers);
@@ -757,6 +939,7 @@ run(const options_t &opt)
   std::cout << "frames processed: " << processed << std::endl
             << "RANSAC seeds:     " << ransac_seed_count << " ("
             << frames_with_seed << " ring iterations)" << std::endl
+            << "boundary retries: " << boundary_retries << std::endl
             << "rings found:      " << rings_found << std::endl
             << "output:            " << opt.output << std::endl;
   return true;
