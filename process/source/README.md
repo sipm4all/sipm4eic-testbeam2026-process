@@ -220,7 +220,7 @@ process/bin/sorter --input calibrated.root --output sorted.root --window 32768
 Suppresses hits that arrive too close to a previous hit from the same channel:
 
 ```bash
-process/bin/after-pulse-suppressor --input sorted.root --output aps.sorted.root --window 50
+process/bin/after-pulse-suppressor --input sorted.root --output aps.sorted.root --window 64
 ```
 
 Trigger tags and spill markers are propagated.

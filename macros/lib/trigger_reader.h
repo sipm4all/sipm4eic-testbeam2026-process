@@ -3,6 +3,7 @@
 #include <TFile.h>
 #include <TTree.h>
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
@@ -56,6 +57,8 @@ public:
   int frame_index() const;
   int nframes() const;
   int nsources() const;
+  bool has_trigger_hits() const;
+  bool has_timing_hits() const;
   bool has_timing() const;
   bool has_rings() const;
   int timing_valid() const;
@@ -81,6 +84,7 @@ private:
 
   struct category_t {
     bool trigger = false;
+    bool available = false;
     UShort_t nhits = 0;
     std::vector<UChar_t> device;
     std::vector<UChar_t> fifo;
@@ -96,7 +100,7 @@ private:
     std::vector<Float_t> y;
 
     void reset();
-    bool bind(TTree *tree, bool is_trigger);
+    bool bind(TTree *tree, bool is_trigger, bool required);
     bool load_hits(std::vector<hit_t> &out) const;
   };
 
@@ -190,6 +194,7 @@ trigger_reader_t::bind(TTree *tree, const char *name, void *address)
 inline void
 trigger_reader_t::category_t::reset()
 {
+  available = false;
   nhits = 0;
   device.clear();
   fifo.clear();
@@ -206,9 +211,12 @@ trigger_reader_t::category_t::reset()
 }
 
 inline bool
-trigger_reader_t::category_t::bind(TTree *tree, bool is_trigger)
+trigger_reader_t::category_t::bind(TTree *tree, bool is_trigger, bool required)
 {
   trigger = is_trigger;
+  available = tree != nullptr;
+  if (!tree)
+    return !required;
   const int n = trigger_reader_t::maxhits_;
   device.resize(n);
   rollover.resize(n);
@@ -230,21 +238,26 @@ trigger_reader_t::category_t::bind(TTree *tree, bool is_trigger)
     counter.resize(n);
 
   if (!trigger_reader_t::bind(tree, "nhits", &nhits) ||
-      !trigger_reader_t::bind(tree, "device", device.data()) ||
-      !trigger_reader_t::bind(tree, "rollover", rollover.data()) ||
-      !trigger_reader_t::bind(tree, "coarse", coarse.data()) ||
       !trigger_reader_t::bind(tree, "time", time.data()))
     return false;
 
-  if (trigger) {
-    return trigger_reader_t::bind(tree, "counter", counter.data());
-  }
+  auto bind_optional = [&](const char *name, void *address) {
+    return !trigger_reader_t::has_branch(tree, name) ||
+           trigger_reader_t::bind(tree, name, address);
+  };
+  if (!bind_optional("device", device.data()) ||
+      !bind_optional("rollover", rollover.data()) ||
+      !bind_optional("coarse", coarse.data()))
+    return false;
 
-  return trigger_reader_t::bind(tree, "fifo", fifo.data()) &&
-         trigger_reader_t::bind(tree, "column", column.data()) &&
-         trigger_reader_t::bind(tree, "pixel", pixel.data()) &&
-         trigger_reader_t::bind(tree, "tdc", tdc.data()) &&
-         trigger_reader_t::bind(tree, "fine", fine.data()) &&
+  if (trigger)
+    return bind_optional("counter", counter.data());
+
+  return bind_optional("fifo", fifo.data()) &&
+         bind_optional("column", column.data()) &&
+         bind_optional("pixel", pixel.data()) &&
+         bind_optional("tdc", tdc.data()) &&
+         bind_optional("fine", fine.data()) &&
          trigger_reader_t::bind(tree, "x", x.data()) &&
          trigger_reader_t::bind(tree, "y", y.data());
 }
@@ -343,8 +356,8 @@ trigger_reader_t::open(const std::string &filename,
   trigger_tree_ = (TTree *)file_->Get("trigger");
   timing_tree_ = (TTree *)file_->Get("timing");
   cherenkov_tree_ = (TTree *)file_->Get("cherenkov");
-  if (!frames_tree_ || !trigger_tree_ || !timing_tree_ || !cherenkov_tree_) {
-    std::cerr << "ERROR: input must contain frames, trigger, timing, and cherenkov trees"
+  if (!frames_tree_ || !cherenkov_tree_) {
+    std::cerr << "ERROR: input must contain frames and cherenkov trees"
               << std::endl;
     reset();
     return false;
@@ -360,30 +373,32 @@ trigger_reader_t::open(const std::string &filename,
     return false;
   }
 
-  if (!trigger_.bind(trigger_tree_, true) ||
-      !timing_.bind(timing_tree_, false) ||
-      !cherenkov_.bind(cherenkov_tree_, false)) {
+  if (!trigger_.bind(trigger_tree_, true, false) ||
+      !timing_.bind(timing_tree_, false, false) ||
+      !cherenkov_.bind(cherenkov_tree_, false, true)) {
     reset();
     return false;
   }
 
   entries_ = frames_tree_->GetEntries();
-  if (trigger_tree_->GetEntries() != entries_ ||
-      timing_tree_->GetEntries() != entries_ ||
+  if ((trigger_tree_ && trigger_tree_->GetEntries() != entries_) ||
+      (timing_tree_ && timing_tree_->GetEntries() != entries_) ||
       cherenkov_tree_->GetEntries() != entries_) {
     std::cerr << "ERROR: frame-tree entry-count mismatch" << std::endl;
     reset();
     return false;
   }
 
-  const bool timing_any = timing_tree_->GetBranch("timing_valid") ||
-                          timing_tree_->GetBranch("T0") ||
-                          timing_tree_->GetBranch("sigma0") ||
-                          timing_tree_->GetBranch("T1") ||
-                          timing_tree_->GetBranch("sigma1") ||
-                          timing_tree_->GetBranch("T") ||
-                          timing_tree_->GetBranch("sigmaT");
-  const bool timing_all = timing_tree_->GetBranch("timing_valid") &&
+  const bool timing_any = timing_tree_ &&
+                          (timing_tree_->GetBranch("timing_valid") ||
+                           timing_tree_->GetBranch("T0") ||
+                           timing_tree_->GetBranch("sigma0") ||
+                           timing_tree_->GetBranch("T1") ||
+                           timing_tree_->GetBranch("sigma1") ||
+                           timing_tree_->GetBranch("T") ||
+                           timing_tree_->GetBranch("sigmaT"));
+  const bool timing_all = timing_tree_ &&
+                          timing_tree_->GetBranch("timing_valid") &&
                           timing_tree_->GetBranch("T0") &&
                           timing_tree_->GetBranch("sigma0") &&
                           timing_tree_->GetBranch("T1") &&
@@ -411,15 +426,23 @@ trigger_reader_t::open(const std::string &filename,
 
   ring_tree_ = (TTree *)file_->Get(ring_name_.c_str());
   if (ring_tree_) {
+    std::fill(std::begin(ring_e_), std::end(ring_e_), 0.f);
+    std::fill(std::begin(ring_phi_), std::end(ring_phi_), 0.f);
+    std::fill(std::begin(ring_ninliers_), std::end(ring_ninliers_), 0);
+    const bool e_ok = !has_branch(ring_tree_, "e") ||
+                      bind(ring_tree_, "e", ring_e_);
+    const bool phi_ok = !has_branch(ring_tree_, "phi") ||
+                        bind(ring_tree_, "phi", ring_phi_);
+    const bool ninliers_ok = !has_branch(ring_tree_, "ninliers") ||
+                             bind(ring_tree_, "ninliers", ring_ninliers_);
     if (ring_tree_->GetEntries() != entries_ ||
         !bind(ring_tree_, "nrings", &nring_) ||
         !bind(ring_tree_, "x0", ring_x0_) ||
         !bind(ring_tree_, "y0", ring_y0_) ||
         !bind(ring_tree_, "r", ring_r_) ||
-        !bind(ring_tree_, "e", ring_e_) ||
-        !bind(ring_tree_, "phi", ring_phi_) ||
+        !e_ok || !phi_ok ||
         !bind(ring_tree_, "time", ring_time_) ||
-        !bind(ring_tree_, "ninliers", ring_ninliers_)) {
+        !ninliers_ok) {
       std::cerr << "ERROR: invalid ring tree" << std::endl;
       reset();
       return false;
@@ -496,8 +519,8 @@ inline bool
 trigger_reader_t::load_frame(Long64_t entry)
 {
   if (frames_tree_->GetEntry(entry) <= 0 ||
-      trigger_tree_->GetEntry(entry) <= 0 ||
-      timing_tree_->GetEntry(entry) <= 0 ||
+      (trigger_tree_ && trigger_tree_->GetEntry(entry) <= 0) ||
+      (timing_tree_ && timing_tree_->GetEntry(entry) <= 0) ||
       cherenkov_tree_->GetEntry(entry) <= 0) {
     std::cerr << "ERROR: failed to read frame entry " << entry << std::endl;
     return false;
@@ -574,6 +597,8 @@ inline int trigger_reader_t::spill_id() const { return spill_id_; }
 inline int trigger_reader_t::frame_index() const { return frame_index_; }
 inline int trigger_reader_t::nframes() const { return nframes_; }
 inline int trigger_reader_t::nsources() const { return static_cast<int>(sources_.size()); }
+inline bool trigger_reader_t::has_trigger_hits() const { return trigger_.available; }
+inline bool trigger_reader_t::has_timing_hits() const { return timing_.available; }
 inline bool trigger_reader_t::has_timing() const { return has_timing_; }
 inline bool trigger_reader_t::has_rings() const { return has_rings_; }
 

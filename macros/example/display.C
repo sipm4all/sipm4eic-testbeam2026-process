@@ -220,23 +220,17 @@ draw_frame_delta(const trigger_reader_t &reader,
   auto histogram = new TH1D("display_delta", "", 400, -100, 100);
   histogram->SetDirectory(nullptr);
   histogram->SetStats(0);
-  histogram->SetTitle(Form("spill %d frame %d Cherenkov timing;#Deltat [ns];hits",
-                           reader.spill_id(), reader.frame_index()));
+  histogram->SetTitle(Form("spill %d frame %d Cherenkov timing;%s [ns];hits",
+                           reader.spill_id(), reader.frame_index(),
+                           use_reference ? "#Deltat" : "time"));
   histogram->SetLineColor(kBlack);
   histogram->SetFillColor(kAzure - 9);
 
-  double reference = reference_time;
-  if (!use_reference) {
-    reference = std::numeric_limits<double>::infinity();
-    for (const auto &hit : reader.cherenkov_hits())
-      if (std::isfinite(hit.time))
-        reference = std::min(reference, hit.time);
-  }
-  if (std::isfinite(reference)) {
-    for (const auto &hit : reader.cherenkov_hits()) {
-      if (std::isfinite(hit.time))
-        histogram->Fill((hit.time - reference) * time_to_ns);
-    }
+  for (const auto &hit : reader.cherenkov_hits()) {
+    if (!std::isfinite(hit.time))
+      continue;
+    const double value = use_reference ? hit.time - reference_time : hit.time;
+    histogram->Fill(value * time_to_ns);
   }
 
   gPad->Clear();
@@ -342,7 +336,7 @@ draw_frame_map(trigger_reader_t &reader,
   }
 
   for (const auto &hit : drawable) {
-    auto dt = (use_reference ? hit.time - reference_time : hit.time - vmin) * time_to_ns;
+    auto dt = (use_reference ? hit.time - reference_time : hit.time) * time_to_ns;
     const int hit_color = color_index(dt, color_min, color_max);
     auto box = new TBox(hit.x - 0.5 * pixel_size, hit.y - 0.5 * pixel_size,
                         hit.x + 0.5 * pixel_size, hit.y + 0.5 * pixel_size);
@@ -377,7 +371,7 @@ draw_frame_map(trigger_reader_t &reader,
       circle->SetFillStyle(0);
       const double ring_value = use_reference ?
         (ring.time - reference_time) * time_to_ns :
-        (ring.time - vmin) * time_to_ns;
+        ring.time * time_to_ns;
       circle->SetLineColor(color_index(ring_value, color_min, color_max));
       circle->SetLineWidth(2);
       circle->Draw("same");
@@ -434,6 +428,21 @@ passes_selections(const trigger_reader_t &reader,
   return true;
 }
 
+bool
+validate_selections(const trigger_reader_t &reader,
+                    const std::vector<selection_ptr_t> &selections)
+{
+  for (const auto &selection : selections) {
+    if (const auto trigger = dynamic_cast<const trigger_selection_t *>(selection.get());
+        trigger && trigger->enabled && !reader.has_trigger_hits()) {
+      std::cerr << "ERROR: trigger selection requested, but input has no trigger tree"
+                << std::endl;
+      return false;
+    }
+  }
+  return true;
+}
+
 void
 display_frames(const char *filename,
                const reference_ptr_t &reference,
@@ -446,6 +455,8 @@ display_frames(const char *filename,
 {
   trigger_reader_t reader;
   if (!reader.open(filename, ring_name ? ring_name : "ring"))
+    return;
+  if (!validate_selections(reader, selections))
     return;
 
   auto canvas = make_display_canvas();
