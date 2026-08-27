@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# User configuration.
+# Fixed installation and process-data locations used by this workflow.
+PROCESS_DIR="/data/2026-testbeam/process"
+SCRIPT_DIR="/data/2026-testbeam/process/sipm4eic-testbeam2026-process/process/scripts"
 CONFIG_DIR="/data/2026-testbeam/process/sipm4eic-testbeam2026-process/process/config"
+
+# User configuration.
 CALIBRATION_CONFIG="${CONFIG_DIR}/calibration/calibration.20260824.v2.conf"
 CLOCK_CORRECTION_CONFING="${CONFIG_DIR}/calibration/clock-corrections.20260824.conf"
 TRIGGER_CONFIG="${CONFIG_DIR}/trigger/timing.conf"
@@ -15,8 +19,6 @@ USE_GPU=1
 OVERWRITE=0
 STAGES=()
 
-SCRIPT_DIR="/data/2026-testbeam/process/sipm4eic-testbeam2026-process/process/scripts"
-PROCESS_DIR="/data/2026-testbeam/process"
 
 usage()
 {
