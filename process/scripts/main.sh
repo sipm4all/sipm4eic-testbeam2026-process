@@ -3,7 +3,7 @@ set -euo pipefail
 
 # User configuration.
 CONFIG_DIR="/data/2026-testbeam/process/sipm4eic-testbeam2026-process/process/config"
-CALIBRATION_CONFIG="${CONFIG_DIR}/calibration/calibration.20260824.conf"
+CALIBRATION_CONFIG="${CONFIG_DIR}/calibration/calibration.20260824.v2.conf"
 CLOCK_CORRECTION_CONF="${CONFIG_DIR}/calibration/clock-corrections.20260824.conf"
 TRIGGER_CONFIG="${CONFIG_DIR}/trigger/timing.conf"
 TRIGGER_TAG="timing"
