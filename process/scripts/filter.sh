@@ -51,5 +51,8 @@ if [ "${overwrite}" -eq 1 ] || [ ! -f "${merged_output}" ]; then
 else
     echo " --- filtered output exists, skipping merge: ${merged_output}"
 fi
-rm -f "${outputs[@]}"
+echo " --- removing ${#outputs[@]} filtered spill files"
+rm -f -- "${outputs[@]}"
+remaining=("${output_dir}"/filtered."${filter_tag}"."${trigger_tag}".spill_*.root)
+[ ${#remaining[@]} -eq 0 ] || fail "could not remove filtered spill files"
 echo " --- filter workflow completed"
