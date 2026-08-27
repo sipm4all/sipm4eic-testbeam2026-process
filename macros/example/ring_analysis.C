@@ -90,6 +90,11 @@ ring_analysis(const char *filename = "ring.root",
       "hDeltaTRingVsDistanceUnmatched",
       "unmatched hit time vs signed radial residual;residual [mm];#Deltat [ns]",
       1024, -100., 100., 1024, -32., 32.);
+  auto hRingRadius = new TH1D(
+      "hRingRadius", "ring radius;radius [mm];rings", 512, 0., 128.);
+  auto hRingX0Y0 = new TH2D(
+      "hRingX0Y0", "ring center;x_{0} [mm];y_{0} [mm]",
+      400, -100., 100., 400, -100., 100.);
 
   long long nframes = 0;
   long long nselected_frames = 0;
@@ -112,6 +117,8 @@ ring_analysis(const char *filename = "ring.root",
         if (!std::isfinite(ring.time) || ring.radius <= 0.)
           continue;
         ++nrings;
+        hRingRadius->Fill(ring.radius);
+        hRingX0Y0->Fill(ring.x0, ring.y0);
 
         for (const auto &hit : reader.cherenkov_hits()) {
           if (!std::isfinite(hit.time) || !std::isfinite(hit.x) ||
@@ -162,6 +169,8 @@ ring_analysis(const char *filename = "ring.root",
   hDeltaTUnmatched->Write();
   hDistanceUnmatched->Write();
   hDeltaTVsDistanceUnmatched->Write();
+  hRingRadius->Write();
+  hRingX0Y0->Write();
   fout->Close();
 
   std::cout << "frames processed:        " << nframes << std::endl;
