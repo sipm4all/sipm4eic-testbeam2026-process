@@ -15,9 +15,8 @@ USE_GPU=1
 OVERWRITE=0
 STAGES=()
 
-ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
-SCRIPT_DIR="${ROOT_DIR}/process/scripts"
-DATA_ROOT="/data/2026-testbeam/process"
+SCRIPT_DIR="/data/2026-testbeam/process/sipm4eic-testbeam2026-process/process/scripts"
+PROCESS_DIR="/data/2026-testbeam/process"
 
 usage()
 {
@@ -89,14 +88,14 @@ run_one()
     [ "${do_timing}" -eq 1 ] && "${SCRIPT_DIR}/timing.sh" "${common[@]}" \
         --trigger "${TRIGGER_TAG}" --parallel-spills --jobs 8 "${overwrite[@]}"
 
-    [ "${do_timing}" -eq 1 ] && rm -f "${DATA_ROOT}/${run}/trigger/triggered.${TRIGGER_TAG}.spill_"*.root
+    [ "${do_timing}" -eq 1 ] && rm -f "${PROCESS_DIR}/${run}/trigger/triggered.${TRIGGER_TAG}.spill_"*.root
 
     local gpu=()
     [ "${USE_GPU}" -eq 1 ] && gpu+=(--gpu)
     [ "${do_ring}" -eq 1 ] && "${SCRIPT_DIR}/ring-finder.sh" "${common[@]}" \
         --trigger "${TRIGGER_TAG}" --parallel-spills --jobs 8 "${gpu[@]}" "${overwrite[@]}"
 
-    [ "${do_ring}" -eq 1 ] && rm -f "${DATA_ROOT}/${run}/trigger/timing.${TRIGGER_TAG}.spill_"*.root
+    [ "${do_ring}" -eq 1 ] && rm -f "${PROCESS_DIR}/${run}/trigger/timing.${TRIGGER_TAG}.spill_"*.root
 
     [ "${do_filter}" -eq 1 ] && "${SCRIPT_DIR}/filter.sh" "${common[@]}" \
         --trigger "${TRIGGER_TAG}" \
