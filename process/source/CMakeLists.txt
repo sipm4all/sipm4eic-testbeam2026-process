@@ -81,6 +81,7 @@ add_executable(after-pulse-suppressor after-pulse-suppressor.cc)
 add_executable(merger merger.cc)
 add_executable(trigger trigger.cc)
 add_executable(timing timing.cc)
+add_executable(filter filter.cc)
 add_executable(ring-finder-ransac ring-finder-ransac.cc)
 add_executable(ring-finder-hough ring-finder-hough.cc)
 if(RING_HOUGH_CUDA_ENABLED)
@@ -92,7 +93,7 @@ target_include_directories(validate_timing_estimator PRIVATE
 )
 target_link_libraries(validate_timing_estimator PRIVATE timing_estimator)
 
-foreach(target decoder dcalib calibrator coordinator cleaner checker sorter after-pulse-suppressor merger trigger timing ring-finder-ransac ring-finder-hough)
+foreach(target decoder dcalib calibrator coordinator cleaner checker sorter after-pulse-suppressor merger trigger timing filter ring-finder-ransac ring-finder-hough)
   target_compile_options(${target} PRIVATE ${ROOT_CFLAGS_LIST})
   target_link_libraries(${target} PRIVATE ${ROOT_LIBS_LIST} Boost::program_options)
 endforeach()
@@ -120,6 +121,7 @@ install(TARGETS
   merger
   trigger
   timing
+  filter
   ring-finder-ransac
   ring-finder-hough
   validate_timing_estimator
