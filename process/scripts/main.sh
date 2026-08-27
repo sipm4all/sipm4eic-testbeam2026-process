@@ -4,7 +4,7 @@ set -euo pipefail
 # User configuration.
 CONFIG_DIR="/data/2026-testbeam/process/sipm4eic-testbeam2026-process/process/config"
 CALIBRATION_CONFIG="${CONFIG_DIR}/calibration/calibration.20260824.conf"
-CLOCK_CORRECTIONS_CONFIG="${CONFIG_DIR}/calibration/clock-corrections.empty.conf"
+CLOCK_CORRECTION_CONF="${CONFIG_DIR}/calibration/clock-corrections.20260824.conf"
 TRIGGER_CONFIG="${CONFIG_DIR}/trigger/timing.conf"
 TRIGGER_TAG="timing"
 FILTER_CONFIG="${CONFIG_DIR}/filter/recodata.conf"
@@ -79,7 +79,7 @@ run_one()
 
     [ "${do_process}" -eq 1 ] && "${SCRIPTS}/process.sh" "${common[@]}" \
         --calibration "${CALIBRATION_CONFIG}" \
-        --clock "${CLOCK_CORRECTIONS_CONFIG}" \
+        --clock "${CLOCK_CORRECTION_CONF}" \
         "${overwrite[@]}"
 
     [ "${do_trigger}" -eq 1 ] && "${SCRIPTS}/trigger.sh" "${common[@]}" \
