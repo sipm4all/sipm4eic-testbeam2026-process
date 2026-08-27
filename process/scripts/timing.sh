@@ -9,7 +9,6 @@ ipath="/data/2026-testbeam/process"
 opath="/data/2026-testbeam/process"
 
 TIMING="${ROOT_DIR}/process/bin/timing"
-HADD="hadd"
 
 run=""
 TRIGGER_TAGS=()
@@ -32,10 +31,10 @@ required:
 
 options:
   --run-type TYPE                accepted for symmetry with the other workflows, default: physics
-  --parallel-spills              run timing on triggered.<tag>.spill_*.root in parallel and hadd
+  --parallel-spills              run timing on triggered.<tag>.spill_*.root in parallel
   --jobs N                       maximum parallel spill timing jobs, default: 8
   --overwrite                    overwrite existing timing outputs instead of skipping them
-  --clean-timing-spills          remove triggered.<tag>.timing.spill_*.root after hadd, default: keep them
+  --clean-timing-spills          legacy option; split spill outputs are retained by this workflow
   --help, -h                     show this help message
 
 examples:
@@ -147,9 +146,6 @@ esac
 if [ ! -x "${TIMING}" ]; then
     fail "${TIMING} does not exist or is not executable"
 fi
-if [ "${PARALLEL_SPILLS}" -eq 1 ] && ! command -v "${HADD}" >/dev/null 2>&1; then
-    fail "${HADD} was not found"
-fi
 
 irpath="${ipath}/${run}/trigger"
 if [ ! -d "${irpath}" ]; then
@@ -170,7 +166,7 @@ done
 echo " --- timing workflow started"
 
 for tag in "${TRIGGER_TAGS[@]}"; do
-    output="${orpath}/triggered.${tag}.timing.root"
+        output="${orpath}/timing.${tag}.root"
 
     if [ "${OVERWRITE}" -ne 1 ] && [ -f "${output}" ]; then
         echo " --- timing output exists, skipping tag ${tag}: ${output}"
@@ -182,7 +178,7 @@ for tag in "${TRIGGER_TAGS[@]}"; do
         [ -f "${input}" ] || fail "triggered input does not exist: ${input}"
 
         echo " --- timing tag ${tag}: ${input}"
-        run_job "${orpath}/triggered.${tag}.timing.log" \
+        run_job "${orpath}/timing.${tag}.log" \
             time -p "${TIMING}" --input "${input}" --output "${output}"
         continue
     fi
@@ -200,11 +196,11 @@ for tag in "${TRIGGER_TAGS[@]}"; do
         fname=$(basename "${input}")
         spill_id=${fname#triggered.${tag}.spill_}
         spill_id=${spill_id%.root}
-        spill_output="${orpath}/triggered.${tag}.timing.spill_${spill_id}.root"
+        spill_output="${orpath}/timing.${tag}.spill_${spill_id}.root"
         timing_spill_files+=("${spill_output}")
 
         wait_for_jobs "${JOBS}" timing_pids
-        run_job "${orpath}/triggered.${tag}.timing.spill_${spill_id}.log" bash -c '
+        run_job "${orpath}/timing.${tag}.spill_${spill_id}.log" bash -c '
             timing=$1
             input=$2
             output=$3
@@ -232,23 +228,7 @@ for tag in "${TRIGGER_TAGS[@]}"; do
         fail "timing tag ${tag} has ${#existing_timing_spills[@]} spill outputs, expected ${#spill_files[@]}"
     fi
 
-    run_job "${orpath}/triggered.${tag}.timing.log" bash -c '
-        hadd=$1
-        output=$2
-        clean_timing_spills=$3
-        overwrite=$4
-        shift 4
-
-        if [ "${overwrite}" -ne 1 ] && [ -f "${output}" ]; then
-            echo " --- timing output exists, skipping hadd: ${output}"
-            exit 0
-        fi
-
-        time -p "${hadd}" -f "${output}" "$@"
-        if [ "${clean_timing_spills}" -eq 1 ]; then
-            rm -f "$@"
-        fi
-    ' _ "${HADD}" "${output}" "${CLEAN_TIMING_SPILLS}" "${OVERWRITE}" "${existing_timing_spills[@]}"
+    echo " --- timing tag ${tag}: kept ${#existing_timing_spills[@]} spill files"
 done
 
 echo " --- timing workflow completed"

@@ -4,7 +4,6 @@ shopt -s nullglob
 
 ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 RING_FINDER="${ROOT_DIR}/process/bin/ring-finder-hough"
-HADD="hadd"
 
 run_type="physics"
 ipath="/data/2026-testbeam/process"
@@ -33,10 +32,10 @@ options:
   --run-type TYPE                default: physics
   --input-stage STAGE            trigger or timing, default: timing
   --gpu                          use the CUDA Hough backend
-  --parallel-spills              process split-spill files in parallel and hadd
+  --parallel-spills              process split-spill files in parallel
   --jobs N                       maximum parallel spill jobs, default: 8
   --overwrite                    overwrite existing ring outputs
-  --clean-ring-spills            remove ring spill files after hadd, default: keep
+  --clean-ring-spills            legacy option; split spill outputs are retained by this workflow
   --min-inliers N                minimum ring inliers
   --max-rings N                  maximum rings per frame
   --branch-name NAME             output ring tree name; default: ring
@@ -175,7 +174,6 @@ esac
 [[ "${jobs}" =~ ^[0-9]+$ ]] || fail "--jobs must be a positive integer"
 [ "${jobs}" -gt 0 ] || fail "--jobs must be greater than zero"
 [ -x "${RING_FINDER}" ] || fail "${RING_FINDER} does not exist or is not executable"
-command -v "${HADD}" >/dev/null 2>&1 || fail "${HADD} was not found"
 
 declare -A seen_tags=()
 for tag in "${trigger_tags[@]}"; do
@@ -194,11 +192,11 @@ mkdir -p "${orpath}"
 echo " --- ring-finder workflow started"
 for tag in "${trigger_tags[@]}"; do
     if [ "${input_stage}" = "timing" ]; then
-        input_prefix="triggered.${tag}.timing"
-        output_prefix="triggered.${tag}.timing.ring"
+        input_prefix="timing.${tag}"
+        output_prefix="rings.${tag}"
     else
         input_prefix="triggered.${tag}"
-        output_prefix="triggered.${tag}.ring"
+        output_prefix="rings.${tag}"
     fi
     output="${orpath}/${output_prefix}.root"
 
@@ -274,22 +272,7 @@ for tag in "${trigger_tags[@]}"; do
     [ ${#existing_outputs[@]} -eq ${#spill_files[@]} ] || \
         fail "ring tag ${tag} has ${#existing_outputs[@]} outputs, expected ${#spill_files[@]}"
 
-    run_job "${orpath}/${output_prefix}.log" bash -c '
-        hadd=$1
-        output=$2
-        clean=$3
-        overwrite=$4
-        shift 4
-        if [ "${overwrite}" -ne 1 ] && [ -f "${output}" ]; then
-            echo " --- ring output exists, skipping hadd: ${output}"
-            exit 0
-        fi
-        time -p "${hadd}" -f "${output}" "$@"
-        if [ "${clean}" -eq 1 ]; then
-            rm -f "$@"
-        fi
-    ' _ "${HADD}" "${output}" "${clean_ring_spills}" "${overwrite}" \
-        "${existing_outputs[@]}"
+    echo " --- ring tag ${tag}: kept ${#existing_outputs[@]} spill files"
 done
 
 echo " --- ring-finder workflow completed"

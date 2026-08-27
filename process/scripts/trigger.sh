@@ -9,7 +9,6 @@ ipath="/data/2026-testbeam/process"
 opath="/data/2026-testbeam/process"
 
 TRIGGER="${ROOT_DIR}/process/bin/trigger"
-HADD="hadd"
 
 run=""
 TRIGGER_CONFIGS=()
@@ -39,7 +38,7 @@ options:
   --input-prefix PREFIX          merged spill prefix, default derived from --devices
   --overwrite                    overwrite existing trigger outputs instead of skipping them
   --window, -w VALUE             trigger frame window, default: 256
-  --clean-triggered-spills       remove triggered.<tag>.spill_*.root after hadd, default: keep them
+  --clean-triggered-spills       legacy option; split spill outputs are retained by this workflow
   --help, -h                     show this help message
 
 examples:
@@ -189,9 +188,6 @@ awk "BEGIN { exit !(${TRIGGER_WINDOW} > 0) }" || fail "--window must be greater 
 if [ ! -x "${TRIGGER}" ]; then
     fail "${TRIGGER} does not exist or is not executable"
 fi
-if ! command -v "${HADD}" >/dev/null 2>&1; then
-    fail "${HADD} was not found"
-fi
 
 declare -A seen_trigger_tags=()
 for i in "${!TRIGGER_CONFIGS[@]}"; do
@@ -245,11 +241,6 @@ for i in "${!TRIGGER_CONFIGS[@]}"; do
     config=${TRIGGER_CONFIGS[$i]}
     echo " --- trigger config ${tag}: ${config}"
 
-    if [ "${OVERWRITE}" -ne 1 ] && [ -f "${orpath}/triggered.${tag}.root" ]; then
-        echo " --- triggered output exists, skipping tag ${tag}: ${orpath}/triggered.${tag}.root"
-        continue
-    fi
-
     trigger_pids=()
     for spill_id in "${spill_ids[@]}"; do
         merged_spill="${irpath}/${merge_prefix}.spill_${spill_id}.root"
@@ -300,23 +291,7 @@ for i in "${!TRIGGER_CONFIGS[@]}"; do
         fail "trigger tag ${tag} has ${#triggered_files[@]} files, expected ${#spill_ids[@]}"
     fi
 
-    run_job "${orpath}/triggered.${tag}.log" bash -c '
-        hadd=$1
-        output=$2
-        clean_triggered_spills=$3
-        overwrite=$4
-        shift 4
-
-        if [ "${overwrite}" -ne 1 ] && [ -f "${output}" ]; then
-            echo " --- triggered output exists, skipping hadd: ${output}"
-            exit 0
-        fi
-
-        time -p "${hadd}" -f "${output}" "$@"
-        if [ "${clean_triggered_spills}" -eq 1 ]; then
-            rm -f "$@"
-        fi
-    ' _ "${HADD}" "${orpath}/triggered.${tag}.root" "${CLEAN_TRIGGERED_SPILLS}" "${OVERWRITE}" "${triggered_files[@]}"
+    echo " --- trigger tag ${tag}: kept ${#triggered_files[@]} spill files"
 done
 
 echo " --- trigger jobs completed"
