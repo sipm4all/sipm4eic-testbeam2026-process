@@ -862,6 +862,37 @@ int main(int argc, char **argv)
   auto h_reflection = new TH2D("hMirrorXY", "mirror reflection points;x [mm];y [mm]", 1000, -1000., 1000., 1000, -1000., 1000.);
   auto h_detector = new TH2D("hDetectorXY", "detector hits;x [mm];y [mm]", 400, -200., 200., 400, -200., 200.);
 
+  // Recreate all frame-aligned trees entry-by-entry, appending the IRT angles
+  // to the Cherenkov tree while preserving the original branch contents.
+  std::unique_ptr<TFile> input_file(TFile::Open(input.c_str(), "READ"));
+  TTree *input_cherenkov = input_file ?
+      dynamic_cast<TTree *>(input_file->Get("cherenkov")) : nullptr;
+  TTree *output_cherenkov = nullptr;
+  UShort_t cherenkov_nhits = 0;
+  Float_t cherenkov_x[65535] = {};
+  Float_t cherenkov_y[65535] = {};
+  Float_t cherenkov_theta[65535] = {};
+  Float_t cherenkov_phi[65535] = {};
+  if (!input_cherenkov ||
+      input_cherenkov->SetBranchAddress("nhits", &cherenkov_nhits) < 0 ||
+      input_cherenkov->SetBranchAddress("x", cherenkov_x) < 0 ||
+      input_cherenkov->SetBranchAddress("y", cherenkov_y) < 0) {
+    std::cerr << "ERROR: input does not contain a usable cherenkov tree\n";
+    return 1;
+  }
+  file->cd();
+  output_cherenkov = input_cherenkov->CloneTree(0);
+  output_cherenkov->SetName("cherenkov");
+  auto output_irt = new TTree("irt", "IRT reconstruction, one entry per frame");
+  output_irt->Branch("nhits", &cherenkov_nhits, "nhits/s");
+  output_irt->Branch("theta", cherenkov_theta, "theta[nhits]/F");
+  output_irt->Branch("phi", cherenkov_phi, "phi[nhits]/F");
+
+  TTree *input_frames = dynamic_cast<TTree *>(input_file->Get("frames"));
+  TTree *input_ring = dynamic_cast<TTree *>(input_file->Get("ring"));
+  TTree *output_frames = input_frames ? input_frames->CloneTree(0) : nullptr;
+  TTree *output_ring = input_ring ? input_ring->CloneTree(0) : nullptr;
+
   Long64_t frames = 0, hits = 0, valid = 0;
   for (const auto &point : points) {
         ++hits;
@@ -876,7 +907,43 @@ int main(int argc, char **argv)
         h_detector->Fill(point.first, point.second);
   }
   frames = frames_read;
-  file->Write();
+  for (Long64_t entry = 0; entry < input_cherenkov->GetEntries(); ++entry) {
+    if (input_frames && input_frames->GetEntry(entry) <= 0)
+      return 1;
+    if (input_ring && input_ring->GetEntry(entry) <= 0)
+      return 1;
+    if (input_cherenkov->GetEntry(entry) <= 0)
+      return 1;
+    if (cherenkov_nhits > 65535) {
+      std::cerr << "ERROR: cherenkov hit count exceeds output capacity\n";
+      return 1;
+    }
+    for (unsigned int i = 0; i < cherenkov_nhits; ++i) {
+      const auto photon = irt::reconstruct(fitted_geometry,
+                                            cherenkov_x[i], cherenkov_y[i]);
+      cherenkov_theta[i] = photon.valid ? static_cast<Float_t>(photon.theta) :
+                                           std::numeric_limits<Float_t>::quiet_NaN();
+      cherenkov_phi[i] = photon.valid ? static_cast<Float_t>(photon.phi) :
+                                         std::numeric_limits<Float_t>::quiet_NaN();
+    }
+    if (output_frames && output_frames->Fill() < 0)
+      return 1;
+    if (output_ring && output_ring->Fill() < 0)
+      return 1;
+    output_cherenkov->Fill();
+    output_irt->Fill();
+  }
+  if (output_frames)
+    output_frames->Write();
+  if (output_ring)
+    output_ring->Write();
+  output_cherenkov->Write();
+  output_irt->Write();
+  h_angle->Write();
+  h_phi->Write();
+  h_theta_phi->Write();
+  h_reflection->Write();
+  h_detector->Write();
   file->Close();
   std::cout << "frames processed: " << frames << '\n'
             << "Cherenkov hits:  " << hits << '\n'

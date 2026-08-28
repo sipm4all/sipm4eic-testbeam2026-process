@@ -31,6 +31,8 @@ struct hit_t {
   double time = 0.;
   double x = std::numeric_limits<double>::quiet_NaN();
   double y = std::numeric_limits<double>::quiet_NaN();
+  double theta = std::numeric_limits<double>::quiet_NaN();
+  double phi = std::numeric_limits<double>::quiet_NaN();
 };
 
 struct ring_t {
@@ -98,6 +100,8 @@ private:
     std::vector<Float_t> time;
     std::vector<Float_t> x;
     std::vector<Float_t> y;
+    std::vector<Float_t> theta;
+    std::vector<Float_t> phi;
 
     void reset();
     bool bind(TTree *tree, bool is_trigger, bool required);
@@ -115,6 +119,7 @@ private:
   TTree *trigger_tree_ = nullptr;
   TTree *timing_tree_ = nullptr;
   TTree *cherenkov_tree_ = nullptr;
+  TTree *irt_tree_ = nullptr;
   TTree *ring_tree_ = nullptr;
   TTree *meta_tree_ = nullptr;
   std::string ring_name_ = "ring";
@@ -126,6 +131,10 @@ private:
   category_t trigger_;
   category_t timing_;
   category_t cherenkov_;
+  UShort_t irt_nhits_ = 0;
+  Float_t irt_theta_[maxhits_];
+  Float_t irt_phi_[maxhits_];
+  bool has_irt_ = false;
 
   bool has_timing_ = false;
   bool timing_valid_ = false;
@@ -208,6 +217,8 @@ trigger_reader_t::category_t::reset()
   time.clear();
   x.clear();
   y.clear();
+  theta.clear();
+  phi.clear();
 }
 
 inline bool
@@ -231,11 +242,15 @@ trigger_reader_t::category_t::bind(TTree *tree, bool is_trigger, bool required)
     fine.resize(n);
     x.resize(n);
     y.resize(n);
+    theta.resize(n);
+    phi.resize(n);
   }
   if (!trigger)
     counter.clear();
   else
     counter.resize(n);
+  if (!has_branch(tree, "theta")) theta.clear();
+  if (!has_branch(tree, "phi")) phi.clear();
 
   if (!trigger_reader_t::bind(tree, "nhits", &nhits) ||
       !trigger_reader_t::bind(tree, "time", time.data()))
@@ -259,7 +274,9 @@ trigger_reader_t::category_t::bind(TTree *tree, bool is_trigger, bool required)
          bind_optional("tdc", tdc.data()) &&
          bind_optional("fine", fine.data()) &&
          trigger_reader_t::bind(tree, "x", x.data()) &&
-         trigger_reader_t::bind(tree, "y", y.data());
+         trigger_reader_t::bind(tree, "y", y.data()) &&
+         (!has_branch(tree, "theta") || bind(tree, "theta", theta.data())) &&
+         (!has_branch(tree, "phi") || bind(tree, "phi", phi.data()));
 }
 
 inline bool
@@ -293,6 +310,8 @@ trigger_reader_t::category_t::load_hits(std::vector<hit_t> &out) const
       hit.fine = fine[i];
       hit.x = x[i];
       hit.y = y[i];
+      hit.theta = theta.empty() ? std::numeric_limits<double>::quiet_NaN() : theta[i];
+      hit.phi = phi.empty() ? std::numeric_limits<double>::quiet_NaN() : phi[i];
     }
     out.push_back(hit);
   }
@@ -313,11 +332,13 @@ trigger_reader_t::reset()
   trigger_tree_ = nullptr;
   timing_tree_ = nullptr;
   cherenkov_tree_ = nullptr;
+  irt_tree_ = nullptr;
   ring_tree_ = nullptr;
   meta_tree_ = nullptr;
   trigger_.reset();
   timing_.reset();
   cherenkov_.reset();
+  has_irt_ = false;
 
   has_frame_time_ = false;
   has_timing_ = false;
@@ -380,10 +401,22 @@ trigger_reader_t::open(const std::string &filename,
     return false;
   }
 
+  irt_tree_ = (TTree *)file_->Get("irt");
+  if (irt_tree_) {
+    if (!bind(irt_tree_, "nhits", &irt_nhits_) ||
+        !bind(irt_tree_, "theta", irt_theta_) ||
+        !bind(irt_tree_, "phi", irt_phi_)) {
+      reset();
+      return false;
+    }
+    has_irt_ = true;
+  }
+
   entries_ = frames_tree_->GetEntries();
   if ((trigger_tree_ && trigger_tree_->GetEntries() != entries_) ||
       (timing_tree_ && timing_tree_->GetEntries() != entries_) ||
-      cherenkov_tree_->GetEntries() != entries_) {
+      cherenkov_tree_->GetEntries() != entries_ ||
+      (irt_tree_ && irt_tree_->GetEntries() != entries_)) {
     std::cerr << "ERROR: frame-tree entry-count mismatch" << std::endl;
     reset();
     return false;
@@ -521,7 +554,8 @@ trigger_reader_t::load_frame(Long64_t entry)
   if (frames_tree_->GetEntry(entry) <= 0 ||
       (trigger_tree_ && trigger_tree_->GetEntry(entry) <= 0) ||
       (timing_tree_ && timing_tree_->GetEntry(entry) <= 0) ||
-      cherenkov_tree_->GetEntry(entry) <= 0) {
+      cherenkov_tree_->GetEntry(entry) <= 0 ||
+      (irt_tree_ && irt_tree_->GetEntry(entry) <= 0)) {
     std::cerr << "ERROR: failed to read frame entry " << entry << std::endl;
     return false;
   }
@@ -533,6 +567,16 @@ trigger_reader_t::load_frame(Long64_t entry)
       !timing_.load_hits(timing_hits_) ||
       !cherenkov_.load_hits(cherenkov_hits_))
     return false;
+  if (has_irt_) {
+    if (irt_nhits_ != cherenkov_hits_.size()) {
+      std::cerr << "ERROR: IRT/Cherenkov hit-count mismatch" << std::endl;
+      return false;
+    }
+    for (unsigned int i = 0; i < irt_nhits_; ++i) {
+      cherenkov_hits_[i].theta = irt_theta_[i];
+      cherenkov_hits_[i].phi = irt_phi_[i];
+    }
+  }
 
   rings_.clear();
   if (has_rings_) {

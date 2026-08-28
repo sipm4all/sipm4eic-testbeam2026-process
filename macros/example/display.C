@@ -8,6 +8,7 @@
 #include <TStyle.h>
 #include <TText.h>
 #include <TEllipse.h>
+#include <TMarker.h>
 
 #include <algorithm>
 #include <array>
@@ -22,7 +23,7 @@ constexpr double time_min = -100.;
 constexpr double time_max = 100.;
 constexpr double pixel_size = 3.0;
 // These must match the ring-finder-ransac settings used to produce the ring tree.
-constexpr double ring_match_tolerance = 5.;
+constexpr double ring_match_tolerance = 6.;
 constexpr double ring_match_time_window = 4.;
 constexpr bool draw_matched_ring_hits = true;
 
@@ -396,6 +397,55 @@ draw_frame_map(trigger_reader_t &reader,
   draw_frame_delta(reader, use_reference, reference_time);
 }
 
+void
+draw_frame_angles(const trigger_reader_t &reader,
+                  bool use_reference,
+                  double reference_time)
+{
+  static TCanvas *canvas = nullptr;
+  if (!canvas) {
+    canvas = new TCanvas("cAngles", "Cherenkov angles", 800, 800);
+    canvas->SetMargin(0.15, 0.15, 0.15, 0.15);
+    canvas->SetFillColor(kWhite);
+    canvas->SetFrameFillColor(kWhite);
+  }
+  canvas->cd();
+  gPad->Clear();
+  auto frame = gPad->DrawFrame(-M_PI, 0., M_PI, 0.1);
+  frame->SetTitle(Form("spill %d frame %d;#phi [rad];#theta [rad]",
+                       reader.spill_id(), reader.frame_index()));
+  frame->SetStats(0);
+  gStyle->SetPalette(kBird);
+
+  for (const auto &hit : reader.cherenkov_hits()) {
+    if (!std::isfinite(hit.theta) || !std::isfinite(hit.phi) ||
+        !std::isfinite(hit.time))
+      continue;
+    const double dt = (use_reference ? hit.time - reference_time : hit.time) * 3.125;
+    const int colour = color_index(dt, time_min, time_max);
+    auto marker = new TMarker(hit.phi, hit.theta, 21);
+    marker->SetMarkerColor(colour);
+    marker->SetMarkerSize(1.2);
+    marker->Draw("same");
+
+    bool selected = false;
+    for (const auto &ring : reader.rings()) {
+      if (is_ring_hit(hit, ring)) {
+        selected = true;
+        break;
+      }
+    }
+    if (draw_matched_ring_hits && selected) {
+      auto outline = new TMarker(hit.phi, hit.theta, 24);
+      outline->SetMarkerColor(colour);
+      outline->SetMarkerSize(1.55);
+      outline->Draw("same");
+    }
+  }
+  gPad->Modified();
+  gPad->Update();
+}
+
 } // namespace
 
 
@@ -493,6 +543,7 @@ display_frames(const char *filename,
 
       canvas->cd();
       draw_frame_map(reader, use_reference, reference_time);
+      draw_frame_angles(reader, use_reference, reference_time);
 
       if (fixed_frame)
         return;
