@@ -9,6 +9,7 @@
 #include <TText.h>
 #include <TEllipse.h>
 #include <TMarker.h>
+#include <TGraph.h>
 
 #include <algorithm>
 #include <array>
@@ -264,7 +265,6 @@ draw_frame_map(trigger_reader_t &reader,
   constexpr double color_min = time_min;
   constexpr double color_max = time_max;
 
-  gStyle->SetPalette(kBird);
   gStyle->SetPalette(kRainbow);
 
   gPad->Clear();
@@ -414,8 +414,42 @@ draw_frame_angles(const trigger_reader_t &reader,
   auto frame = gPad->DrawFrame(-M_PI, 0., M_PI, 0.1);
   frame->SetTitle(Form("spill %d frame %d;#phi [rad];#theta [rad]",
                        reader.spill_id(), reader.frame_index()));
+  frame->GetXaxis()->SetTitleOffset(1.5);
+  frame->GetYaxis()->SetTitleOffset(1.5);
   frame->SetStats(0);
-  gStyle->SetPalette(kBird);
+  gStyle->SetPalette(kRainbow);
+
+  // Keep the angle display colour scale identical to the spatial display.
+  constexpr int n_palette_bins = 48;
+  const double palette_x1 = 3.35;
+  const double palette_x2 = 3.55;
+  const double palette_y1 = 0.;
+  const double palette_y2 = 0.1;
+  for (int i = 0; i < n_palette_bins; ++i) {
+    const double y1 = palette_y1 + (palette_y2 - palette_y1) * i / n_palette_bins;
+    const double y2 = palette_y1 + (palette_y2 - palette_y1) * (i + 1) / n_palette_bins;
+    const double value = time_min + (time_max - time_min) * (i + 0.5) / n_palette_bins;
+    auto box = new TBox(palette_x1, y1, palette_x2, y2);
+    box->SetFillColor(color_index(value, time_min, time_max));
+    box->SetLineColor(color_index(value, time_min, time_max));
+    box->Draw("same");
+  }
+  auto palette_title = new TText((palette_x1 + palette_x2) * 0.5,
+                                 palette_y2 + 0.008, "t (ns)");
+  palette_title->SetTextSize(0.035);
+  palette_title->SetTextFont(42);
+  palette_title->SetTextAlign(21);
+  palette_title->Draw("same");
+  for (int i = 0; i <= 4; ++i) {
+    const double f = i / 4.;
+    auto label = new TText(palette_x2 + 0.04,
+                           palette_y1 + f * (palette_y2 - palette_y1),
+                           Form("%.3g", time_min + f * (time_max - time_min)));
+    label->SetTextSize(0.035);
+    label->SetTextFont(42);
+    label->SetTextAlign(12);
+    label->Draw("same");
+  }
 
   for (const auto &hit : reader.cherenkov_hits()) {
     if (!std::isfinite(hit.theta) || !std::isfinite(hit.phi) ||
@@ -423,10 +457,12 @@ draw_frame_angles(const trigger_reader_t &reader,
       continue;
     const double dt = (use_reference ? hit.time - reference_time : hit.time) * 3.125;
     const int colour = color_index(dt, time_min, time_max);
-    auto marker = new TMarker(hit.phi, hit.theta, 21);
-    marker->SetMarkerColor(colour);
-    marker->SetMarkerSize(1.2);
-    marker->Draw("same");
+    auto graph = new TGraph(1);
+    graph->SetPoint(0, hit.phi, hit.theta);
+    graph->SetMarkerStyle(21);
+    graph->SetMarkerColor(colour);
+    graph->SetMarkerSize(1.2);
+    graph->Draw("P same");
 
     bool selected = false;
     for (const auto &ring : reader.rings()) {
@@ -436,10 +472,12 @@ draw_frame_angles(const trigger_reader_t &reader,
       }
     }
     if (draw_matched_ring_hits && selected) {
-      auto outline = new TMarker(hit.phi, hit.theta, 24);
+      auto outline = new TGraph(1);
+      outline->SetPoint(0, hit.phi, hit.theta);
+      outline->SetMarkerStyle(24);
       outline->SetMarkerColor(colour);
-      outline->SetMarkerSize(1.55);
-      outline->Draw("same");
+      outline->SetMarkerSize(2.0);
+      outline->Draw("P same");
     }
   }
   gPad->Modified();

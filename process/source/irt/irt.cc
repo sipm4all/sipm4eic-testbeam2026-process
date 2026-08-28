@@ -8,6 +8,7 @@
 #include <TMatrixD.h>
 #include <TVectorD.h>
 #include <TFile.h>
+#include <TKey.h>
 #include <TH1D.h>
 #include <TH2D.h>
 
@@ -893,6 +894,23 @@ int main(int argc, char **argv)
   TTree *output_frames = input_frames ? input_frames->CloneTree(0) : nullptr;
   TTree *output_ring = input_ring ? input_ring->CloneTree(0) : nullptr;
 
+  TIter key_iterator(input_file->GetListOfKeys());
+  while (auto *key = dynamic_cast<TKey *>(key_iterator())) {
+    const std::string name = key->GetName();
+    if (name == "frames" || name == "ring" || name == "cherenkov")
+      continue;
+    auto *tree = dynamic_cast<TTree *>(key->ReadObj());
+    if (!tree)
+      continue;
+    file->cd();
+    auto *copy = tree->CloneTree(-1, "fast");
+    if (!copy) {
+      std::cerr << "ERROR: could not clone input tree '" << name << "'\n";
+      return 1;
+    }
+    copy->Write();
+  }
+
   Long64_t frames = 0, hits = 0, valid = 0;
   for (const auto &point : points) {
         ++hits;
@@ -933,12 +951,7 @@ int main(int argc, char **argv)
     output_cherenkov->Fill();
     output_irt->Fill();
   }
-  if (output_frames)
-    output_frames->Write();
-  if (output_ring)
-    output_ring->Write();
-  output_cherenkov->Write();
-  output_irt->Write();
+  file->Write("", TObject::kOverwrite);
   h_angle->Write();
   h_phi->Write();
   h_theta_phi->Write();
