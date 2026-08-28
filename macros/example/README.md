@@ -374,3 +374,50 @@ of a new fit performed by `deltat.C`.
 
 
 `trigger_reader.C` demonstrates the high-level triggered-frame reader. It prints each spill, the number of frames, the number of participating sources from `spill_participation`, and then loops over the trigger/timing/Cherenkov hit collections for each frame.
+
+## irt_analysis.C
+
+`irt_analysis.C` estimates the Cherenkov angle using the IRT `theta` values
+without using the reconstructed ring geometry for hit association. The ring
+tree is still used as an event-level filter: only frames containing exactly
+one stored ring are analyzed by default.
+
+For each selected frame, the macro scans a two-dimensional Hough accumulator
+in `(theta,time)`:
+
+```text
+theta: 100 bins over [0, 0.1] rad
+time:   64 bins over [-32, 32] native time units
+```
+
+Each hit contributes a two-dimensional Gaussian weight. The configured widths
+are:
+
+```text
+resolution_theta = 0.002 rad
+resolution_time  = 1 native time unit
+```
+
+The accumulator maximum defines the candidate `(theta,time)`. Hits are then
+selected when both residuals are within four corresponding resolutions:
+
+```text
+abs(hit.theta - theta_peak) <= 4 * resolution_theta
+abs(hit.time  - time_peak)  <= 4 * resolution_time
+```
+
+The selected hit `theta` values are averaged once per accepted frame. The
+result is written to `hAverageCherenkovThetaVsNHits`, whose axes are the number
+of selected hits and the average Cherenkov angle in radians.
+
+Example:
+
+```cpp
+.L macros/example/irt_analysis.C+
+irt_analysis("irt.filtered.recodata.timing.sps.root", {},
+             "irt_analysis.theta-time.root", "ring", 10000)
+```
+
+The final `max_events` argument limits the number of frames; omit it or use
+`-1` for all frames. Optional event selections can be passed in the second
+argument using the same selection objects as `display.C`.
