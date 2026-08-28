@@ -84,6 +84,7 @@ add_executable(timing timing.cc)
 add_executable(filter filter.cc)
 add_executable(ring-finder-ransac ring-finder-ransac.cc)
 add_executable(ring-finder-hough ring-finder-hough.cc)
+add_executable(irt irt/irt.cc)
 if(RING_HOUGH_CUDA_ENABLED)
   add_executable(ring-finder-roberto ring-finder-roberto/main.cc)
 endif()
@@ -93,7 +94,12 @@ target_include_directories(validate_timing_estimator PRIVATE
 )
 target_link_libraries(validate_timing_estimator PRIVATE timing_estimator)
 
-foreach(target decoder dcalib calibrator coordinator cleaner checker sorter after-pulse-suppressor merger trigger timing filter ring-finder-ransac ring-finder-hough)
+target_include_directories(irt PRIVATE
+  ${CMAKE_CURRENT_LIST_DIR}/irt
+  ${CMAKE_CURRENT_LIST_DIR}/../../macros/lib
+)
+
+foreach(target decoder dcalib calibrator coordinator cleaner checker sorter after-pulse-suppressor merger trigger timing filter ring-finder-ransac ring-finder-hough irt)
   target_compile_options(${target} PRIVATE ${ROOT_CFLAGS_LIST})
   target_link_libraries(${target} PRIVATE ${ROOT_LIBS_LIST} Boost::program_options)
 endforeach()
@@ -124,6 +130,7 @@ install(TARGETS
   filter
   ring-finder-ransac
   ring-finder-hough
+  irt
   validate_timing_estimator
   ARCHIVE DESTINATION lib
   LIBRARY DESTINATION lib

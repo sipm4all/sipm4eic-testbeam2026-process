@@ -1,0 +1,141 @@
+IRT theta-phi harmonic investigation
+=====================================
+
+Data sample
+-----------
+Input: filtered.recodata.fingers.root
+Selection: exactly one accepted ring per frame
+Statistics: 10000 frames, 144435 Cherenkov hits
+Objective: robust residual of reconstructed theta minus target theta
+Target theta: 0.037921467 rad
+
+Baseline geometry
+-----------------
+track eta = 3.09673
+track phi = 0.262884
+mirror shift = (+2.11642, -12.6748, 0) mm
+detector centre shift = (+0.197618, +0.00373014, 0) mm
+
+Baseline theta-versus-phi harmonics
+-----------------------------------
+A0  = -0.000451482
+Ac1 = -0.000807094
+As1 = -0.000505082
+Ac2 =  0.000903788
+As2 =  0.00189909
+
+Focused track fit
+------------------
+Fitting only track eta and track phi, with all geometry fixed, gave:
+track eta = 3.09398 +/- 0.00033
+track phi = 0.262245 +/- 0.00018
+
+The fitted-track harmonics were:
+A0  = -0.000417149
+Ac1 = -0.000855910
+As1 = -0.000379160
+Ac2 =  0.000901842
+As2 =  0.00192554
+
+Conclusion: the global track direction does not remove the modulation. The
+harmonic coefficients are essentially unchanged, especially the dominant
+second harmonic.
+
+One-parameter scans from the nominal geometry
+----------------------------------------------
+The scan objective and numerical derivative at the nominal point were:
+
+parameter                       best scan value     derivative
+emission_z                      2400 (lower edge)    256
+track_eta                       3.1                  2.037e7
+track_phi                       0.2625              -5.093e7
+mirror_delta_x                  0                    -8029
+mirror_delta_y                  0                     806
+mirror_delta_z                  0                    -6196
+detector_center_delta_z         0                     5832
+detector_center_delta_x         0                     9600
+detector_center_delta_y         0                     -518
+detector_theta                  -0.65               -1.116e8
+detector_phi                    0                    -3.054e5
+detector_tilt_x                 0                     1.446e7
+detector_tilt_y                 0                    -9.25e5
+
+Interpretation
+--------------
+The strongest remaining responses are detector_theta and detector_tilt_x,
+followed by track_phi, track_eta, and detector centre x. Detector y, detector
+phi, mirror y, and the longitudinal coordinates are much less influential in
+this objective. The apparent emission_z preference at the scan boundary is
+not evidence of a reliable measurement; it indicates weak or monotonic
+sensitivity over the tested interval.
+
+Next diagnostic
+---------------
+Fit detector_theta and detector_tilt_x together while keeping track, mirror,
+and detector centre fixed. Then inspect the harmonics again. If the second
+harmonic remains, test detector_theta with detector centre x and detector
+tilt_y separately, followed by a controlled two-parameter fit. Do not release
+all parameters simultaneously until these correlations are understood.
+
+Focused detector fit
+---------------------
+The fit of detector_theta and detector_tilt_x on the same 10000-frame sample
+gave:
+detector_theta = -0.648041 +/- 0.001601 rad
+detector_tilt_x = 1.34337e-05 +/- 0.001599 rad
+
+The fitted harmonics were:
+A0  = -0.000455810
+Ac1 = -0.000801748
+As1 = -0.000526943
+Ac2 =  0.000903656
+As2 =  0.00189437
+
+Conclusion: this pair does not improve the modulation. The fitted theta is
+effectively the nominal value and the tilt is consistent with zero. The
+dominant second harmonic is unchanged. Detector_theta is therefore sensitive
+in the scalar theta objective but is not the source of the residual
+theta-versus-phi pattern.
+
+Transverse four-parameter fit
+------------------------------
+Fitting mirror x/y and detector centre x/y together gave:
+mirror = (-86.41, -60.93) mm relative to the baseline fit
+detector = (-100.00, -53.28) mm relative to the baseline fit
+The detector x parameter reached its lower limit. The scalar objective was
+lower, but the solution is clearly unphysical and is not a valid geometry
+interpretation.
+
+The harmonics at that boundary solution were:
+A0  =  0.000874
+Ac1 = -0.001616
+As1 = -0.001430
+Ac2 =  0.000700
+As2 =  0.001714
+
+Conclusion: the scalar theta objective can be reduced by exploiting broad
+transverse geometry degeneracies, but this does not remove the harmonic
+pattern and drives parameters to unphysical boundaries. The harmonic pattern
+must therefore be fitted directly, or the remaining issue is in the detector
+hit-coordinate model rather than these global geometry shifts.
+
+Direct harmonic-power fit
+--------------------------
+I tested an objective equal to Ac1^2+As1^2+Ac2^2+As2^2, fitting detector_theta,
+detector_phi, detector_tilt_x, and detector_tilt_y together. The result was:
+detector_theta = -0.648056 rad
+detector_phi = -0.000880 rad
+detector_tilt_x = -2.06e-06 rad
+detector_tilt_y = 5.31e-04 rad
+
+The resulting coefficients were:
+A0  = -0.000391
+Ac1 =  0.000117
+As1 = -0.000675
+Ac2 =  0.000918
+As2 =  0.001960
+
+This is not an improvement: the dominant second-harmonic amplitude remains
+unchanged or larger. The large parameter uncertainties also show that this
+direct harmonic fit is weakly identified and should not be used alone as a
+geometry calibration.
