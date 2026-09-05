@@ -417,12 +417,16 @@ final_pids=()
 for spill_id in "${spill_ids[@]}"; do
     device_outputs=()
     for dpath in "${device_dirs[@]}"; do
-        files=("${dpath}"/aps.sorted.spill_${spill_id}.root)
-        device_outputs+=("${files[@]}")
+        input_file="${dpath}/aps.sorted.spill_${spill_id}.root"
+        if [ -f "${input_file}" ]; then
+            device_outputs+=("${input_file}")
+        else
+            echo "WARNING: missing device spill, skipping input: ${input_file}"
+        fi
     done
     if [ ${#device_outputs[@]} -eq 0 ]; then
-        echo " --- no device-level files found for spill ${spill_id} "
-        exit 1
+        echo "WARNING: no device-level files found for spill ${spill_id}, skipping"
+        continue
     fi
     run_job "${orpath}/${merge_prefix}.spill_${spill_id}.log" bash -c '
         set -euo pipefail
