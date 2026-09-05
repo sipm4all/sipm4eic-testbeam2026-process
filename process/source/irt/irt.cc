@@ -217,8 +217,10 @@ int main(int argc, char **argv)
     ("fit-mirror-phi", po::bool_switch(&fit_mirror_phi), "fit mirror rotation vector and track phi with eta fixed to 3.16")
     ("harmonic-objective", po::bool_switch(&harmonic_objective), "include theta-versus-phi harmonic power in configured fit")
     ("diagnostic", po::bool_switch(&diagnostic), "scan one geometry parameter at a time")
-    ("target-theta", po::value<double>(&target_theta)->default_value(target_theta),
-     "expected Cherenkov angle in radians")
+    ("expected-cherenkov-angle", po::value<double>(&target_theta)->default_value(target_theta),
+     "expected Cherenkov angle used by the geometry fit, in radians")
+    ("target-theta", po::value<double>(&target_theta),
+     "alias for --expected-cherenkov-angle")
     ("require-rings", po::value<int>(&require_rings)->default_value(require_rings),
      "require exactly this many accepted rings per frame")
     ;
