@@ -874,12 +874,14 @@ int main(int argc, char **argv)
   UShort_t cherenkov_nhits = 0;
   Float_t cherenkov_x[65535] = {};
   Float_t cherenkov_y[65535] = {};
+  Float_t cherenkov_time[65535] = {};
   Float_t cherenkov_theta[65535] = {};
   Float_t cherenkov_phi[65535] = {};
   if (!input_cherenkov ||
       input_cherenkov->SetBranchAddress("nhits", &cherenkov_nhits) < 0 ||
       input_cherenkov->SetBranchAddress("x", cherenkov_x) < 0 ||
-      input_cherenkov->SetBranchAddress("y", cherenkov_y) < 0) {
+      input_cherenkov->SetBranchAddress("y", cherenkov_y) < 0 ||
+      input_cherenkov->SetBranchAddress("time", cherenkov_time) < 0) {
     std::cerr << "ERROR: input does not contain a usable cherenkov tree\n";
     return 1;
   }
@@ -890,6 +892,8 @@ int main(int argc, char **argv)
   output_irt->Branch("nhits", &cherenkov_nhits, "nhits/s");
   output_irt->Branch("theta", cherenkov_theta, "theta[nhits]/F");
   output_irt->Branch("phi", cherenkov_phi, "phi[nhits]/F");
+  Float_t cherenkov_emission_time[65535] = {};
+  output_irt->Branch("time", cherenkov_emission_time, "time[nhits]/F");
 
   TTree *input_frames = dynamic_cast<TTree *>(input_file->Get("frames"));
   TTree *input_ring = dynamic_cast<TTree *>(input_file->Get("ring"));
@@ -944,7 +948,20 @@ int main(int argc, char **argv)
       cherenkov_theta[i] = photon.valid ? static_cast<Float_t>(photon.theta) :
                                            std::numeric_limits<Float_t>::quiet_NaN();
       cherenkov_phi[i] = photon.valid ? static_cast<Float_t>(photon.phi) :
-                                         std::numeric_limits<Float_t>::quiet_NaN();
+                                           std::numeric_limits<Float_t>::quiet_NaN();
+      if (photon.valid) {
+        constexpr double time_to_ns = 3.125;
+        constexpr double speed_of_light_mm_per_ns = 299.792458;
+        const double path_length =
+            (photon.reflection - photon.detector).Mag() +
+            (photon.reflection - fitted_geometry.emission).Mag();
+        cherenkov_emission_time[i] = static_cast<Float_t>(
+            cherenkov_time[i] * time_to_ns -
+            path_length / speed_of_light_mm_per_ns);
+      } else {
+        cherenkov_emission_time[i] =
+            std::numeric_limits<Float_t>::quiet_NaN();
+      }
     }
     if (output_frames && output_frames->Fill() < 0)
       return 1;
