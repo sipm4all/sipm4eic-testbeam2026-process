@@ -46,6 +46,14 @@ if(CMAKE_CUDA_COMPILER)
       ${CMAKE_CURRENT_LIST_DIR}/ring-finder-roberto
     )
     target_link_libraries(ring_finder_roberto_cuda PUBLIC CUDA::cudart)
+
+    add_library(irt_cuda STATIC irt/irt_cuda.cu)
+    set_target_properties(irt_cuda PROPERTIES
+      CUDA_STANDARD 17
+      CUDA_STANDARD_REQUIRED ON
+    )
+    target_include_directories(irt_cuda PUBLIC ${CMAKE_CURRENT_LIST_DIR}/irt)
+    target_link_libraries(irt_cuda PUBLIC CUDA::cudart)
   endif()
 endif()
 
@@ -108,6 +116,8 @@ target_link_libraries(timing PRIVATE timing_estimator)
 if(RING_HOUGH_CUDA_ENABLED)
   target_compile_definitions(ring-finder-hough PRIVATE RING_HOUGH_HAS_CUDA=1)
   target_link_libraries(ring-finder-hough PRIVATE ring_hough_cuda)
+  target_compile_definitions(irt PRIVATE IRT_HAS_CUDA=1)
+  target_link_libraries(irt PRIVATE irt_cuda)
   target_compile_options(ring-finder-roberto PRIVATE ${ROOT_CFLAGS_LIST})
   target_link_libraries(ring-finder-roberto PRIVATE
     ${ROOT_LIBS_LIST} Boost::program_options ring_finder_roberto_cuda

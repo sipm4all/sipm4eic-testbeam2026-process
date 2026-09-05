@@ -1,4 +1,7 @@
 #include "irt_geometry.h"
+#ifdef IRT_HAS_CUDA
+#include "irt_cuda.h"
+#endif
 
 #include "trigger_reader.h"
 
@@ -25,6 +28,34 @@
 namespace po = boost::program_options;
 
 namespace {
+
+#ifdef IRT_HAS_CUDA
+irt::cuda::geometry_t
+cuda_geometry(const irt::geometry_t &g)
+{
+  irt::cuda::geometry_t result{};
+  for (int i = 0; i < 3; ++i) {
+    result.track[i] = g.track[i];
+    result.emission[i] = g.emission[i];
+    result.mirror_center[i] = g.mirror_center[i];
+    result.mirror_pivot[i] = g.mirror_pivot[i];
+    result.detector_center[i] = g.detector_center[i];
+    result.detector_rotation[i] = g.detector_rotation_vector[i];
+  }
+  result.mirror_rotation[0] = g.mirror_rotation_vector.X();
+  result.mirror_rotation[1] = g.mirror_rotation_vector.Y();
+  result.mirror_rotation[2] = g.mirror_rotation_vector.Z();
+  TVector3 normal;
+  normal.SetMagThetaPhi(1., g.detector_theta, g.detector_phi);
+  for (int i = 0; i < 3; ++i)
+    result.detector_normal[i] = normal[i];
+  result.mirror_radius = g.mirror_radius;
+  result.detector_radius = g.detector_radius;
+  result.detector_tilt_x = g.detector_tilt_x;
+  result.detector_tilt_y = g.detector_tilt_y;
+  return result;
+}
+#endif
 
 bool read_geometry_config(const std::string &filename, irt::geometry_t &geometry)
 {
@@ -193,6 +224,7 @@ int main(int argc, char **argv)
   bool fit_mirror_phi = false;
   bool harmonic_objective = false;
   bool diagnostic = false;
+  bool use_gpu = false;
   double target_theta = 0.037921467;
   int require_rings = -1;
   po::options_description options("options");
@@ -217,6 +249,7 @@ int main(int argc, char **argv)
     ("fit-mirror-phi", po::bool_switch(&fit_mirror_phi), "fit mirror rotation vector and track phi with eta fixed to 3.16")
     ("harmonic-objective", po::bool_switch(&harmonic_objective), "include theta-versus-phi harmonic power in configured fit")
     ("diagnostic", po::bool_switch(&diagnostic), "scan one geometry parameter at a time")
+    ("gpu", po::bool_switch(&use_gpu), "reconstruct fixed-geometry hits with CUDA")
     ("expected-cherenkov-angle", po::value<double>(&target_theta)->default_value(target_theta),
      "expected Cherenkov angle used by the geometry fit, in radians")
     ("target-theta", po::value<double>(&target_theta),
@@ -894,6 +927,18 @@ int main(int argc, char **argv)
   output_irt->Branch("phi", cherenkov_phi, "phi[nhits]/F");
   Float_t cherenkov_emission_time[65535] = {};
   output_irt->Branch("time", cherenkov_emission_time, "time[nhits]/F");
+#ifdef IRT_HAS_CUDA
+  const auto gpu_geometry = cuda_geometry(fitted_geometry);
+  if (use_gpu && !irt::cuda::available()) {
+    std::cerr << "ERROR: CUDA requested but no CUDA device is available\n";
+    return 1;
+  }
+#else
+  if (use_gpu) {
+    std::cerr << "ERROR: this build does not contain CUDA support\n";
+    return 1;
+  }
+#endif
 
   TTree *input_frames = dynamic_cast<TTree *>(input_file->Get("frames"));
   TTree *input_ring = dynamic_cast<TTree *>(input_file->Get("ring"));
@@ -931,7 +976,71 @@ int main(int argc, char **argv)
         h_detector->Fill(point.first, point.second);
   }
   frames = frames_read;
-  for (Long64_t entry = 0; entry < input_cherenkov->GetEntries(); ++entry) {
+  const Long64_t input_entries = input_cherenkov->GetEntries();
+  const Long64_t entries_to_process =
+      max_events < 0 ? input_entries : std::min(input_entries, max_events);
+  if (use_gpu) {
+#ifdef IRT_HAS_CUDA
+    constexpr std::size_t max_batch_hits = 1000000;
+    std::vector<float> batch_x, batch_y, batch_time;
+    std::vector<UShort_t> batch_counts;
+    std::vector<float> batch_theta, batch_phi, batch_emission_time;
+    std::vector<unsigned char> batch_valid;
+
+    auto flush_gpu_batch = [&]() -> bool {
+      if (batch_counts.empty()) return true;
+      const int count = static_cast<int>(batch_x.size());
+      batch_theta.resize(batch_x.size());
+      batch_phi.resize(batch_x.size());
+      batch_emission_time.resize(batch_x.size());
+      batch_valid.resize(batch_x.size());
+      if (!irt::cuda::reconstruct(gpu_geometry, batch_x.data(), batch_y.data(),
+                                  batch_time.data(), count, batch_theta.data(),
+                                  batch_phi.data(), batch_emission_time.data(),
+                                  batch_valid.data()))
+        return false;
+      std::size_t offset = 0;
+      for (const auto count_hits : batch_counts) {
+        cherenkov_nhits = count_hits;
+        for (unsigned int i = 0; i < count_hits; ++i) {
+          cherenkov_theta[i] = batch_theta[offset + i];
+          cherenkov_phi[i] = batch_phi[offset + i];
+          cherenkov_emission_time[i] = batch_emission_time[offset + i];
+        }
+        output_irt->Fill();
+        offset += count_hits;
+      }
+      batch_x.clear(); batch_y.clear(); batch_time.clear();
+      batch_counts.clear();
+      return true;
+    };
+
+    for (Long64_t entry = 0; entry < entries_to_process; ++entry) {
+      if (input_frames && input_frames->GetEntry(entry) <= 0) return 1;
+      if (input_ring && input_ring->GetEntry(entry) <= 0) return 1;
+      if (input_cherenkov->GetEntry(entry) <= 0) return 1;
+      if (cherenkov_nhits > 65535) return 1;
+      if (output_frames && output_frames->Fill() < 0) return 1;
+      if (output_ring && output_ring->Fill() < 0) return 1;
+      output_cherenkov->Fill();
+      batch_counts.push_back(cherenkov_nhits);
+      for (unsigned int i = 0; i < cherenkov_nhits; ++i) {
+        batch_x.push_back(cherenkov_x[i]);
+        batch_y.push_back(cherenkov_y[i]);
+        batch_time.push_back(cherenkov_time[i]);
+      }
+      if (batch_x.size() >= max_batch_hits && !flush_gpu_batch()) {
+        std::cerr << "ERROR: CUDA IRT reconstruction failed\n";
+        return 1;
+      }
+    }
+    if (!flush_gpu_batch()) {
+      std::cerr << "ERROR: CUDA IRT reconstruction failed\n";
+      return 1;
+    }
+#endif
+  } else {
+  for (Long64_t entry = 0; entry < entries_to_process; ++entry) {
     if (input_frames && input_frames->GetEntry(entry) <= 0)
       return 1;
     if (input_ring && input_ring->GetEntry(entry) <= 0)
@@ -943,25 +1052,25 @@ int main(int argc, char **argv)
       return 1;
     }
     for (unsigned int i = 0; i < cherenkov_nhits; ++i) {
-      const auto photon = irt::reconstruct(fitted_geometry,
-                                            cherenkov_x[i], cherenkov_y[i]);
-      cherenkov_theta[i] = photon.valid ? static_cast<Float_t>(photon.theta) :
+        const auto photon = irt::reconstruct(fitted_geometry,
+                                              cherenkov_x[i], cherenkov_y[i]);
+        cherenkov_theta[i] = photon.valid ? static_cast<Float_t>(photon.theta) :
+                                             std::numeric_limits<Float_t>::quiet_NaN();
+        cherenkov_phi[i] = photon.valid ? static_cast<Float_t>(photon.phi) :
                                            std::numeric_limits<Float_t>::quiet_NaN();
-      cherenkov_phi[i] = photon.valid ? static_cast<Float_t>(photon.phi) :
-                                           std::numeric_limits<Float_t>::quiet_NaN();
-      if (photon.valid) {
-        constexpr double time_to_ns = 3.125;
-        constexpr double speed_of_light_mm_per_ns = 299.792458;
-        const double path_length =
-            (photon.reflection - photon.detector).Mag() +
-            (photon.reflection - fitted_geometry.emission).Mag();
-        cherenkov_emission_time[i] = static_cast<Float_t>(
-            cherenkov_time[i] * time_to_ns -
-            path_length / speed_of_light_mm_per_ns);
-      } else {
-        cherenkov_emission_time[i] =
-            std::numeric_limits<Float_t>::quiet_NaN();
-      }
+        if (photon.valid) {
+          constexpr double time_to_ns = 3.125;
+          constexpr double speed_of_light_mm_per_ns = 299.792458;
+          const double path_length =
+              (photon.reflection - photon.detector).Mag() +
+              (photon.reflection - fitted_geometry.emission).Mag();
+          cherenkov_emission_time[i] = static_cast<Float_t>(
+              cherenkov_time[i] * time_to_ns -
+              path_length / speed_of_light_mm_per_ns);
+        } else {
+          cherenkov_emission_time[i] =
+              std::numeric_limits<Float_t>::quiet_NaN();
+        }
     }
     if (output_frames && output_frames->Fill() < 0)
       return 1;
@@ -969,6 +1078,7 @@ int main(int argc, char **argv)
       return 1;
     output_cherenkov->Fill();
     output_irt->Fill();
+  }
   }
   file->Write("", TObject::kOverwrite);
   h_angle->Write();
