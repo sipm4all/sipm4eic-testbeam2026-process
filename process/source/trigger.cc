@@ -21,7 +21,7 @@
 #include <vector>
 
 
-constexpr int maxframes = 65536;
+constexpr int maxframes = 131072;
 // nhits is persisted as uint16_t, whose largest representable value is 65535.
 constexpr int maxhits = std::numeric_limits<uint16_t>::max();
 constexpr int maxsources = 4096;
