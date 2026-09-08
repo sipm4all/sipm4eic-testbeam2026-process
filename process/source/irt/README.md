@@ -70,3 +70,11 @@ process/build/irt \
 This two-step procedure is useful because it tests the real IRT input and fit
 path. It does not use the ellipse generator as an alternative fitting
 implementation.
+
+## Saved SPS fit
+
+`process/config/geometry/fit.sps.best.39979urad.conf` records the best fit from
+the 10,000-event synthetic ellipse test with the expected Cherenkov angle fixed
+to `0.039979159` rad (`39.979159 mrad`). The fitted values are retained as the
+starting values, and the same free/fixed statuses used for that fit are kept.
+The fit reached `MinFCN = 0.0313949` with 320,000 generated Cherenkov hits.
