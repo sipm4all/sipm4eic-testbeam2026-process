@@ -233,6 +233,7 @@ int main(int argc, char **argv)
   bool harmonic_objective = false;
   bool diagnostic = false;
   bool use_gpu = false;
+  bool apply_fit_config = false;
   double target_theta = 0.037921467;
   double angular_resolution = 0.0015;
   int require_rings = -1;
@@ -272,6 +273,8 @@ int main(int argc, char **argv)
     ("harmonic-objective", po::bool_switch(&harmonic_objective), "include theta-versus-phi harmonic power in configured fit")
     ("diagnostic", po::bool_switch(&diagnostic), "scan one geometry parameter at a time")
     ("gpu", po::bool_switch(&use_gpu), "reconstruct fixed-geometry hits with CUDA")
+    ("apply-fit-config", po::bool_switch(&apply_fit_config),
+     "apply fit-config start values without running a fit")
     ("expected-cherenkov-angle", po::value<double>(&target_theta)->default_value(target_theta),
      "expected Cherenkov angle used by the geometry fit, in radians")
     ("target-theta", po::value<double>(&target_theta),
@@ -358,9 +361,25 @@ int main(int argc, char **argv)
   irt::apply_inverse_assembly_to_track(geometry);
   geometry.mirror_center += TVector3(2.11642, -12.6748, 0.);
   geometry.detector_center += TVector3(0.197618, 0.00373014, 0.);
+  if (apply_fit_config) {
+    if (fit_config.empty()) {
+      std::cerr << "ERROR: --apply-fit-config requires --fit-config\n";
+      return 1;
+    }
+    std::vector<fit_parameter_t> parameters;
+    if (!read_fit_config(fit_config, parameters)) {
+      std::cerr << "ERROR: invalid fit configuration: " << fit_config << '\n';
+      return 1;
+    }
+    std::vector<double> values;
+    values.reserve(parameters.size());
+    for (const auto &parameter : parameters) values.push_back(parameter.start);
+    apply_fit_parameters(geometry, parameters, values.data());
+    std::cout << "applied fit configuration: " << fit_config << '\n';
+  }
   irt::geometry_t fitted_geometry = geometry;
   std::vector<TH2D *> fit_scans;
-  if (!fit_config.empty() && !fit_points.empty() && fit_max_hits > 0) {
+  if (!apply_fit_config && !fit_config.empty() && !fit_points.empty() && fit_max_hits > 0) {
     std::vector<fit_parameter_t> parameters;
     if (!read_fit_config(fit_config, parameters)) {
       std::cerr << "ERROR: invalid fit configuration: " << fit_config << '\n';
