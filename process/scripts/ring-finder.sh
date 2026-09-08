@@ -10,6 +10,7 @@ ipath="/data/2026-testbeam/process"
 opath="/data/2026-testbeam/process"
 run=""
 input_stage="timing"
+filter_tag="recodata"
 trigger_tags=()
 overwrite=0
 parallel_spills=0
@@ -30,7 +31,8 @@ required:
 
 options:
   --run-type TYPE                default: physics
-  --input-stage STAGE            trigger or timing, default: timing
+  --input-stage STAGE            trigger, timing, or filtered; default: timing
+  --filter-tag TAG               filtered input tag; default: recodata
   --gpu                          use the CUDA Hough backend
   --parallel-spills              process split-spill files in parallel
   --jobs N                       maximum parallel spill jobs, default: 8
@@ -122,6 +124,11 @@ while [ $# -gt 0 ]; do
             input_stage=$2
             shift 2
             ;;
+        --filter-tag)
+            [ $# -ge 2 ] || fail "$1 requires TAG"
+            filter_tag=$2
+            shift 2
+            ;;
         --gpu)
             use_gpu=1
             shift
@@ -169,7 +176,10 @@ case "${run_type}" in
 esac
 case "${input_stage}" in
     trigger|timing) ;;
-    *) fail "--input-stage must be trigger or timing" ;;
+    filtered)
+        [ -n "${filter_tag}" ] || fail "empty --filter-tag"
+        ;;
+    *) fail "--input-stage must be trigger, timing, or filtered" ;;
 esac
 [[ "${jobs}" =~ ^[0-9]+$ ]] || fail "--jobs must be a positive integer"
 [ "${jobs}" -gt 0 ] || fail "--jobs must be greater than zero"
@@ -193,6 +203,9 @@ echo " --- ring-finder workflow started"
 for tag in "${trigger_tags[@]}"; do
     if [ "${input_stage}" = "timing" ]; then
         input_prefix="timing.${tag}"
+        output_prefix="rings.${tag}"
+    elif [ "${input_stage}" = "filtered" ]; then
+        input_prefix="filtered.${filter_tag}.${tag}"
         output_prefix="rings.${tag}"
     else
         input_prefix="triggered.${tag}"

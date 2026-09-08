@@ -159,7 +159,9 @@ run_one()
     fi
 
     [ "${do_ring}" -eq 1 ] && "${SCRIPT_DIR}/ring-finder.sh" "${common[@]}" \
-        --trigger "${TRIGGER_TAG}" --parallel-spills --jobs 8 "${gpu[@]}" "${overwrite[@]}"
+        --trigger "${TRIGGER_TAG}" --input-stage filtered \
+        --filter-tag "${FILTER_TAG}" --parallel-spills --jobs 8 \
+        "${gpu[@]}" "${overwrite[@]}"
 
     [ "${do_ring}" -eq 1 ] && rm -f "${PROCESS_DIR}/${run}/trigger/timing.${TRIGGER_TAG}.spill_"*.root
 
