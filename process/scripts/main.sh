@@ -7,9 +7,9 @@ SCRIPT_DIR="/data/2026-testbeam/process/sipm4eic-testbeam2026-process/process/sc
 CONFIG_DIR="/data/2026-testbeam/process/sipm4eic-testbeam2026-process/process/config"
 
 # User configuration.
-CALIBRATION_CONFIG="${CONFIG_DIR}/calibration/calibration.20260824.v2.conf"
+CALIBRATION_CONFIG=""
 CALIBRATION_MANIFEST="${CONFIG_DIR}/calibration/runs.conf"
-CLOCK_CORRECTION_CONFIG="${CONFIG_DIR}/calibration/clock-corrections.20260824.conf"
+CLOCK_CORRECTION_CONFIG=""
 TRIGGER_CONFIG="${CONFIG_DIR}/trigger/timing.conf"
 TRIGGER_TAG="timing"
 FILTER_CONFIG="${CONFIG_DIR}/filter/recodata.conf"
@@ -54,7 +54,7 @@ resolve_calibration()
 {
     local run=$1
     local manifest=${CALIBRATION_MANIFEST}
-    [ -f "${manifest}" ] || return 0
+    [ -f "${manifest}" ] || fail "calibration manifest does not exist: ${manifest}"
 
     local row
     row=$(awk -v run="${run}" '
