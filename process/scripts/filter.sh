@@ -26,8 +26,8 @@ done
 [ -x "${FILTER}" ] || fail "${FILTER} does not exist or is not executable"
 [[ "${jobs}" =~ ^[0-9]+$ ]] && [ "${jobs}" -gt 0 ] || fail "--jobs must be positive"
 input_dir="${ipath}/${run}/trigger"; output_dir="${opath}/${run}/trigger"; mkdir -p "${output_dir}"
-inputs=("${input_dir}"/rings.${trigger_tag}.spill_*.root)
-[ ${#inputs[@]} -gt 0 ] || fail "no ring spill files found: ${input_dir}/rings.${trigger_tag}.spill_*.root"
+inputs=("${input_dir}"/timing.${trigger_tag}.spill_*.root)
+[ ${#inputs[@]} -gt 0 ] || fail "no timing spill files found: ${input_dir}/timing.${trigger_tag}.spill_*.root"
 outputs=("${output_dir}"/filtered."${filter_tag}"."${trigger_tag}".spill_*.root)
 merged_output="${output_dir}/filtered.${filter_tag}.${trigger_tag}.root"
 if [ "${overwrite}" -ne 1 ] && [ -f "${merged_output}" ]; then
@@ -51,8 +51,4 @@ if [ "${overwrite}" -eq 1 ] || [ ! -f "${merged_output}" ]; then
 else
     echo " --- filtered output exists, skipping merge: ${merged_output}"
 fi
-echo " --- removing ${#outputs[@]} filtered spill files"
-rm -f -- "${outputs[@]}"
-remaining=("${output_dir}"/filtered."${filter_tag}"."${trigger_tag}".spill_*.root)
-[ ${#remaining[@]} -eq 0 ] || fail "could not remove filtered spill files"
 echo " --- filter workflow completed"

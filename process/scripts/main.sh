@@ -14,6 +14,7 @@ TRIGGER_TAG="timing"
 FILTER_CONFIG="${CONFIG_DIR}/filter/recodata.conf"
 FILTER_TAG="recodata"
 WINDOW=32
+DELTAT_MACRO="/data/2026-testbeam/process/sipm4eic-testbeam2026-process/macros/example/deltat.C"
 RUN_TYPE="physics"
 USE_GPU=1
 OVERWRITE=0
@@ -29,7 +30,7 @@ usage:
 
 options:
   --step STAGE ...    run only these stages; may be repeated. Stages are:
-                     decoder, checker, process, trigger, timing, ring, filter
+                     decoder, checker, process, trigger, timing, filter, deltat, ring
                      With no --step, run the complete pipeline.
   --overwrite        pass --overwrite to selected stages
   --help, -h         show this help
@@ -58,10 +59,10 @@ run_one()
     [ "${OVERWRITE}" -eq 1 ] && overwrite+=(--overwrite)
 
     local do_decoder=0 do_checker=0 do_process=0 do_trigger=0
-    local do_timing=0 do_ring=0 do_filter=0
+    local do_timing=0 do_ring=0 do_filter=0 do_deltat=0
     if [ ${#STAGES[@]} -eq 0 ]; then
         do_decoder=1; do_checker=1; do_process=1; do_trigger=1
-        do_timing=1; do_ring=1; do_filter=1
+        do_timing=1; do_filter=1
     else
         local stage
         for stage in "${STAGES[@]}"; do
@@ -69,6 +70,7 @@ run_one()
                 decoder) do_decoder=1 ;; checker) do_checker=1 ;;
                 process) do_process=1 ;; trigger) do_trigger=1 ;;
                 timing) do_timing=1 ;; ring|ring-finder) do_ring=1 ;;
+                deltat) do_deltat=1 ;;
                 filter) do_filter=1 ;;
                 *) fail "unknown stage: ${stage}" ;;
             esac
@@ -90,18 +92,47 @@ run_one()
     [ "${do_timing}" -eq 1 ] && "${SCRIPT_DIR}/timing.sh" "${common[@]}" \
         --trigger "${TRIGGER_TAG}" --parallel-spills --jobs 8 "${overwrite[@]}"
 
-    [ "${do_timing}" -eq 1 ] && rm -f "${PROCESS_DIR}/${run}/trigger/triggered.${TRIGGER_TAG}.spill_"*.root
-
     local gpu=()
     [ "${USE_GPU}" -eq 1 ] && gpu+=(--gpu)
+
+    [ "${do_filter}" -eq 1 ] && "${SCRIPT_DIR}/filter.sh" "${common[@]}" \
+        --trigger "${TRIGGER_TAG}" \
+        --filter "${FILTER_CONFIG}" "${FILTER_TAG}" "${gpu[@]}" "${overwrite[@]}"
+
+    if [ "${do_deltat}" -eq 1 ]; then
+        local analysis_dir="${PROCESS_DIR}/${run}/analysis"
+        mkdir -p "${analysis_dir}"
+        local deltat_output="${analysis_dir}/deltat.${TRIGGER_TAG}.root"
+        if [ "${OVERWRITE}" -eq 1 ] || [ ! -f "${deltat_output}" ]; then
+            local deltat_pids=() input spill output
+            local timing_inputs=("${PROCESS_DIR}/${run}/trigger"/timing.${TRIGGER_TAG}.spill_*.root)
+            [ ${#timing_inputs[@]} -gt 0 ] || fail "no timing spill files for deltat"
+            for input in "${timing_inputs[@]}"; do
+                spill=${input##*.spill_}; spill=${spill%.root}
+                output="${analysis_dir}/deltat.${TRIGGER_TAG}.spill_${spill}.root"
+                if [ "${OVERWRITE}" -eq 1 ] || [ ! -f "${output}" ]; then
+                    root -l -b -q -e ".L ${DELTAT_MACRO}" \
+                        -e "deltat(\"${input}\", std::make_shared<channel_target_t>(-1), std::make_shared<timing_reference_t>(\"T\"), {}, \"${output}\")" &
+                    deltat_pids+=("$!")
+                fi
+            done
+            local pid
+            for pid in "${deltat_pids[@]}"; do wait "${pid}"; done
+            local deltat_inputs=("${analysis_dir}"/deltat.${TRIGGER_TAG}.spill_*.root)
+            [ ${#deltat_inputs[@]} -gt 0 ] || fail "deltat produced no spill files"
+            hadd -f "${deltat_output}" "${deltat_inputs[@]}"
+            rm -f -- "${deltat_inputs[@]}"
+        else
+            echo " --- deltat output exists, skipping: ${deltat_output}"
+        fi
+    fi
+
+    [ "${do_timing}" -eq 1 ] && rm -f "${PROCESS_DIR}/${run}/trigger/triggered.${TRIGGER_TAG}.spill_"*.root
     [ "${do_ring}" -eq 1 ] && "${SCRIPT_DIR}/ring-finder.sh" "${common[@]}" \
         --trigger "${TRIGGER_TAG}" --parallel-spills --jobs 8 "${gpu[@]}" "${overwrite[@]}"
 
     [ "${do_ring}" -eq 1 ] && rm -f "${PROCESS_DIR}/${run}/trigger/timing.${TRIGGER_TAG}.spill_"*.root
 
-    [ "${do_filter}" -eq 1 ] && "${SCRIPT_DIR}/filter.sh" "${common[@]}" \
-        --trigger "${TRIGGER_TAG}" \
-        --filter "${FILTER_CONFIG}" "${FILTER_TAG}" "${gpu[@]}" "${overwrite[@]}"
 }
 
 while [ $# -gt 0 ]; do
@@ -111,7 +142,7 @@ while [ $# -gt 0 ]; do
             shift
             while [ $# -gt 0 ] && [[ "$1" != --* ]]; do
                 case "$1" in
-                    decoder|checker|process|trigger|timing|ring|ring-finder|filter)
+                    decoder|checker|process|trigger|timing|filter|deltat|ring|ring-finder)
                         STAGES+=("$1")
                         shift
                         ;;
