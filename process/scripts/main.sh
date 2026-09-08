@@ -92,6 +92,8 @@ run_one()
     [ "${do_timing}" -eq 1 ] && "${SCRIPT_DIR}/timing.sh" "${common[@]}" \
         --trigger "${TRIGGER_TAG}" --parallel-spills --jobs 8 "${overwrite[@]}"
 
+    [ "${do_timing}" -eq 1 ] && rm -f "${PROCESS_DIR}/${run}/trigger/triggered.${TRIGGER_TAG}.spill_"*.root
+
     local gpu=()
     [ "${USE_GPU}" -eq 1 ] && gpu+=(--gpu)
 
@@ -127,7 +129,6 @@ run_one()
         fi
     fi
 
-    [ "${do_timing}" -eq 1 ] && rm -f "${PROCESS_DIR}/${run}/trigger/triggered.${TRIGGER_TAG}.spill_"*.root
     [ "${do_ring}" -eq 1 ] && "${SCRIPT_DIR}/ring-finder.sh" "${common[@]}" \
         --trigger "${TRIGGER_TAG}" --parallel-spills --jobs 8 "${gpu[@]}" "${overwrite[@]}"
 
