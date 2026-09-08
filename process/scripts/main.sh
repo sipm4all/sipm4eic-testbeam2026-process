@@ -163,8 +163,6 @@ run_one()
         --filter-tag "${FILTER_TAG}" --parallel-spills --jobs 8 \
         "${gpu[@]}" "${overwrite[@]}"
 
-    [ "${do_ring}" -eq 1 ] && rm -f "${PROCESS_DIR}/${run}/trigger/timing.${TRIGGER_TAG}.spill_"*.root
-
 }
 
 while [ $# -gt 0 ]; do
