@@ -8,7 +8,8 @@ CONFIG_DIR="/data/2026-testbeam/process/sipm4eic-testbeam2026-process/process/co
 
 # User configuration.
 CALIBRATION_CONFIG="${CONFIG_DIR}/calibration/calibration.20260824.v2.conf"
-CLOCK_CORRECTION_CONFING="${CONFIG_DIR}/calibration/clock-corrections.20260824.conf"
+CALIBRATION_MANIFEST="${CONFIG_DIR}/calibration/runs.conf"
+CLOCK_CORRECTION_CONFIG="${CONFIG_DIR}/calibration/clock-corrections.20260824.conf"
 TRIGGER_CONFIG="${CONFIG_DIR}/trigger/timing.conf"
 TRIGGER_TAG="timing"
 FILTER_CONFIG="${CONFIG_DIR}/filter/recodata.conf"
@@ -49,14 +50,42 @@ fail()
     exit 1
 }
 
+resolve_calibration()
+{
+    local run=$1
+    local manifest=${CALIBRATION_MANIFEST}
+    [ -f "${manifest}" ] || return 0
+
+    local row
+    row=$(awk -v run="${run}" '
+        /^[[:space:]]*#/ || NF == 0 { next }
+        $1 == run { exact = $0; next }
+        $1 == "*" { fallback = $0 }
+        END { if (exact != "") print exact; else if (fallback != "") print fallback }
+    ' "${manifest}")
+    [ -n "${row}" ] || fail "no calibration entry for run ${run} in ${manifest}"
+
+    local key calibration clock
+    read -r key calibration clock _ <<< "${row}"
+    [ -n "${calibration}" ] || fail "missing calibration filename for run ${run} in ${manifest}"
+    CALIBRATION_CONFIG="${CONFIG_DIR}/calibration/${calibration}"
+    CLOCK_CORRECTION_CONFIG=""
+    if [ -n "${clock:-}" ] && [ "${clock}" != "-" ]; then
+        CLOCK_CORRECTION_CONFIG="${CONFIG_DIR}/calibration/${clock}"
+    fi
+}
+
 run_one()
 {
     local run=$1
     echo " --- processing run: ${run}"
+    resolve_calibration "${run}"
 
     local common=(--run "${run}" --run-type "${RUN_TYPE}")
     local overwrite=()
+    local clock_option=()
     [ "${OVERWRITE}" -eq 1 ] && overwrite+=(--overwrite)
+    [ -n "${CLOCK_CORRECTION_CONFIG}" ] && clock_option+=(--clock "${CLOCK_CORRECTION_CONFIG}")
 
     local do_decoder=0 do_checker=0 do_process=0 do_trigger=0
     local do_timing=0 do_ring=0 do_filter=0 do_deltat=0
@@ -82,7 +111,7 @@ run_one()
 
     [ "${do_process}" -eq 1 ] && "${SCRIPT_DIR}/process.sh" "${common[@]}" \
         --calibration "${CALIBRATION_CONFIG}" \
-        --clock "${CLOCK_CORRECTION_CONFING}" \
+        "${clock_option[@]}" \
         "${overwrite[@]}"
 
     [ "${do_trigger}" -eq 1 ] && "${SCRIPT_DIR}/trigger.sh" "${common[@]}" \
