@@ -1,4 +1,7 @@
 #include "irt_geometry.h"
+#ifdef IRT_HAS_CUDA
+#include "irt_cuda.h"
+#endif
 
 #include "trigger_reader.h"
 
@@ -8,6 +11,7 @@
 #include <TMatrixD.h>
 #include <TVectorD.h>
 #include <TFile.h>
+#include <TKey.h>
 #include <TH1D.h>
 #include <TH2D.h>
 
@@ -24,6 +28,34 @@
 namespace po = boost::program_options;
 
 namespace {
+
+#ifdef IRT_HAS_CUDA
+irt::cuda::geometry_t
+cuda_geometry(const irt::geometry_t &g)
+{
+  irt::cuda::geometry_t result{};
+  for (int i = 0; i < 3; ++i) {
+    result.track[i] = g.track[i];
+    result.emission[i] = g.emission[i];
+    result.mirror_center[i] = g.mirror_center[i];
+    result.mirror_pivot[i] = g.mirror_pivot[i];
+    result.detector_center[i] = g.detector_center[i];
+    result.detector_rotation[i] = g.detector_rotation_vector[i];
+  }
+  result.mirror_rotation[0] = g.mirror_rotation_vector.X();
+  result.mirror_rotation[1] = g.mirror_rotation_vector.Y();
+  result.mirror_rotation[2] = g.mirror_rotation_vector.Z();
+  TVector3 normal;
+  normal.SetMagThetaPhi(1., g.detector_theta, g.detector_phi);
+  for (int i = 0; i < 3; ++i)
+    result.detector_normal[i] = normal[i];
+  result.mirror_radius = g.mirror_radius;
+  result.detector_radius = g.detector_radius;
+  result.detector_tilt_x = g.detector_tilt_x;
+  result.detector_tilt_y = g.detector_tilt_y;
+  return result;
+}
+#endif
 
 bool read_geometry_config(const std::string &filename, irt::geometry_t &geometry)
 {
@@ -112,6 +144,7 @@ void apply_fit_parameters(irt::geometry_t &g,
                           const double *values)
 {
   TVector3 mirror_delta, mirror_rotation, detector_delta, detector_rotation;
+  double mirror_delta_r = 0.;
   double eta = g.track_eta, phi = g.track_phi, emission_z = g.emission_z;
   TVector3 origin = g.track_origin;
   for (std::size_t i = 0; i < parameters.size(); ++i) {
@@ -119,6 +152,7 @@ void apply_fit_parameters(irt::geometry_t &g,
     if (n == "track_eta") eta = v; else if (n == "track_phi") phi = v;
     else if (n == "track_origin_x") origin.SetX(v);
     else if (n == "track_origin_y") origin.SetY(v);
+    else if (n == "expected_cherenkov_angle") { /* handled by the fit objective */ }
     else if (n == "emission_z") emission_z = v;
     else if (n == "detector_theta") g.detector_theta = v;
     else if (n == "detector_phi") g.detector_phi = v;
@@ -131,6 +165,7 @@ void apply_fit_parameters(irt::geometry_t &g,
     else if (n == "mirror_delta_x") mirror_delta.SetX(v);
     else if (n == "mirror_delta_y") mirror_delta.SetY(v);
     else if (n == "mirror_delta_z") mirror_delta.SetZ(v);
+    else if (n == "mirror_delta_r") mirror_delta_r = v;
     else if (n == "mirror_rotation_x") mirror_rotation.SetX(v);
     else if (n == "mirror_rotation_y") mirror_rotation.SetY(v);
     else if (n == "mirror_rotation_z") mirror_rotation.SetZ(v);
@@ -142,6 +177,7 @@ void apply_fit_parameters(irt::geometry_t &g,
     else if (n == "detector_rotation_z") detector_rotation.SetZ(v);
   }
   g.mirror_center += mirror_delta;
+  g.mirror_radius += mirror_delta_r;
   g.detector_center += detector_delta;
   g.mirror_rotation_vector += mirror_rotation;
   g.detector_rotation_vector += detector_rotation;
@@ -180,7 +216,11 @@ int main(int argc, char **argv)
   std::string config;
   std::string fit_config;
   Long64_t max_events = -1;
+  Long64_t start_frame = 0;
+  Long64_t max_frames = -1;
   Long64_t fit_max_hits = 2000;
+  Long64_t scan_max_hits = 0;
+  Long64_t scan_max_events = -1;
   bool fit_geometry = false;
   bool fit_track = false;
   bool fit_track_phi = false;
@@ -192,8 +232,16 @@ int main(int argc, char **argv)
   bool fit_mirror_phi = false;
   bool harmonic_objective = false;
   bool diagnostic = false;
+  bool use_gpu = false;
+  bool apply_fit_config = false;
   double target_theta = 0.037921467;
+  double angular_resolution = 0.0015;
   int require_rings = -1;
+  int max_cherenkov_hits = -1;
+  double ring_x0_min = -std::numeric_limits<double>::infinity();
+  double ring_x0_max = std::numeric_limits<double>::infinity();
+  double ring_y0_min = -std::numeric_limits<double>::infinity();
+  double ring_y0_max = std::numeric_limits<double>::infinity();
   po::options_description options("options");
   options.add_options()
     ("help,h", "show this help")
@@ -203,8 +251,16 @@ int main(int argc, char **argv)
     ("fit-config", po::value<std::string>(&fit_config), "Minuit fit parameter configuration")
     ("max-events", po::value<Long64_t>(&max_events)->default_value(-1),
      "maximum frames to process")
+    ("start-frame", po::value<Long64_t>(&start_frame)->default_value(start_frame),
+     "zero-based first frame to process")
+    ("max-frames", po::value<Long64_t>(&max_frames)->default_value(max_frames),
+     "maximum number of frames to process after --start-frame")
     ("fit-max-hits", po::value<Long64_t>(&fit_max_hits)->default_value(fit_max_hits),
      "maximum deterministic Cherenkov hits used by the geometry fit")
+    ("scan-max-hits", po::value<Long64_t>(&scan_max_hits)->default_value(scan_max_hits),
+     "maximum hits used by pairwise Delta-chi2 scans; zero disables scans")
+    ("scan-max-events", po::value<Long64_t>(&scan_max_events)->default_value(scan_max_events),
+     "maximum input frames contributing to pairwise Delta-chi2 scans")
     ("fit", po::bool_switch(&fit_geometry), "fit nominal geometry before filling output")
     ("fit-track", po::bool_switch(&fit_track), "fit only track eta and phi")
     ("fit-track-phi", po::bool_switch(&fit_track_phi), "fit only track phi, keeping configured eta fixed")
@@ -216,10 +272,27 @@ int main(int argc, char **argv)
     ("fit-mirror-phi", po::bool_switch(&fit_mirror_phi), "fit mirror rotation vector and track phi with eta fixed to 3.16")
     ("harmonic-objective", po::bool_switch(&harmonic_objective), "include theta-versus-phi harmonic power in configured fit")
     ("diagnostic", po::bool_switch(&diagnostic), "scan one geometry parameter at a time")
-    ("target-theta", po::value<double>(&target_theta)->default_value(target_theta),
-     "expected Cherenkov angle in radians")
+    ("gpu", po::bool_switch(&use_gpu), "reconstruct fixed-geometry hits with CUDA")
+    ("apply-fit-config", po::bool_switch(&apply_fit_config),
+     "apply fit-config start values without running a fit")
+    ("expected-cherenkov-angle", po::value<double>(&target_theta)->default_value(target_theta),
+     "expected Cherenkov angle used by the geometry fit, in radians")
+    ("target-theta", po::value<double>(&target_theta),
+     "alias for --expected-cherenkov-angle")
+    ("angular-resolution", po::value<double>(&angular_resolution)->default_value(angular_resolution),
+     "angular resolution used in the chi2 objective, in radians")
     ("require-rings", po::value<int>(&require_rings)->default_value(require_rings),
      "require exactly this many accepted rings per frame")
+    ("max-cherenkov-hits", po::value<int>(&max_cherenkov_hits)->default_value(max_cherenkov_hits),
+     "maximum Cherenkov hits per selected frame")
+    ("ring-x0-min", po::value<double>(&ring_x0_min)->default_value(ring_x0_min),
+     "minimum x0 of the selected ring")
+    ("ring-x0-max", po::value<double>(&ring_x0_max)->default_value(ring_x0_max),
+     "maximum x0 of the selected ring")
+    ("ring-y0-min", po::value<double>(&ring_y0_min)->default_value(ring_y0_min),
+     "minimum y0 of the selected ring")
+    ("ring-y0-max", po::value<double>(&ring_y0_max)->default_value(ring_y0_max),
+     "maximum y0 of the selected ring")
     ;
   po::variables_map vm;
   try {
@@ -240,13 +313,27 @@ int main(int argc, char **argv)
   }
   std::vector<std::pair<double, double>> points;
   std::vector<std::pair<double, double>> fit_points;
+  std::vector<Long64_t> fit_point_frames;
   Long64_t frames_read = 0;
-  while (reader.next_spill() && (max_events < 0 || frames_read < max_events)) {
-    while (reader.next_frame() && (max_events < 0 || frames_read < max_events)) {
+  const Long64_t frame_end = max_frames >= 0
+    ? start_frame + max_frames : max_events;
+  while (reader.next_spill() && (frame_end < 0 || frames_read < frame_end)) {
+    while (reader.next_frame() && (frame_end < 0 || frames_read < frame_end)) {
       ++frames_read;
+      if (frames_read - 1 < start_frame)
+        continue;
       if (require_rings >= 0 &&
           static_cast<int>(reader.rings().size()) != require_rings)
         continue;
+      if (max_cherenkov_hits >= 0 &&
+          static_cast<int>(reader.cherenkov_hits().size()) > max_cherenkov_hits)
+        continue;
+      if (require_rings == 1) {
+        const auto &ring = reader.rings().front();
+        if (ring.x0 < ring_x0_min || ring.x0 > ring_x0_max ||
+            ring.y0 < ring_y0_min || ring.y0 > ring_y0_max)
+          continue;
+      }
       for (const auto &hit : reader.cherenkov_hits()) {
         if (std::isfinite(hit.x) && std::isfinite(hit.y)) {
           points.emplace_back(hit.x, hit.y);
@@ -254,6 +341,7 @@ int main(int argc, char **argv)
             for (const auto &ring : reader.rings()) {
               if (ring_hit(ring, hit)) {
                 fit_points.emplace_back(hit.x, hit.y);
+                fit_point_frames.push_back(frames_read - 1);
                 break;
               }
             }
@@ -273,8 +361,25 @@ int main(int argc, char **argv)
   irt::apply_inverse_assembly_to_track(geometry);
   geometry.mirror_center += TVector3(2.11642, -12.6748, 0.);
   geometry.detector_center += TVector3(0.197618, 0.00373014, 0.);
+  if (apply_fit_config) {
+    if (fit_config.empty()) {
+      std::cerr << "ERROR: --apply-fit-config requires --fit-config\n";
+      return 1;
+    }
+    std::vector<fit_parameter_t> parameters;
+    if (!read_fit_config(fit_config, parameters)) {
+      std::cerr << "ERROR: invalid fit configuration: " << fit_config << '\n';
+      return 1;
+    }
+    std::vector<double> values;
+    values.reserve(parameters.size());
+    for (const auto &parameter : parameters) values.push_back(parameter.start);
+    apply_fit_parameters(geometry, parameters, values.data());
+    std::cout << "applied fit configuration: " << fit_config << '\n';
+  }
   irt::geometry_t fitted_geometry = geometry;
-  if (!fit_config.empty() && !fit_points.empty() && fit_max_hits > 0) {
+  std::vector<TH2D *> fit_scans;
+  if (!apply_fit_config && !fit_config.empty() && !fit_points.empty() && fit_max_hits > 0) {
     std::vector<fit_parameter_t> parameters;
     if (!read_fit_config(fit_config, parameters)) {
       std::cerr << "ERROR: invalid fit configuration: " << fit_config << '\n';
@@ -284,13 +389,17 @@ int main(int argc, char **argv)
     auto objective = [&](const double *par) {
       auto candidate = geometry;
       apply_fit_parameters(candidate, parameters, par);
+      double fit_target_theta = target_theta;
+      for (std::size_t k = 0; k < parameters.size(); ++k)
+        if (parameters[k].name == "expected_cherenkov_angle")
+          fit_target_theta = par[k];
       double sum = 0.; int used = 0;
       for (std::size_t i = 0; i < fit_count; ++i) {
         const auto photon = irt::reconstruct(candidate, fit_points[i].first, fit_points[i].second);
         if (!photon.valid) continue;
-        const double pull = (photon.theta - target_theta) / .001;
-        const double a = std::abs(pull);
-        sum += a <= 3. ? pull * pull : 6. * a - 9.; ++used;
+        const double pull = (photon.theta - fit_target_theta) / angular_resolution;
+        sum += pull * pull;
+        ++used;
       }
       if (used == 0) return 1.e12;
       if (!harmonic_objective) return sum;
@@ -323,6 +432,80 @@ int main(int argc, char **argv)
     else {
       const auto result = fitter.Result(); result.Print(std::cout);
       apply_fit_parameters(fitted_geometry, parameters, result.Parameters().data());
+
+      std::vector<int> free_indices;
+      for (std::size_t i = 0; i < parameters.size(); ++i)
+        if (parameters[i].free)
+          free_indices.push_back(static_cast<int>(i));
+
+      const double chi2_min = objective(result.Parameters().data());
+      std::size_t scan_count = 0;
+      if (scan_max_hits > 0) {
+        while (scan_count < fit_count &&
+               (scan_max_events < 0 || fit_point_frames[scan_count] < scan_max_events) &&
+               scan_count < static_cast<std::size_t>(scan_max_hits))
+          ++scan_count;
+      }
+      auto scan_objective = [&](const double *par) {
+        auto candidate = geometry;
+        apply_fit_parameters(candidate, parameters, par);
+        double fit_target_theta = target_theta;
+        for (std::size_t k = 0; k < parameters.size(); ++k)
+          if (parameters[k].name == "expected_cherenkov_angle")
+            fit_target_theta = par[k];
+        double sum = 0.; int used = 0;
+        for (std::size_t k = 0; k < scan_count; ++k) {
+          const auto photon = irt::reconstruct(candidate, fit_points[k].first, fit_points[k].second);
+          if (!photon.valid) continue;
+          const double pull = (photon.theta - fit_target_theta) / angular_resolution;
+          sum += pull * pull;
+          ++used;
+        }
+        return used == 0 ? 1.e12 : sum;
+      };
+      const double scan_chi2_min = scan_count > 0
+        ? scan_objective(result.Parameters().data()) : 0.;
+      if (scan_count == 0) {
+        std::cout << "pairwise Delta-chi2 scans disabled (use --scan-max-hits N)\n";
+      }
+      for (std::size_t ia = 0; ia < free_indices.size(); ++ia) {
+        for (std::size_t ib = ia + 1; ib < free_indices.size(); ++ib) {
+          const int i = free_indices[ia];
+          const int j = free_indices[ib];
+          const double best_i = result.Parameter(i);
+          const double best_j = result.Parameter(j);
+          const double error_i = result.Error(i);
+          const double error_j = result.Error(j);
+          const double half_i = error_i > 0. ? 5. * error_i :
+                                0.5 * (parameters[i].max - parameters[i].min);
+          const double half_j = error_j > 0. ? 5. * error_j :
+                                0.5 * (parameters[j].max - parameters[j].min);
+          const double lo_i = std::max(parameters[i].min, best_i - half_i);
+          const double hi_i = std::min(parameters[i].max, best_i + half_i);
+          const double lo_j = std::max(parameters[j].min, best_j - half_j);
+          const double hi_j = std::min(parameters[j].max, best_j + half_j);
+          std::string name_i = parameters[i].name;
+          std::string name_j = parameters[j].name;
+          std::replace(name_i.begin(), name_i.end(), '-', '_');
+          std::replace(name_j.begin(), name_j.end(), '-', '_');
+          auto *scan = new TH2D(
+              ("hDeltaChi2_" + name_i + "_vs_" + name_j).c_str(),
+              ("#Delta#chi^{2}: " + parameters[i].name + " vs " + parameters[j].name +
+               ";" + parameters[i].name + ";" + parameters[j].name).c_str(),
+              41, lo_i, hi_i, 41, lo_j, hi_j);
+          for (int xi = 1; xi <= scan->GetNbinsX(); ++xi) {
+            std::vector<double> values(result.Parameters().begin(),
+                                       result.Parameters().end());
+            values[i] = scan->GetXaxis()->GetBinCenter(xi);
+            for (int yj = 1; yj <= scan->GetNbinsY(); ++yj) {
+              values[j] = scan->GetYaxis()->GetBinCenter(yj);
+              scan->SetBinContent(xi, yj,
+                                  scan_count > 0 ? scan_objective(values.data()) - scan_chi2_min : 0.);
+            }
+          }
+          fit_scans.push_back(scan);
+        }
+      }
     }
   }
   auto calculate_harmonics = [&](const irt::geometry_t &candidate) {
@@ -352,9 +535,8 @@ int main(int argc, char **argv)
         const auto photon = irt::reconstruct(candidate, fit_points[i].first,
                                               fit_points[i].second);
         if (!photon.valid) continue;
-        const double pull = (photon.theta - target_theta) / .001;
-        const double a = std::abs(pull);
-        sum += a <= 3. ? pull * pull : 6. * a - 9.;
+        const double pull = (photon.theta - target_theta) / angular_resolution;
+        sum += pull * pull;
         ++used;
       }
       return used > 0 ? sum : 1.e12;
@@ -394,9 +576,8 @@ int main(int argc, char **argv)
         const auto photon = irt::reconstruct(candidate, fit_points[i].first,
                                               fit_points[i].second);
         if (!photon.valid) continue;
-        const double pull = (photon.theta - target_theta) / .001;
-        const double a = std::abs(pull);
-        sum += a <= 3. ? pull * pull : 6. * a - 9.;
+        const double pull = (photon.theta - target_theta) / angular_resolution;
+        sum += pull * pull;
         ++used;
       }
       return used > 0 ? sum : 1.e12;
@@ -436,9 +617,8 @@ int main(int argc, char **argv)
         const auto photon = irt::reconstruct(candidate, fit_points[i].first,
                                               fit_points[i].second);
         if (!photon.valid) continue;
-        const double pull = (photon.theta - target_theta) / .001;
-        const double a = std::abs(pull);
-        sum += a <= 3. ? pull * pull : 6. * a - 9.;
+        const double pull = (photon.theta - target_theta) / angular_resolution;
+        sum += pull * pull;
         ++used;
       }
       return used > 0 ? sum : 1.e12;
@@ -480,9 +660,8 @@ int main(int argc, char **argv)
         const auto photon = irt::reconstruct(candidate, fit_points[i].first,
                                               fit_points[i].second);
         if (!photon.valid) continue;
-        const double pull = (photon.theta - target_theta) / .001;
-        const double a = std::abs(pull);
-        sum += a <= 3. ? pull * pull : 6. * a - 9.;
+        const double pull = (photon.theta - target_theta) / angular_resolution;
+        sum += pull * pull;
         ++used;
       }
       return used > 0 ? sum : 1.e12;
@@ -581,9 +760,8 @@ int main(int argc, char **argv)
         const auto photon = irt::reconstruct(candidate, fit_points[i].first,
                                               fit_points[i].second);
         if (!photon.valid) continue;
-        const double pull = (photon.theta - target_theta) / .001;
-        const double a = std::abs(pull);
-        sum += a <= 3. ? pull * pull : 6. * a - 9.;
+        const double pull = (photon.theta - target_theta) / angular_resolution;
+        sum += pull * pull;
         ++used;
       }
       return used > 0 ? sum : 1.e12;
@@ -629,9 +807,8 @@ int main(int argc, char **argv)
         const auto photon = irt::reconstruct(candidate, fit_points[i].first,
                                               fit_points[i].second);
         if (!photon.valid) continue;
-        const double pull = (photon.theta - target_theta) / .001;
-        const double a = std::abs(pull);
-        sum += a <= 3. ? pull * pull : 6. * a - 9.;
+        const double pull = (photon.theta - target_theta) / angular_resolution;
+        sum += pull * pull;
         ++used;
       }
       return used > 0 ? sum : 1.e12;
@@ -683,9 +860,8 @@ int main(int argc, char **argv)
         const auto photon = irt::reconstruct(candidate, fit_points[i].first,
                                               fit_points[i].second);
         if (!photon.valid) continue;
-        const double pull = (photon.theta - target_theta) / .001;
-        const double a = std::abs(pull);
-        sum += a <= 3. ? pull * pull : 6. * a - 9.;
+        const double pull = (photon.theta - target_theta) / angular_resolution;
+        sum += pull * pull;
         ++used;
       }
       return used > 0 ? sum : 1.e12;
@@ -792,9 +968,8 @@ int main(int argc, char **argv)
         for (const auto &point : fit_points) {
           const auto photon = irt::reconstruct(candidate, point.first, point.second);
           if (!photon.valid) continue;
-          const double pull = (photon.theta - target_theta) / .001;
-          const double a = std::abs(pull);
-          objective += a <= 3. ? pull * pull : 6. * a - 9.;
+          const double pull = (photon.theta - target_theta) / angular_resolution;
+          objective += pull * pull;
           ++used;
         }
         scan_objectives[istep] = used > 0 ? objective : 1.e300;
@@ -813,7 +988,7 @@ int main(int argc, char **argv)
                 << " |derivative|=" << std::abs(derivative) << '\n';
     }
   }
-  if (fit_geometry && !fit_points.empty() && fit_max_hits > 0) {
+  if (fit_geometry && fit_config.empty() && !fit_points.empty() && fit_max_hits > 0) {
     const std::size_t fit_count = std::min<std::size_t>(
         fit_points.size(), static_cast<std::size_t>(fit_max_hits));
     auto objective = [&](const double *par) {
@@ -827,9 +1002,8 @@ int main(int argc, char **argv)
         const auto photon = irt::reconstruct(candidate, point.first, point.second);
         if (!photon.valid)
           continue;
-        const double pull = (photon.theta - target_theta) / 0.001;
-        const double a = std::abs(pull);
-        sum += a <= 3. ? pull * pull : 6. * a - 9.;
+        const double pull = (photon.theta - target_theta) / angular_resolution;
+        sum += pull * pull;
         ++used;
       }
       return used > 0 ? sum : 1.e12;
@@ -861,6 +1035,75 @@ int main(int argc, char **argv)
   auto h_theta_phi = new TH2D("hCherenkovThetaPhi", "reconstructed Cherenkov angles;#phi [rad];#theta [rad]", 720, -M_PI, M_PI, 1000, 0., .1);
   auto h_reflection = new TH2D("hMirrorXY", "mirror reflection points;x [mm];y [mm]", 1000, -1000., 1000., 1000, -1000., 1000.);
   auto h_detector = new TH2D("hDetectorXY", "detector hits;x [mm];y [mm]", 400, -200., 200., 400, -200., 200.);
+  auto h_angle_fit = new TH1D("hCherenkovThetaFit", "reconstructed Cherenkov angle, ring-selected hits;#theta [rad];hits", 1000, 0., .1);
+  auto h_phi_fit = new TH1D("hCherenkovPhiFit", "reconstructed Cherenkov azimuth, ring-selected hits;#phi [rad];hits", 720, -M_PI, M_PI);
+  auto h_theta_phi_fit = new TH2D("hCherenkovThetaPhiFit", "reconstructed Cherenkov angles, ring-selected hits;#phi [rad];#theta [rad]", 720, -M_PI, M_PI, 1000, 0., .1);
+  auto h_reflection_fit = new TH2D("hMirrorXYFit", "mirror reflection points, ring-selected hits;x [mm];y [mm]", 1000, -1000., 1000., 1000, -1000., 1000.);
+  auto h_detector_fit = new TH2D("hDetectorXYFit", "detector hits, ring-selected hits;x [mm];y [mm]", 400, -200., 200., 400, -200., 200.);
+
+  // Recreate all frame-aligned trees entry-by-entry, appending the IRT angles
+  // to the Cherenkov tree while preserving the original branch contents.
+  std::unique_ptr<TFile> input_file(TFile::Open(input.c_str(), "READ"));
+  TTree *input_cherenkov = input_file ?
+      dynamic_cast<TTree *>(input_file->Get("cherenkov")) : nullptr;
+  TTree *output_cherenkov = nullptr;
+  UShort_t cherenkov_nhits = 0;
+  Float_t cherenkov_x[65535] = {};
+  Float_t cherenkov_y[65535] = {};
+  Float_t cherenkov_time[65535] = {};
+  Float_t cherenkov_theta[65535] = {};
+  Float_t cherenkov_phi[65535] = {};
+  if (!input_cherenkov ||
+      input_cherenkov->SetBranchAddress("nhits", &cherenkov_nhits) < 0 ||
+      input_cherenkov->SetBranchAddress("x", cherenkov_x) < 0 ||
+      input_cherenkov->SetBranchAddress("y", cherenkov_y) < 0 ||
+      input_cherenkov->SetBranchAddress("time", cherenkov_time) < 0) {
+    std::cerr << "ERROR: input does not contain a usable cherenkov tree\n";
+    return 1;
+  }
+  file->cd();
+  output_cherenkov = input_cherenkov->CloneTree(0);
+  output_cherenkov->SetName("cherenkov");
+  auto output_irt = new TTree("irt", "IRT reconstruction, one entry per frame");
+  output_irt->Branch("nhits", &cherenkov_nhits, "nhits/s");
+  output_irt->Branch("theta", cherenkov_theta, "theta[nhits]/F");
+  output_irt->Branch("phi", cherenkov_phi, "phi[nhits]/F");
+  Float_t cherenkov_emission_time[65535] = {};
+  output_irt->Branch("time", cherenkov_emission_time, "time[nhits]/F");
+#ifdef IRT_HAS_CUDA
+  const auto gpu_geometry = cuda_geometry(fitted_geometry);
+  if (use_gpu && !irt::cuda::available()) {
+    std::cerr << "ERROR: CUDA requested but no CUDA device is available\n";
+    return 1;
+  }
+#else
+  if (use_gpu) {
+    std::cerr << "ERROR: this build does not contain CUDA support\n";
+    return 1;
+  }
+#endif
+
+  TTree *input_frames = dynamic_cast<TTree *>(input_file->Get("frames"));
+  TTree *input_ring = dynamic_cast<TTree *>(input_file->Get("ring"));
+  TTree *output_frames = input_frames ? input_frames->CloneTree(0) : nullptr;
+  TTree *output_ring = input_ring ? input_ring->CloneTree(0) : nullptr;
+
+  TIter key_iterator(input_file->GetListOfKeys());
+  while (auto *key = dynamic_cast<TKey *>(key_iterator())) {
+    const std::string name = key->GetName();
+    if (name == "frames" || name == "ring" || name == "cherenkov")
+      continue;
+    auto *tree = dynamic_cast<TTree *>(key->ReadObj());
+    if (!tree)
+      continue;
+    file->cd();
+    auto *copy = tree->CloneTree(-1, "fast");
+    if (!copy) {
+      std::cerr << "ERROR: could not clone input tree '" << name << "'\n";
+      return 1;
+    }
+    copy->Write();
+  }
 
   Long64_t frames = 0, hits = 0, valid = 0;
   for (const auto &point : points) {
@@ -875,8 +1118,132 @@ int main(int argc, char **argv)
         h_reflection->Fill(photon.reflection.X(), photon.reflection.Y());
         h_detector->Fill(point.first, point.second);
   }
+  const std::size_t fit_hist_count =
+      fit_max_hits > 0 ? std::min<std::size_t>(fit_points.size(), fit_max_hits) : 0;
+  for (std::size_t i = 0; i < fit_hist_count; ++i) {
+        const auto &point = fit_points[i];
+        const auto photon = irt::reconstruct(fitted_geometry, point.first, point.second);
+        if (!photon.valid)
+          continue;
+        h_angle_fit->Fill(photon.theta);
+        h_phi_fit->Fill(photon.phi);
+        h_theta_phi_fit->Fill(photon.phi, photon.theta);
+        h_reflection_fit->Fill(photon.reflection.X(), photon.reflection.Y());
+        h_detector_fit->Fill(point.first, point.second);
+  }
   frames = frames_read;
-  file->Write();
+  const Long64_t input_entries = input_cherenkov->GetEntries();
+  const Long64_t entries_to_process =
+      max_events < 0 ? input_entries : std::min(input_entries, max_events);
+  if (use_gpu) {
+#ifdef IRT_HAS_CUDA
+    constexpr std::size_t max_batch_hits = 1000000;
+    std::vector<float> batch_x, batch_y, batch_time;
+    std::vector<UShort_t> batch_counts;
+    std::vector<float> batch_theta, batch_phi, batch_emission_time;
+    std::vector<unsigned char> batch_valid;
+
+    auto flush_gpu_batch = [&]() -> bool {
+      if (batch_counts.empty()) return true;
+      const int count = static_cast<int>(batch_x.size());
+      batch_theta.resize(batch_x.size());
+      batch_phi.resize(batch_x.size());
+      batch_emission_time.resize(batch_x.size());
+      batch_valid.resize(batch_x.size());
+      if (!irt::cuda::reconstruct(gpu_geometry, batch_x.data(), batch_y.data(),
+                                  batch_time.data(), count, batch_theta.data(),
+                                  batch_phi.data(), batch_emission_time.data(),
+                                  batch_valid.data()))
+        return false;
+      std::size_t offset = 0;
+      for (const auto count_hits : batch_counts) {
+        cherenkov_nhits = count_hits;
+        for (unsigned int i = 0; i < count_hits; ++i) {
+          cherenkov_theta[i] = batch_theta[offset + i];
+          cherenkov_phi[i] = batch_phi[offset + i];
+          cherenkov_emission_time[i] = batch_emission_time[offset + i];
+        }
+        output_irt->Fill();
+        offset += count_hits;
+      }
+      batch_x.clear(); batch_y.clear(); batch_time.clear();
+      batch_counts.clear();
+      return true;
+    };
+
+    for (Long64_t entry = 0; entry < entries_to_process; ++entry) {
+      if (input_frames && input_frames->GetEntry(entry) <= 0) return 1;
+      if (input_ring && input_ring->GetEntry(entry) <= 0) return 1;
+      if (input_cherenkov->GetEntry(entry) <= 0) return 1;
+      if (cherenkov_nhits > 65535) return 1;
+      if (output_frames && output_frames->Fill() < 0) return 1;
+      if (output_ring && output_ring->Fill() < 0) return 1;
+      output_cherenkov->Fill();
+      batch_counts.push_back(cherenkov_nhits);
+      for (unsigned int i = 0; i < cherenkov_nhits; ++i) {
+        batch_x.push_back(cherenkov_x[i]);
+        batch_y.push_back(cherenkov_y[i]);
+        batch_time.push_back(cherenkov_time[i]);
+      }
+      if (batch_x.size() >= max_batch_hits && !flush_gpu_batch()) {
+        std::cerr << "ERROR: CUDA IRT reconstruction failed\n";
+        return 1;
+      }
+    }
+    if (!flush_gpu_batch()) {
+      std::cerr << "ERROR: CUDA IRT reconstruction failed\n";
+      return 1;
+    }
+#endif
+  } else {
+  for (Long64_t entry = 0; entry < entries_to_process; ++entry) {
+    if (input_frames && input_frames->GetEntry(entry) <= 0)
+      return 1;
+    if (input_ring && input_ring->GetEntry(entry) <= 0)
+      return 1;
+    if (input_cherenkov->GetEntry(entry) <= 0)
+      return 1;
+    if (cherenkov_nhits > 65535) {
+      std::cerr << "ERROR: cherenkov hit count exceeds output capacity\n";
+      return 1;
+    }
+    for (unsigned int i = 0; i < cherenkov_nhits; ++i) {
+        const auto photon = irt::reconstruct(fitted_geometry,
+                                              cherenkov_x[i], cherenkov_y[i]);
+        cherenkov_theta[i] = photon.valid ? static_cast<Float_t>(photon.theta) :
+                                             std::numeric_limits<Float_t>::quiet_NaN();
+        cherenkov_phi[i] = photon.valid ? static_cast<Float_t>(photon.phi) :
+                                           std::numeric_limits<Float_t>::quiet_NaN();
+        if (photon.valid) {
+          constexpr double time_to_ns = 3.125;
+          constexpr double speed_of_light_mm_per_ns = 299.792458;
+          const double path_length =
+              (photon.reflection - photon.detector).Mag() +
+              (photon.reflection - fitted_geometry.emission).Mag();
+          cherenkov_emission_time[i] = static_cast<Float_t>(
+              cherenkov_time[i] * time_to_ns -
+              path_length / speed_of_light_mm_per_ns);
+        } else {
+          cherenkov_emission_time[i] =
+              std::numeric_limits<Float_t>::quiet_NaN();
+        }
+    }
+    if (output_frames && output_frames->Fill() < 0)
+      return 1;
+    if (output_ring && output_ring->Fill() < 0)
+      return 1;
+    output_cherenkov->Fill();
+    output_irt->Fill();
+  }
+  }
+  file->Write("", TObject::kOverwrite);
+  h_angle->Write();
+  h_phi->Write();
+  h_theta_phi->Write();
+  h_reflection->Write();
+  h_detector->Write();
+  for (auto *scan : fit_scans)
+    scan->Write();
   file->Close();
   std::cout << "frames processed: " << frames << '\n'
             << "Cherenkov hits:  " << hits << '\n'

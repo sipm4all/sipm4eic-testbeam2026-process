@@ -46,6 +46,14 @@ if(CMAKE_CUDA_COMPILER)
       ${CMAKE_CURRENT_LIST_DIR}/ring-finder-roberto
     )
     target_link_libraries(ring_finder_roberto_cuda PUBLIC CUDA::cudart)
+
+    add_library(irt_cuda STATIC irt/irt_cuda.cu)
+    set_target_properties(irt_cuda PROPERTIES
+      CUDA_STANDARD 17
+      CUDA_STANDARD_REQUIRED ON
+    )
+    target_include_directories(irt_cuda PUBLIC ${CMAKE_CURRENT_LIST_DIR}/irt)
+    target_link_libraries(irt_cuda PUBLIC CUDA::cudart)
   endif()
 endif()
 
@@ -85,6 +93,16 @@ add_executable(filter filter.cc)
 add_executable(ring-finder-ransac ring-finder-ransac.cc)
 add_executable(ring-finder-hough ring-finder-hough.cc)
 add_executable(irt irt/irt.cc)
+add_executable(irt_ellipse irt/irt_ellipse.cc)
+add_executable(irt_analysis irt_analysis.cc)
+if(RING_HOUGH_CUDA_ENABLED)
+  add_library(irt_analysis_cuda STATIC irt_analysis_cuda.cu)
+  set_target_properties(irt_analysis_cuda PROPERTIES CUDA_STANDARD 17 CUDA_STANDARD_REQUIRED ON)
+  target_link_libraries(irt_analysis_cuda PUBLIC CUDA::cudart)
+  target_include_directories(irt_analysis_cuda PUBLIC ${CMAKE_CURRENT_LIST_DIR})
+  target_compile_definitions(irt_analysis PRIVATE IRT_ANALYSIS_HAS_CUDA=1)
+  target_link_libraries(irt_analysis PRIVATE irt_analysis_cuda)
+endif()
 if(RING_HOUGH_CUDA_ENABLED)
   add_executable(ring-finder-roberto ring-finder-roberto/main.cc)
 endif()
@@ -99,15 +117,19 @@ target_include_directories(irt PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/../../macros/lib
 )
 
-foreach(target decoder dcalib calibrator coordinator cleaner checker sorter after-pulse-suppressor merger trigger timing filter ring-finder-ransac ring-finder-hough irt)
+foreach(target decoder dcalib calibrator coordinator cleaner checker sorter after-pulse-suppressor merger trigger timing filter ring-finder-ransac ring-finder-hough irt irt_ellipse irt_analysis)
   target_compile_options(${target} PRIVATE ${ROOT_CFLAGS_LIST})
   target_link_libraries(${target} PRIVATE ${ROOT_LIBS_LIST} Boost::program_options)
 endforeach()
 target_include_directories(timing PRIVATE ${CMAKE_CURRENT_LIST_DIR}/timing/include)
+target_include_directories(irt_ellipse PRIVATE ${CMAKE_CURRENT_LIST_DIR}/irt)
+target_include_directories(irt_analysis PRIVATE ${CMAKE_CURRENT_LIST_DIR}/../../macros/lib)
 target_link_libraries(timing PRIVATE timing_estimator)
 if(RING_HOUGH_CUDA_ENABLED)
   target_compile_definitions(ring-finder-hough PRIVATE RING_HOUGH_HAS_CUDA=1)
   target_link_libraries(ring-finder-hough PRIVATE ring_hough_cuda)
+  target_compile_definitions(irt PRIVATE IRT_HAS_CUDA=1)
+  target_link_libraries(irt PRIVATE irt_cuda)
   target_compile_options(ring-finder-roberto PRIVATE ${ROOT_CFLAGS_LIST})
   target_link_libraries(ring-finder-roberto PRIVATE
     ${ROOT_LIBS_LIST} Boost::program_options ring_finder_roberto_cuda
