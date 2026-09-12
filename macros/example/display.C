@@ -10,6 +10,9 @@
 #include <TEllipse.h>
 #include <TMarker.h>
 #include <TGraph.h>
+#include <TTreeReader.h>
+#include <TTreeReaderArray.h>
+#include <TTreeReaderValue.h>
 
 #include <algorithm>
 #include <array>
@@ -36,6 +39,12 @@ finite_xy(const hit_t &hit)
 {
   return std::isfinite(hit.x) && std::isfinite(hit.y);
 }
+
+struct display_cluster_t {
+  unsigned int size;
+  float x;
+  float y;
+};
 
 double
 ring_residual(const ring_t &ring, const hit_t &hit)
@@ -244,7 +253,8 @@ draw_frame_delta(const trigger_reader_t &reader,
 void
 draw_frame_map(trigger_reader_t &reader,
                bool use_reference,
-               double reference_time)
+               double reference_time,
+               const std::vector<display_cluster_t> &clusters)
 {
   constexpr double time_to_ns = 3.125;
   auto hits = reader.cherenkov_hits();
@@ -361,6 +371,17 @@ draw_frame_map(trigger_reader_t &reader,
       marker->SetLineWidth(2);
       marker->Draw("same");
     }
+  }
+
+  // Cluster centroids are optional and are overlaid without changing the hit display.
+  for (const auto &cluster : clusters) {
+    const double side = pixel_size * std::sqrt(static_cast<double>(cluster.size));
+    auto box = new TBox(cluster.x - 0.5 * side, cluster.y - 0.5 * side,
+                        cluster.x + 0.5 * side, cluster.y + 0.5 * side);
+    box->SetFillStyle(0);
+    box->SetLineColor(kBlack);
+    box->SetLineWidth(1);
+    box->Draw("same");
   }
 
   if (reader.has_rings()) {
@@ -548,6 +569,34 @@ display_frames(const char *filename,
     return;
 
   auto canvas = make_display_canvas();
+  auto input = TFile::Open(filename, "READ");
+  TTree *cluster_tree = input && !input->IsZombie()
+    ? dynamic_cast<TTree *>(input->Get("clusters")) : nullptr;
+  std::unique_ptr<TTreeReader> cluster_reader;
+  std::unique_ptr<TTreeReaderValue<UShort_t>> cluster_nclusters;
+  std::unique_ptr<TTreeReaderArray<UChar_t>> cluster_size;
+  std::unique_ptr<TTreeReaderArray<Float_t>> cluster_x;
+  std::unique_ptr<TTreeReaderArray<Float_t>> cluster_y;
+  if (cluster_tree) {
+    auto frame_tree = dynamic_cast<TTree *>(input->Get("frames"));
+    if (!frame_tree || cluster_tree->GetEntries() != frame_tree->GetEntries()) {
+      std::cerr << "ERROR: clusters tree entry-count mismatch" << std::endl;
+      input->Close();
+      return;
+    }
+    cluster_reader = std::make_unique<TTreeReader>(cluster_tree);
+    cluster_nclusters = std::make_unique<TTreeReaderValue<UShort_t>>(*cluster_reader, "nclusters");
+    cluster_size = std::make_unique<TTreeReaderArray<UChar_t>>(*cluster_reader, "size");
+    cluster_x = std::make_unique<TTreeReaderArray<Float_t>>(*cluster_reader, "x");
+    cluster_y = std::make_unique<TTreeReaderArray<Float_t>>(*cluster_reader, "y");
+    for (const char *branch : {"nclusters", "size", "x", "y"}) {
+      if (!cluster_tree->GetBranch(branch)) {
+        std::cerr << "ERROR: clusters tree missing branch '" << branch << "'" << std::endl;
+        input->Close();
+        return;
+      }
+    }
+  }
   const bool fixed_frame = target_spill != std::numeric_limits<int>::min();
 
   while (reader.next_spill()) {
@@ -557,6 +606,24 @@ display_frames(const char *filename,
       continue;
 
     while (reader.next_frame()) {
+      std::vector<display_cluster_t> frame_clusters;
+      if (cluster_reader) {
+        if (!cluster_reader->Next()) {
+          std::cerr << "ERROR: failed to read clusters entry" << std::endl;
+          input->Close();
+          return;
+        }
+        const auto nclusters = static_cast<std::size_t>(**cluster_nclusters);
+        if (cluster_size->GetSize() < nclusters || cluster_x->GetSize() < nclusters ||
+            cluster_y->GetSize() < nclusters) {
+          std::cerr << "ERROR: invalid clusters arrays at frame " << reader.frame_index() << std::endl;
+          input->Close();
+          return;
+        }
+        frame_clusters.reserve(nclusters);
+        for (std::size_t i = 0; i < nclusters; ++i)
+          frame_clusters.push_back({(*cluster_size)[i], (*cluster_x)[i], (*cluster_y)[i]});
+      }
       if (reader.spill_id() == start_spill &&
           reader.frame_index() < start_frame)
         continue;
@@ -580,7 +647,7 @@ display_frames(const char *filename,
       }
 
       canvas->cd();
-      draw_frame_map(reader, use_reference, reference_time);
+      draw_frame_map(reader, use_reference, reference_time, frame_clusters);
       draw_frame_angles(reader, use_reference, reference_time);
 
       if (fixed_frame)
@@ -604,6 +671,9 @@ display_frames(const char *filename,
         save_frame_png(canvas, reader);
     }
   }
+
+  if (input)
+    input->Close();
 
   if (fixed_frame) {
     std::cerr << "ERROR: frame not found"

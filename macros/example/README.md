@@ -421,3 +421,64 @@ irt_analysis("irt.filtered.recodata.timing.sps.root", {},
 The final `max_events` argument limits the number of frames; omit it or use
 `-1` for all frames. Optional event selections can be passed in the second
 argument using the same selection objects as `display.C`.
+### `pair_distance.C`
+
+`pair_distance.C` computes the spatial distance between every independent pair
+of Cherenkov hits in each frame. Only pairs with `i < j` are used, so a pair is
+not counted twice. The `hPairDistance` histogram is normalized by the number of
+processed frames and therefore contains pairs per event.
+
+Run it from ROOT with:
+
+```cpp
+.L macros/example/pair_distance.C
+pair_distance("triggered.root", "pair_distance.root", 5.)
+```
+
+The third argument is the close-pair distance threshold in millimetres.
+The macro also produces `hClosePairs`, the number of independent pairs closer
+than the threshold in each frame, and `hMinPairDistance`, the minimum pair
+distance in each frame.
+
+### `event_quality.C`
+
+`event_quality.C` diagnoses messy frames with exactly one stored ring. It
+measures out-of-ring hits, close space-time hit pairs, and maximum local
+space-time multiplicity. It does not use ring residual RMS. The default
+neighbourhood is 3 mm and 2 native time units; ring matching uses 6 mm and 4
+native time units. All thresholds can be passed as additional arguments.
+It also writes `hClosePairsVsHits`, an event-level two-dimensional histogram
+correlating the total Cherenkov hit count with the close-pair count.
+
+### `clusters.C`
+
+`clusters.C` finds connected Cherenkov-hit clusters in each frame. Hits are
+adjacent when their spatial distance is below 3.2 mm. Connectivity is
+transitive, so a hit can join a cluster through any hit already in that
+cluster. An isolated hit is a cluster of size one.
+All plots produced by this macro are restricted to frames containing exactly
+one stored ring whose center passes a 4-sigma cut: `x0 = 6.17236 +/-
+4*0.793097` and `y0 = -2.18484 +/- 4*0.825066`.
+
+```cpp
+.L macros/example/clusters.C
+clusters("triggered.root", "clusters.root", 3.2, 4)
+```
+
+The output contains cluster-size, clusters-per-frame, largest-cluster,
+largest-cluster-fraction, clusters-versus-hit-count, and the all-event
+`hClustersVsLargestCluster` two-dimensional histogram. The latter correlates
+the number of clusters in a frame with the size of its largest cluster.
+`hHitsVsLargestCluster` directly correlates largest cluster size (X-axis)
+with total Cherenkov hit multiplicity (Y-axis).
+For configurable large-cluster diagnostics, clusters with size greater than
+or equal to the fourth argument are counted in `hLargeClusters`,
+`hLargeClustersVsHits`, and `hLargeClustersVsLargestCluster`.
+For frames with exactly one stored ring it also writes `hRingInliersAll` and
+`hRingInliersLargestCluster2` and `hRingInliersLargestCluster3`, the `N_inliers` distributions before and after
+requiring the largest spatial cluster to contain at most two hits.
+`hRingInlierClustersAll`, `hRingInlierClustersLargestCluster2`, and
+`hRingInlierClustersLargestCluster3` count connected spatial clusters among
+the reconstructed ring-inlier hits. Since the ring tree stores `ninliers` but
+not the individual hit identities, these hits are reconstructed with a 6 mm
+radial and 4 native-unit time cut around the stored ring.

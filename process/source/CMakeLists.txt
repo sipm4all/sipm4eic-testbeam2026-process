@@ -90,6 +90,7 @@ add_executable(merger merger.cc)
 add_executable(trigger trigger.cc)
 add_executable(timing timing.cc)
 add_executable(filter filter.cc)
+add_executable(clusterer clusterer.cc)
 add_executable(ring-finder-ransac ring-finder-ransac.cc)
 add_executable(ring-finder-hough ring-finder-hough.cc)
 add_executable(irt irt/irt.cc)
@@ -117,7 +118,7 @@ target_include_directories(irt PRIVATE
   ${CMAKE_CURRENT_LIST_DIR}/../../macros/lib
 )
 
-foreach(target decoder dcalib calibrator coordinator cleaner checker sorter after-pulse-suppressor merger trigger timing filter ring-finder-ransac ring-finder-hough irt irt_ellipse irt_analysis)
+foreach(target decoder dcalib calibrator coordinator cleaner checker sorter after-pulse-suppressor merger trigger timing filter clusterer ring-finder-ransac ring-finder-hough irt irt_ellipse irt_analysis)
   target_compile_options(${target} PRIVATE ${ROOT_CFLAGS_LIST})
   target_link_libraries(${target} PRIVATE ${ROOT_LIBS_LIST} Boost::program_options)
 endforeach()
