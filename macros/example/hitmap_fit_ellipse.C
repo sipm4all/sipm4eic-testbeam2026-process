@@ -1,4 +1,4 @@
-#include "../lib/trigger_reader.h"
+#include "../lib/frame_selection.h"
 #include <TCanvas.h>
 #include <TFile.h>
 #include <TF2.h>
@@ -14,13 +14,62 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <string>
+#include <memory>
+#include <vector>
+
+namespace {
+
+struct hit_selection_t {
+  double min_x, max_x, min_y, max_y, min_time, max_time;
+
+  bool accepts(const hit_t &hit) const
+  {
+    return std::isfinite(hit.x) && std::isfinite(hit.y) &&
+           std::isfinite(hit.time) && hit.x >= min_x && hit.x <= max_x &&
+           hit.y >= min_y && hit.y <= max_y && hit.time >= min_time &&
+           hit.time <= max_time;
+  }
+};
+
+bool
+passes_selections(const trigger_reader_t &reader,
+                  const std::vector<selection_ptr_t> &selections)
+{
+  for (const auto &selection : selections) {
+    if (!selection) {
+      std::cerr << "ERROR: null hitmap selection" << std::endl;
+      return false;
+    }
+    if (!selection->is_selected(reader))
+      return false;
+  }
+  return true;
+}
+
+}
 
 std::map<std::string, std::array<double, 2>>
-hitmap_fit(std::string input_filename, std::string output_filename)
+hitmap_fit(std::string input_filename, std::string output_filename,
+           const std::vector<selection_ptr_t> &selections = {},
+           hit_selection_t hit_selection = {-std::numeric_limits<double>::infinity(),
+                                            std::numeric_limits<double>::infinity(),
+                                            -std::numeric_limits<double>::infinity(),
+                                            std::numeric_limits<double>::infinity(),
+                                            -std::numeric_limits<double>::infinity(),
+                                            std::numeric_limits<double>::infinity()})
 {
   trigger_reader_t reader;
   if (!reader.open(input_filename)) return {};
+  for (const auto &selection : selections) {
+    if (selection && dynamic_cast<const ring_selection_t *>(selection.get()) &&
+        !reader.has_rings()) {
+      std::cerr << "ERROR: ring selection requested, but input has no ring tree"
+                << std::endl;
+      return {};
+    }
+  }
 
   TH2F hmap("hMap", ";x (mm);y (mm)", 396, -99., 99., 396, -99., 99.);
   TH2F hmap_vis("hMap_vis", ";x (mm);y (mm)", 396, -99., 99., 396, -99., 99.);
@@ -29,17 +78,18 @@ hitmap_fit(std::string input_filename, std::string output_filename)
   int selected_frames = 0;
   while (reader.next_spill()) {
     while (reader.next_frame()) {
+      if (!passes_selections(reader, selections)) {
+        continue;
+      }
       ++selected_frames;
       for (const auto &hit : reader.cherenkov_hits()) {
-        if (!std::isfinite(hit.x) || !std::isfinite(hit.y) ||
-            !std::isfinite(hit.time)) continue;
+        if (!hit_selection.accepts(hit)) continue;
         const std::array<float, 2> pos = {static_cast<float>(hit.x), static_cast<float>(hit.y)};
         hitmap[pos] += 1.;
         hmap.Fill(hit.x, hit.y);
         hmap_vis.Fill(gRandom->Uniform(hit.x - 1.5, hit.x + 1.5),
                       gRandom->Uniform(hit.y - 1.5, hit.y + 1.5));
-        if (hit.x >= -36.)
-          fit_hitmap[pos] += 1.;
+        fit_hitmap[pos] += 1.;
       }
     }
   }
@@ -64,7 +114,7 @@ hitmap_fit(std::string input_filename, std::string output_filename)
     }
     return sum;
   };
-  const double start[8] = {10., 30., -30., 45., 35., 0., .05, 0.};
+  const double start[8] = {30., 6.10127, -2.11881, 40.3, 43.8, 0., .03, 10.};
   ROOT::Fit::Fitter fitter;
   ROOT::Math::Functor fcn(chi2, 8);
   fitter.SetFCN(fcn, start);
@@ -78,7 +128,9 @@ hitmap_fit(std::string input_filename, std::string output_filename)
   const bool fit_ok = fitter.FitFCN();
   const auto result = fitter.Result();
   result.Print(std::cout);
-  if (!fit_ok) return {};
+  if (!fit_ok)
+    std::cerr << "WARNING: Minuit did not report a valid fit; writing the result for inspection"
+              << std::endl;
 
   TFile output(output_filename.c_str(), "RECREATE");
   auto *results = new TH1F("hResults", "fit results", 8, 0, 8);
@@ -97,6 +149,14 @@ hitmap_fit(std::string input_filename, std::string output_filename)
       result.Parameter(3) * (1. + sign * result.Parameter(6)),
       result.Parameter(4) * (1. + sign * result.Parameter(6)), 0., 360., angle);
     ellipse->SetFillStyle(0); ellipse->SetLineColor(kBlack); ellipse->Draw("same");
+
+    auto *ellipse_3sigma = new TEllipse(result.Parameter(1), result.Parameter(2),
+      result.Parameter(3) * (1. + sign * 3. * result.Parameter(6)),
+      result.Parameter(4) * (1. + sign * 3. * result.Parameter(6)), 0., 360., angle);
+    ellipse_3sigma->SetFillStyle(0);
+    ellipse_3sigma->SetLineColor(kBlack);
+    ellipse_3sigma->SetLineStyle(2);
+    ellipse_3sigma->Draw("same");
   }
   canvas.cd(2);
   TLatex text; text.SetNDC();

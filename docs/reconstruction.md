@@ -532,3 +532,29 @@ macros/example/deltat.C
 ```
 
 for minimal analysis examples.
+### SPS hitmap ellipse fit
+
+For the SPS run `20260604-231255`, the Cherenkov hitmap ellipse can be fitted
+with `macros/example/hitmap_fit_ellipse.C`. The documented selection uses
+exactly one ring, with:
+
+```text
+1.6807629 < x0 < 10.532937
+-6.9282539 < y0 < 2.6953339
+37.447760 < radius < 46.685640
+```
+
+The per-hit selection is:
+
+```text
+-36 <= x <= 100 mm
+-100 <= y <= 100 mm
+-0.5 <= time <= 1.5 native time units
+```
+
+These cuts select events and hits for the fit only; they do not alter the
+input data. The macro starts from the measured SPS geometry estimate
+`(x0,y0)=(6.10127,-2.11881) mm`, `A=40.3 mm`, `B=43.8 mm`, `theta=0`,
+`sigmaRho=0.03`, `Nsig=30`, and `Nbkg=10`. It draws the fitted one-sigma
+ellipse boundaries as solid lines and the three-sigma boundaries as dashed
+lines.

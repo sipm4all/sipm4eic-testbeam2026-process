@@ -88,3 +88,11 @@ The first three select type-1 hits. `trigger_target_t` selects type-9 hits;
 `ring_target_t` consumes the rings already stored in the input `ring` tree. It
 does not run RANSAC. `ring_selection_t` is a separate frame-level filter used
 to select frames by stored ring centre, radius, and ring count.
+
+`cherenkov_hits_selection_t(min_hits, max_hits)` is another frame-level
+filter. It accepts a frame only when the number of Cherenkov hits is within
+the inclusive range. For example:
+
+```cpp
+std::make_shared<cherenkov_hits_selection_t>(5, 40)
+```

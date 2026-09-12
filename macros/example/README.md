@@ -482,3 +482,38 @@ requiring the largest spatial cluster to contain at most two hits.
 the reconstructed ring-inlier hits. Since the ring tree stores `ninliers` but
 not the individual hit identities, these hits are reconstructed with a 6 mm
 radial and 4 native-unit time cut around the stored ring.
+### `hitmap_fit_ellipse.C` selections
+
+`hitmap_fit_ellipse.C` accepts the same optional selection objects used by
+`display.C`, including `ring_selection_t` for ring-tree cuts and
+`cherenkov_hits_selection_t` for event hit-multiplicity cuts:
+
+```cpp
+hitmap_fit("input.root", "fit.root", {
+  std::make_shared<ring_selection_t>(-10, 10, -10, 10, 30, 50, 1, 1),
+  std::make_shared<cherenkov_hits_selection_t>(5, 40)
+});
+```
+Without selections, all frames are used. Ring selections require a ring tree;
+hit-multiplicity selections use the Cherenkov tree directly.
+The optional fourth argument applies per-hit spatial and time cuts in the
+form `hit_selection_t(min_x, max_x, min_y, max_y, min_time, max_time)`.
+
+For the SPS run `20260604-231255`, an example selection used for the ellipse
+fit was:
+
+```cpp
+hitmap_fit("rings.filtered.recodata.timing.v1.root", "hitmap.fit.root",
+  {std::make_shared<ring_selection_t>(
+     1.6807629, 10.532937, -6.9282539, 2.6953339,
+     37.447760, 46.685640, 1, 1)},
+  hit_selection_t(-36., 100., -100., 100., -0.5, 1.5));
+```
+
+This selects exactly one ring, restricts its center and radius, and accepts
+only Cherenkov hits with `-36 <= x <= 100 mm`, `-100 <= y <= 100 mm`, and
+`-0.5 <= time <= 1.5` in native time units. The hit cuts affect the fitted
+map and fit only; they do not modify the input tree. The fit starts from
+`x0=6.10127`, `y0=-2.11881`, `A=40.3`, `B=43.8`, `theta=0`, `sigmaRho=0.03`,
+`Nsig=30`, and `Nbkg=10`. The output includes solid one-sigma ellipse
+outlines and dashed three-sigma outlines.

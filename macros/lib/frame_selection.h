@@ -326,6 +326,24 @@ struct trigger_selection_t : selection_t {
   }
 };
 
+struct cherenkov_hits_selection_t : selection_t {
+  std::size_t min_hits = 0;
+  std::size_t max_hits = std::numeric_limits<std::size_t>::max();
+
+  cherenkov_hits_selection_t(std::size_t min_hits_ = 0,
+                             std::size_t max_hits_ =
+                               std::numeric_limits<std::size_t>::max())
+    : min_hits(min_hits_), max_hits(max_hits_)
+  {
+  }
+
+  bool is_selected(const trigger_reader_t &reader) const override
+  {
+    const auto count = reader.cherenkov_hits().size();
+    return count >= min_hits && count <= max_hits;
+  }
+};
+
 struct ring_selection_t : selection_t {
   double min_x0 = -std::numeric_limits<double>::infinity();
   double max_x0 =  std::numeric_limits<double>::infinity();
