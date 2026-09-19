@@ -517,3 +517,31 @@ map and fit only; they do not modify the input tree. The fit starts from
 `x0=6.10127`, `y0=-2.11881`, `A=40.3`, `B=43.8`, `theta=0`, `sigmaRho=0.03`,
 `Nsig=30`, and `Nbkg=10`. The output includes solid one-sigma ellipse
 outlines and dashed three-sigma outlines.
+
+### `hitmap_acceptance.C`
+
+`hitmap_acceptance.C` reads the `hResults` produced by
+`hitmap_fit_ellipse.C` and numerically integrates only the fitted ring signal;
+the fitted uniform background is excluded. By default the integration is
+restricted to `|rho - 1| <= 3 sigmaRho` and uses `3 x 3 mm2` pixels on a
+`3.2 mm` pitch.
+
+It reports the fitted-ring integral for four geometries: a continuous
+detector, an ideal full pixel lattice, a complete centered `3 x 3` PDU array,
+and the real eight-PDU Cherenkov geometry. A PDU contains `16 x 16` pixels;
+the default gap between adjacent PDUs is `3 mm`. The ideal-lattice result is
+averaged over sub-pitch lattice phases to avoid dependence on an arbitrary
+grid origin.
+
+```cpp
+.L macros/example/hitmap_acceptance.C
+hitmap_acceptance("hitmap.fit.root");
+```
+
+The optional arguments are, in order, `n_sigma`, `pixel_size`, `pixel_pitch`,
+`pdu_gap`, numerical `integration_step`, and the number of lattice phase
+samples per axis. For example:
+
+```cpp
+hitmap_acceptance("hitmap.fit.root", 3., 3., 3.2, 3., 0.05, 8);
+```
