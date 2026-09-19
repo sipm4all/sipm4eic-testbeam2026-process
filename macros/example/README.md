@@ -2,6 +2,42 @@
 
 This directory contains small ROOT macros showing how to inspect processed data.
 
+## irt_theta.C
+
+`irt_theta.C` draws the reconstructed IRT `theta` distribution for hits whose
+IRT emission time is within an inclusive `[min_time, max_time]` cut. The
+histogram always has 100 bins over `[0, 0.1]` rad and the canvas is 800x800
+with 0.15 margins. The optional `spill` and `frame` arguments select one
+frame; the frame number is the entry index of the frame-aligned trees. A
+negative spill or frame means all values are accepted. Since the frame tree
+has no explicit frame branch, `frame` is the zero-based frame index within the
+selected spill.
+
+```cpp
+.L macros/example/irt_theta.C
+irt_theta("irt.root", -2., 2.);       // all frames
+irt_theta("irt.root", -2., 2., 3);   // spill 3
+irt_theta("irt.root", -2., 2., 3, 47); // spill 3, entry/frame 47
+```
+
+## irt_geometry.C
+
+`irt_geometry.C` draws an explanatory `x-z` projection of the nominal IRT
+geometry: the track and emission point, mirror and detector spheres, mirror
+pivot, detector tangent plane, and a representative photon path. The path is
+illustrative; the numerical ray tracing is performed by `irt`.
+
+```bash
+root -l 'macros/example/irt_geometry.C'
+```
+
+In an interactive ROOT session, call:
+
+```cpp
+.L macros/example/irt_geometry.C
+irt_geometry();
+```
+
 ## trigger_reader.C
 
 Demonstrates the header-only triggered-frame reader API:
