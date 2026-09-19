@@ -163,6 +163,18 @@ The time window is in native timing units (`1 unit = 3.125 ns`). Set
 `draw_matched_ring_hits` to `false` to hide the hit overlays without changing
 ring drawing or selection.
 
+The final four boolean arguments of `display` independently control the
+display layers, in this order:
+
+```cpp
+display(filename, reference, selections, start_spill, start_frame,
+        target_spill, target_frame, ring_name,
+        draw_hits, draw_ring_hits, draw_rings, draw_clusters)
+```
+
+They control, respectively, all Cherenkov hits, hits selected by a ring,
+stored rings, and optional cluster overlays. All four default to `true`.
+
 ## Display Details
 
 - The eight PDU outlines are drawn using the configured Cherenkov geometry.

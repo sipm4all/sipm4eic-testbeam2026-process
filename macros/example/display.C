@@ -254,7 +254,11 @@ void
 draw_frame_map(trigger_reader_t &reader,
                bool use_reference,
                double reference_time,
-               const std::vector<display_cluster_t> &clusters)
+               const std::vector<display_cluster_t> &clusters,
+               bool draw_hits,
+               bool draw_ring_hits,
+               bool draw_rings,
+               bool draw_clusters)
 {
   constexpr double time_to_ns = 3.125;
   auto hits = reader.cherenkov_hits();
@@ -347,6 +351,8 @@ draw_frame_map(trigger_reader_t &reader,
   }
 
   for (const auto &hit : drawable) {
+    if (!draw_hits && !draw_ring_hits)
+      break;
     auto dt = (use_reference ? hit.time - reference_time : hit.time) * time_to_ns;
     const int hit_color = color_index(dt, color_min, color_max);
     auto box = new TBox(hit.x - 0.5 * pixel_size, hit.y - 0.5 * pixel_size,
@@ -361,9 +367,10 @@ draw_frame_map(trigger_reader_t &reader,
     }
     box->SetLineColor(kBlack);
     box->SetLineWidth(1);
-    box->Draw("same");
+    if (draw_hits)
+      box->Draw("same");
 
-    if (draw_matched_ring_hits && ring_hit) {
+    if (draw_ring_hits && ring_hit) {
       // Empty circle is slightly larger than the square and retains its time color.
       auto marker = new TEllipse(hit.x, hit.y, 1.0 * pixel_size, 1.0 * pixel_size);
       marker->SetFillStyle(0);
@@ -375,6 +382,8 @@ draw_frame_map(trigger_reader_t &reader,
 
   // Cluster centroids are optional and are overlaid without changing the hit display.
   for (const auto &cluster : clusters) {
+    if (!draw_clusters)
+      break;
     const double side = pixel_size * std::sqrt(static_cast<double>(cluster.size));
     auto box = new TBox(cluster.x - 0.5 * side, cluster.y - 0.5 * side,
                         cluster.x + 0.5 * side, cluster.y + 0.5 * side);
@@ -384,7 +393,7 @@ draw_frame_map(trigger_reader_t &reader,
     box->Draw("same");
   }
 
-  if (reader.has_rings()) {
+  if (draw_rings && reader.has_rings()) {
     for (const auto &ring : reader.rings()) {
       double minor = ring.radius * std::sqrt(std::max(
         0., 1. - ring.eccentricity * ring.eccentricity));
@@ -421,7 +430,10 @@ draw_frame_map(trigger_reader_t &reader,
 void
 draw_frame_angles(const trigger_reader_t &reader,
                   bool use_reference,
-                  double reference_time)
+                  double reference_time,
+                  bool draw_hits,
+                  bool draw_ring_hits,
+                  bool draw_rings)
 {
   static TCanvas *canvas = nullptr;
   if (!canvas) {
@@ -473,6 +485,8 @@ draw_frame_angles(const trigger_reader_t &reader,
   }
 
   for (const auto &hit : reader.cherenkov_hits()) {
+    if (!draw_hits && !draw_ring_hits)
+      break;
     if (!std::isfinite(hit.theta) || !std::isfinite(hit.phi) ||
         !std::isfinite(hit.time))
       continue;
@@ -483,16 +497,19 @@ draw_frame_angles(const trigger_reader_t &reader,
     graph->SetMarkerStyle(21);
     graph->SetMarkerColor(colour);
     graph->SetMarkerSize(1.2);
-    graph->Draw("P same");
+    if (draw_hits)
+      graph->Draw("P same");
 
     bool selected = false;
     for (const auto &ring : reader.rings()) {
+      if (!draw_rings)
+        break;
       if (is_ring_hit(hit, ring)) {
         selected = true;
         break;
       }
     }
-    if (draw_matched_ring_hits && selected) {
+    if (draw_ring_hits && selected) {
       auto outline = new TGraph(1);
       outline->SetPoint(0, hit.phi, hit.theta);
       outline->SetMarkerStyle(24);
@@ -560,7 +577,11 @@ display_frames(const char *filename,
                int start_frame,
                int target_spill,
                int target_frame,
-               const char *ring_name)
+               const char *ring_name,
+               bool draw_hits,
+               bool draw_ring_hits,
+               bool draw_rings,
+               bool draw_clusters)
 {
   trigger_reader_t reader;
   if (!reader.open(filename, ring_name ? ring_name : "ring"))
@@ -647,8 +668,10 @@ display_frames(const char *filename,
       }
 
       canvas->cd();
-      draw_frame_map(reader, use_reference, reference_time, frame_clusters);
-      draw_frame_angles(reader, use_reference, reference_time);
+      draw_frame_map(reader, use_reference, reference_time, frame_clusters,
+                     draw_hits, draw_ring_hits, draw_rings, draw_clusters);
+      draw_frame_angles(reader, use_reference, reference_time,
+                        draw_hits, draw_ring_hits, draw_rings);
 
       if (fixed_frame)
         return;
@@ -693,8 +716,13 @@ display(const char *filename = "triggered.root",
         int start_frame = 0,
         int target_spill = std::numeric_limits<int>::min(),
         int target_frame = -1,
-        const char *ring_name = "ring")
+        const char *ring_name = "ring",
+        bool draw_hits = true,
+        bool draw_ring_hits = true,
+        bool draw_rings = true,
+        bool draw_clusters = true)
 {
   display_frames(filename, reference, selections, start_spill, start_frame,
-                 target_spill, target_frame, ring_name);
+                 target_spill, target_frame, ring_name, draw_hits,
+                 draw_ring_hits, draw_rings, draw_clusters);
 }
