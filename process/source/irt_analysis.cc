@@ -5,6 +5,7 @@
 #include <cmath>
 #include <iostream>
 #include <memory>
+#include <limits>
 #include <string>
 #ifdef IRT_ANALYSIS_HAS_CUDA
 #include "irt_analysis_cuda.h"
@@ -16,6 +17,9 @@ int main(int argc, char **argv)
 {
   std::string input, output, ring_name = "ring";
   long long max_events = -1;
+  double x0min = -INFINITY, x0max = INFINITY, y0min = -INFINITY, y0max = INFINITY;
+  double rmin = 0., rmax = INFINITY;
+  long long min_hits = 0, max_hits = std::numeric_limits<long long>::max();
   po::options_description options("options");
   options.add_options()
     ("help,h", "show help")
@@ -23,6 +27,14 @@ int main(int argc, char **argv)
     ("output", po::value<std::string>(&output)->required(), "ROOT output")
     ("ring", po::value<std::string>(&ring_name)->default_value(ring_name), "ring tree name")
     ("max-events", po::value<long long>(&max_events)->default_value(max_events), "maximum frames")
+    ("ring-x0-min", po::value<double>(&x0min)->default_value(x0min), "minimum ring x0")
+    ("ring-x0-max", po::value<double>(&x0max)->default_value(x0max), "maximum ring x0")
+    ("ring-y0-min", po::value<double>(&y0min)->default_value(y0min), "minimum ring y0")
+    ("ring-y0-max", po::value<double>(&y0max)->default_value(y0max), "maximum ring y0")
+    ("ring-r-min", po::value<double>(&rmin)->default_value(rmin), "minimum ring radius")
+    ("ring-r-max", po::value<double>(&rmax)->default_value(rmax), "maximum ring radius")
+    ("min-cherenkov-hits", po::value<long long>(&min_hits)->default_value(min_hits), "minimum Cherenkov hits")
+    ("max-cherenkov-hits", po::value<long long>(&max_hits)->default_value(max_hits), "maximum Cherenkov hits")
     ("gpu", po::bool_switch(), "use CUDA for the theta-time accumulator");
   po::variables_map vm;
   try {
@@ -53,6 +65,13 @@ int main(int argc, char **argv)
     while (reader.next_frame() && (max_events < 0 || frames < max_events)) {
       ++frames;
       if (reader.rings().size() != 1) continue;
+      const auto &ring = reader.rings().front();
+      if (ring.x0 < x0min || ring.x0 > x0max || ring.y0 < y0min ||
+          ring.y0 > y0max || ring.radius < rmin || ring.radius > rmax)
+        continue;
+      const auto nhits = static_cast<long long>(reader.cherenkov_hits().size());
+      if (nhits < min_hits || nhits > max_hits)
+        continue;
       ++one_ring;
       std::vector<const hit_t *> hits;
       for (const auto &h : reader.cherenkov_hits())
