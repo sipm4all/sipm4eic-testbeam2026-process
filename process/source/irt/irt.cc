@@ -14,6 +14,7 @@
 #include <TKey.h>
 #include <TH1D.h>
 #include <TH2D.h>
+#include <TRandom.h>
 
 #include <cmath>
 #include <fstream>
@@ -233,6 +234,7 @@ int main(int argc, char **argv)
   bool harmonic_objective = false;
   bool diagnostic = false;
   bool use_gpu = false;
+  bool smear_pixels = false;
   bool apply_fit_config = false;
   double target_theta = 0.037921467;
   double angular_resolution = 0.0015;
@@ -273,6 +275,8 @@ int main(int argc, char **argv)
     ("harmonic-objective", po::bool_switch(&harmonic_objective), "include theta-versus-phi harmonic power in configured fit")
     ("diagnostic", po::bool_switch(&diagnostic), "scan one geometry parameter at a time")
     ("gpu", po::bool_switch(&use_gpu), "reconstruct fixed-geometry hits with CUDA")
+    ("smear-pixels", po::bool_switch(&smear_pixels),
+     "uniformly smear hit coordinates within the 3 x 3 mm pixel for angle histograms")
     ("apply-fit-config", po::bool_switch(&apply_fit_config),
      "apply fit-config start values without running a fit")
     ("expected-cherenkov-angle", po::value<double>(&target_theta)->default_value(target_theta),
@@ -1108,7 +1112,12 @@ int main(int argc, char **argv)
   Long64_t frames = 0, hits = 0, valid = 0;
   for (const auto &point : points) {
         ++hits;
-        const auto photon = irt::reconstruct(fitted_geometry, point.first, point.second);
+        constexpr double pixel_half = 1.5; // 3 x 3 mm detector pixel
+        const double smeared_x = smear_pixels ?
+          gRandom->Uniform(point.first - pixel_half, point.first + pixel_half) : point.first;
+        const double smeared_y = smear_pixels ?
+          gRandom->Uniform(point.second - pixel_half, point.second + pixel_half) : point.second;
+        const auto photon = irt::reconstruct(fitted_geometry, smeared_x, smeared_y);
         if (!photon.valid)
           continue;
         ++valid;
